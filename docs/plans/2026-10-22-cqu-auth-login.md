@@ -1,14 +1,16 @@
 # CQU Auth 登录设计
 
-日期：2026-10-22。状态：设计与证据记录，CQU Auth 登录尚未实现或进行生产端到端验收。认证库按用户决定统一 Better Auth。
+日期：2026-10-22。状态：受控 SDK/CLI 实现记录；生产 native client 注册与真实 Auth→ST→学校 API 端到端验收仍未完成。Better Auth 仍是授权服务器；客户端 OAuth/DPoP 引擎按用户后续决定使用 `oauth4webapi@3.8.8`。
 
 本文保留设计与调查过程；正式规格以 [Issue #1](https://github.com/cqu-moe/friends-cli/issues/1) 为准。规格要求 SDK 与 CLI 两层公开接口测试，Ego 录入流程由用户亲自最终提交。
 
 ## 后续进展
 
+2026-10-22 用户后续决定：Better Auth 保持 CQU Auth 服务端/授权服务器角色；friends-cli 使用正式发布版 `oauth4webapi@3.8.8` 作为完整 native OAuth/DPoP 客户端引擎。该库提供 public client、S256、DPoP proof/nonce 管理和刷新请求；本仓库只实现回环回调、安全存储和 CLI 编排，不手写密码学。不能把该决定表述为 Better Auth 客户端自带 DPoP proof 签名，也不能沿用“客户端 DPoP 缺口仍阻塞”的旧状态。
+
 2026-10-22：[Auth #95](https://github.com/cqu-moe/auth/pull/95) 已合并，PR 与合并提交 CI、Workers Builds 检查均通过。经正常浏览器读取线上 discovery，确认已包含 `cqu:ticket:friends`。下文早期调查中“尚未发布 friends scope”的结论已被此证据替代；未核实的其他客户端能力仍需接入时验证。
 
-friends-cli #2 只交付 local 学校登录与课程查询。客户端注册、Better Auth/DPoP 互操作及真实 ST 核销仍归 [#4](https://github.com/cqu-moe/friends-cli/issues/4)；Auth #94 此时仍打开，不能把 scope 发布当作消费者端到端完成。
+friends-cli #4 已在受控 HTTP 场景实现 SDK/CLI OAuth、DPoP、ST 与学校 API 链路。生产 native client 尚未注册，真实 Auth/学校端到端验收未完成；不能把 scope 发布或受控测试当作生产端到端完成。
 
 ## 用户看到的流程
 
@@ -69,7 +71,7 @@ Auth 新权限落地后的取票请求：
 
 ```http
 POST https://auth.cqu.moe/api/v1/cqu/service-tickets
-Authorization: <按实际 token_type 使用 Bearer 或 DPoP；不在日志输出>
+Authorization: DPoP <access-token；不在日志输出>
 Content-Type: application/json
 
 {"service":"friends"}
@@ -81,9 +83,9 @@ Content-Type: application/json
 
 Ego 操作需要浏览器自身的二课登录态；API token 与浏览器状态不自动等价。后续须验证独立 ST 经网站 SSO 入口的完整跳转和身份一致性，不能直接把 API 已核销的票据再交给页面。
 
-## Better Auth 的复用方式
+## 认证库决定与历史调查
 
-统一使用 Better Auth 生态，不引入第二套 OAuth 协议实现作为当前方案。库的能力和应用负责的事情分别列清：
+下表保留当时的 Better Auth 公开导出调查，作为服务端兼容性证据；它不再是当前客户端实现方案。当前方案由上文“后续决定”确定：
 
 | 部分 | 当前证据 / 设计 |
 | --- | --- |
@@ -97,9 +99,7 @@ Ego 操作需要浏览器自身的二课登录态；API token 与浏览器状态
 
 以上核对的是官方当前源码；实施时必须固定正式发布版本核对 exports、参数和行为。Auth 的 package.json 声明 Better Auth 1.7.7，而本地已安装 provider 目录曾显示 1.6.11，不能用旧 node_modules 推断正式契约。
 
-DPoP 接入先验证官方可用客户端能力；存在缺口时优先复用既有可审计实现或推动 Better Auth 补齐，并记录为接入阻塞，不能自行实现密码学。若客户端策略要求 DPoP，绝不回退 Bearer。DPoP 私钥要与绑定的 refresh token 一起安全保存，不能每次启动重新生成。
-
-`oauth4webapi` 本身支持 PKCE/DPoP；本项目选择 Better Auth 是维护一致性的决定，不是因为前者缺少协议能力。Auth 的互操作测试使用 oauth4webapi，只能作为服务端兼容性证据，不能代替 Better Auth 客户端的独立验收。
+DPoP 接入使用 `oauth4webapi` 的正式 API；若客户端策略要求 DPoP，绝不回退 Bearer。DPoP 私钥要与绑定的 refresh token 一起安全保存，不能每次启动重新生成。
 
 官方依据：[Better Auth Client](https://www.better-auth.com/docs/concepts/client)、[OAuth 公共导出](https://github.com/better-auth/better-auth/blob/main/packages/core/src/oauth2/index.ts)、[授权 URL](https://github.com/better-auth/better-auth/blob/main/packages/core/src/oauth2/create-authorization-url.ts)、[授权码交换](https://github.com/better-auth/better-auth/blob/main/packages/core/src/oauth2/validate-authorization-code.ts)、[刷新](https://github.com/better-auth/better-auth/blob/main/packages/core/src/oauth2/refresh-access-token.ts)、[DPoP 实现](https://github.com/better-auth/better-auth/blob/main/packages/core/src/oauth2/dpop.ts)。
 
@@ -111,4 +111,4 @@ DPoP 接入先验证官方可用客户端能力；存在缺口时优先复用既
 - 学校绑定失效：提示到 Auth 恢复绑定；与 OAuth 登录失败、无 scope 和二课拒绝登录区分。
 - DPoP 私钥缺失：不能重建另一把钥匙继续使用旧绑定 token，需重新授权；nonce 重试与业务写入重试分别处理。
 
-实际验收分别覆盖：正式 Better Auth 客户端 PKCE/回调、公开客户端策略、DPoP（含同密钥刷新与资源调用）、最小 scope 授权/撤销、真实 ST 核销、二课身份选择、API/Ego 身份一致、过期恢复。当前没有执行这些真实登录与写操作测试。
+受控验收已覆盖 public client/S256/state/回调目标、DPoP nonce/proof/同 key 刷新与资源调用、refresh 轮换和重放、密钥错误/缺失、多身份显式选择、ST 一次性核销、二课会话过期恢复、真实 CLI 子进程和 macOS Keyring。生产验收仍需完成 native/public client 注册、真实同意、线上 discovery/token endpoint 兼容、真实 ST 核销与学校 API 身份一致性；这些未完成前不能宣称生产端到端可用。

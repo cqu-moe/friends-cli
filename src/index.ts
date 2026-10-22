@@ -381,9 +381,9 @@ function invalid(message: string): never {
   throw new FriendsError({ code: FriendsErrorCode.InvalidInput, message });
 }
 
-function validateSession(input: { token: string; userLevel: string }): void {
+function validateSession(input: { token: string; userLevel?: string }): void {
   if (!input || typeof input.token !== "string" || !input.token ||
-      typeof input.userLevel !== "string" || !input.userLevel ||
+      (typeof input.userLevel !== "string" || (!input.userLevel && input.userLevel !== "")) ||
       /[\r\n]/.test(input.token + input.userLevel)) invalid("A token and user level are required");
 }
 
@@ -409,12 +409,12 @@ export function createFriendsSdk(options: {
 
   async function inspectLocalSession(input: {
     token: string;
-    userLevel: string;
+    userLevel?: string;
   }): Promise<LocalSessionInspection> {
     validateSession(input);
     const init = {
       method: "POST",
-      headers: headers(input.token, input.userLevel, mainService),
+      headers: headers(input.token, input.userLevel ?? "", mainService),
       body: "{}",
     };
     const [levels, info] = await Promise.all([
@@ -439,7 +439,7 @@ export function createFriendsSdk(options: {
     verifyLocalSession,
     async activateLocalContext(source: {
       token: string;
-      userLevel: string;
+      userLevel?: string;
       selector?: { levelNo?: string; unitNo?: string };
       expectedAccount?: string;
     }): Promise<ActivatedLocalContext> {
