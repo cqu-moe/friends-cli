@@ -17,6 +17,8 @@ export interface WriteRecovery {
   applicationId?: string;
   organizationId?: string;
   draftId?: string;
+  pageLabel?: string;
+
   attachmentGroupUuids?: string[];
   resourceIds?: string[];
   input?: unknown;
@@ -25,6 +27,7 @@ export interface WriteRecovery {
   page?: Record<string, string | null>;
   missing?: string[];
   executionError?: { code: string; message: string };
+  inProgress?: string;
   serverAcknowledged?: boolean | "unknown";
   readback?: "matched" | "unmatched" | "unavailable";
   materialGroups?: {

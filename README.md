@@ -72,6 +72,13 @@ friends volunteer-certification-reviews prepare <reviewUuid> \
 friends drafts activities --via ego --ego-task-space 16 --ego-page p1 --json
 friends drafts create --activity-id <activityUuid> --json
 friends drafts edit <draftId> --expected-revision 0 --input patch.json --json
+friends volunteers identity --json
+friends volunteers activities list --kind participable --page 1 --page-size 10 --keyword 示例 --json
+friends volunteers activities list --kind manageable --json
+friends volunteers activities requirements <activityUuid> --json
+friends volunteers registrations list --page 1 --page-size 10 --json
+friends volunteers register <activityUuid> --input register.json --confirm --json
+friends volunteers withdraw <activityUuid> <registrationUuid> --confirm --json
 friends offerings prepare --input offering.json --via api --json
 friends offerings materials --input offering.json --via api --dry-run --json
 friends offerings materials --input offering.json --via api --confirm --json
@@ -195,6 +202,7 @@ friends drafts capture <draftId> --via ego --ego-task-space 16 \
 - 课程开办的 SDK、真实 CLI 子进程和 strict Ego 脚本已用受控 HTTP/jsdom 场景验证；真实 Ego 页面、材料上传和最终开办写入尚未执行，不能宣称生产验收。
 - 查询类操作可使用 API；后续 Ego 写操作按阶段执行，需要审阅的表单只录入并交接，由用户亲自最终提交。
 - Ego 查询的受控 SDK/CLI 验收见 [Ego 课程查询验收](docs/verification/2026-10-22-ego-course-query.md)；真实已安装 Ego 与学校登录态实测由集中操作另行记录，不能由本仓库受控测试替代。
+- 志愿身份/活动/个人报名的受控 SDK、CLI 与 strict-Ego DOM 验收见 [志愿操作验收](docs/verification/2026-10-22-volunteer-operations.md)；真实 Ego、生产只读和授权写入仍是独立验收层。
 
 志愿草稿可用 `friends drafts edit <id> --expected-revision <n> --input patch.json` 增补尚未报名的人员：
 
@@ -263,6 +271,25 @@ Ego 审批准备只执行可见步骤：先检查当前路由和可见非空人�
 
 组织加入/退出审批的 Ego 准备方法 `prepareOrganizationApplicationDecisionInEgo` 从 Node 入口导出；调用必须包含 `organizationId`、`applicationId`、`type`、`decision`、`message`、`time` 及匹配的详情 `route`。公开方法自行重新验证现有 Ego 会话、组织管理权限、申请归属及等待状态，不依赖 CLI 先行校验。准备阶段读取同源 iframe 的实际表单，使用当前快照的 `[ref=N]` 定位可见动作，仅填空的审批意见，保留其他人工字段与已填意见；不覆盖其他申请页。返回 `submitted:false` 并把日期与最终确认交给用户。返回值不把固定计数当作真实零写入证据。
 
+## 志愿身份、活动与个人报名
+
+志愿查询和写入使用 #5 已实测的 `zovecenter-saip-ek-app-young-volunteers` 网关服务。活动 UUID、报名记录 UUID、岗位 UUID 是不同领域 ID；CLI 和 SDK 均按对应方法校验，不能用报名 UUID 查活动，也不能把其他活动的岗位提交给当前活动。
+
+`volunteers activities requirements` 会返回活动详情、岗位、学校 `can-apply` 结果和未支持问卷类型。API 写入当前支持 `CHOICE`、`MULTIPLE_CHOICE`、`TEXT`、`NUMBER`、`DATE`；`PICTURE`、`MULTIPLE_PICTURE`、`FILE`、`MULTIPLE_FILE` 会显式拒绝，不会用空附件组伪造成功。Ego 可见准备不自动填写 DATE；必填或已提供 DATE 答案时拒绝自动化准备，可选未答日期留给用户在交接后的可见页面处理。
+
+SDK 写入方法本身要求精确确认值：报名为 `confirmation: "volunteers.register"`，退出为 `confirmation: "volunteers.withdraw"`。CLI 的 `--confirm` 只负责构造对应 SDK 确认；缺少确认、`--dry-run` 或 Ego 路径带 `--confirm` 都不会写入。写入成功返回分离的 `receipt` 与 `readback`；`receipt` 仅表示学校网关确认收到请求，`readback` 是第一页个人报名列表证据，两者都不把审批状态说成通过。
+
+`--via ego` 的查询只复用现有 Ego 页面会话并直接调用 API，不导航当前页面。Ego 写入从 `@cqu-moe/friends-cli/node` 公开入口进入：每次重新核验学校会话、账号和上下文，重新读取活动、岗位、问卷和 `can-apply` 要求，再新开一个专用页面并校验该页面 token、账号、角色、路由和活动 UUID。适配器定位可见表单和嵌套 `.van-ellipsis` picker 文本；已有非空文本、岗位或选择会被保留，不覆盖、不盲切换。填写中断返回不可重试的 `UNKNOWN_OUTCOME`，并保留已发生步骤与专用页面 label。准备完成后 `handOff()`；适配器不隐藏调用提交 API，不点击最终提交/确认，也不自动重试。受控页面验收入口：
+
+```sh
+npm run verify:volunteer-ego -- register
+npm run verify:volunteer-ego -- withdraw
+```
+
+仓库内的 jsdom strict fixture 会执行当前生成的 Ego 脚本并检查可见 DOM 输入；runner 的 HTTP fixture 会统计真实到达 `/write` 或 `/quit` 的请求数，并要求准备阶段为 0。该入口只验收可见控件、会话绑定和受控服务器链路，不代表生产写入。真实 Ego 与学校生产验收另行记录。
+
+## 捕获人工修改
+
 命令重新核验当前身份、组织和活动，通过可见编辑弹窗只读核对学号、岗位及小时，保存本地新修订。它不会点击弹窗“保存”、上传或提交认证。过期修订保留冲突文件；未完成输入、页面缺失人员和不可恢复材料会列出待处理项。未捕获的网页修改不保证在关闭浏览器后保留。
 
 按需要用 `drafts edit` 明确修改选择和时长，再单独 `drafts prepare` 恢复录入。用户最终提交后只用 `certification status` 查询。详见[捕获验收](docs/verification/2026-10-22-certification-capture.md)。
@@ -277,6 +304,53 @@ friends volunteer activity-reviews decide <申请UUID> --type offering --decisio
 ```
 
 `review.json` 含 `message`、`time`（YYYY-MM-DD）；开办审批还需 `isSafeEducation: 0|1`，打回多个节点时需 `callbackActivityId`。API 实际决定须显式 `--yes`；Ego 仅准备并交接，用户亲自点最终确定。响应不确定返回 exit 7，不会自动重试。见 [#11 验收记录](docs/verification/2026-10-22-volunteer-activity-reviews.md)。
+
+## 组织活动查询与开办（#18）
+
+组织活动是独立领域，通过 `organization-activities` 操作；志愿服务活动仍使用 `volunteers`。`list --kind public` 查询公开活动，`--kind manageable` 查询当前账号开办记录；支持分页和学校 `key` 关键词。`show`、`requirements`、`status` 分别读取详情、参与要求和开办状态/流程记录，学校未知状态原样保留。
+
+```sh
+friends organization-activities list --kind public --keyword 示例 --page 1
+friends organization-activities show <organizationActivityUuid> --via ego --ego-task-space 7
+friends organization-activities requirements <organizationActivityUuid>
+friends organization-activities status <organizationActivityUuid>
+friends organization-activities prepare --input application.json
+friends organization-activities materials --input application.json --dry-run
+friends organization-activities materials --input application.json --confirm > materials.json
+friends organization-activities submit --input application.json --materials materials.json --confirm
+friends organization-activities prepare --input application.json --via ego --ego-task-space 7 --ego-page p2
+```
+
+最小开办输入如下；`--input -` 可从 stdin 读取。`term` 可省略并采用学校唯一当前学期，有歧义时需明确选择学校返回的学期。
+
+```json
+{
+  "organizationId": "organization-example",
+  "activityName": "示例组织活动",
+  "activityContent": "活动简介",
+  "activityPlace": "示例活动室",
+  "beginTime": "2099-11-02 10:00",
+  "endTime": "2099-11-02 12:00",
+  "registration": {
+    "isOpenEnrollment": true,
+    "isHideList": false,
+    "isEnrollExamine": true,
+    "isEnrollPower": false,
+    "signinNum": 1,
+    "openTime": "2099-10-01 10:00",
+    "deadline": "2099-11-01 18:00"
+  },
+  "materials": {"publicityPictures": [{"path": "/path/to/poster.png"}], "attachments": []}
+}
+```
+
+SDK 使用 `createFriendsSdk().createOrganizationActivityClient(session)`，材料为标准 `File` 数组。`prepare` 仅验证/读取；`uploadMaterials` 要求 `confirmation:"organization-activities.materials"`，`submit` 要求 `confirmation:"organization-activities.submit"` 和材料回执。海报需 1–5 张，附件可选；上传后查询资源组核对资源 ID 和文件名，提交前再次核对。此核对不证明服务器文件字节散列。当前最小设置支持定时开启/截止、1–8 次签到、可见名单/报名审核/成员限制开关；不接受任意问卷或未知字段透传。
+
+API 提交先执行 `next-update` 保存第一步，再重新核验组织权限后执行 `set-update`。任一写响应不明确都停止，不重试、不切换路径；即使只读回查匹配仍为 `UNKNOWN_OUTCOME`/退出码 7，保留资源组、已发生步骤和已知申请 ID。成功回执仅表示学校确认收到，`approved:null`，进度需独立查询。
+
+Ego 查询复用现有会话并直接 API。Node SDK `prepareOrganizationActivityOfferingInEgo` 每次重新核验账号和组织权限，再验证同源 iframe 内的创建路由和账号。当前阶段填写空白且可编辑的标题、简介和地址，保留人工与只读值；组织、时间、海报/附件及第二步设置以 `manualFields` 和 `requested` 交给用户处理。**“下一步”已经写入学校，必须由用户亲自操作；最终提交同样由用户亲自完成。** Ego 不上传、不点击下一步或最终按钮，也不接受 `--yes`、API 确认或自动重试绕过。`--dry-run` 无填写和交接。
+
+实现证据仅为公开源码、受控 SDK 与真实 CLI 子进程测试；本工作线程未访问真实 Ego 或生产服务，见[验收与限制](docs/verification/2026-10-23-organization-activities.md)。
 
 ### 组织活动参与
 
