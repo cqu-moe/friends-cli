@@ -1,9 +1,5 @@
-import type { webcrypto } from "node:crypto";
 import * as oauth from "oauth4webapi";
 
-type CryptoKey = webcrypto.CryptoKey;
-type CryptoKeyPair = webcrypto.CryptoKeyPair;
-type JsonWebKey = webcrypto.JsonWebKey;
 import { FriendsError, FriendsErrorCode } from "./errors.js";
 import { createFriendsSdk, type CourseClient, type LoginContext, type VerifiedCourseSession } from "./index.js";
 

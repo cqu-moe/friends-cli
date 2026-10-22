@@ -8,6 +8,7 @@ export { FriendsError, FriendsErrorCode, exitCodeFor } from "./errors.js";
 export type { WriteRecovery } from "./errors.js";
 export * from "./drafts.js";
 export * from "./draft-source.js";
+export * from "./certification-prepare.js";
 export { organizationId, validateOrganizationMemberListInput } from "./organizations.js";
 export type {
   EditableOrganizationProfileField,
