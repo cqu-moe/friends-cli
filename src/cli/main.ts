@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
 import { Command } from "commander";
 import {
   courseId,
@@ -20,6 +21,7 @@ import { draftSchemas, registerDraftCommands } from "./drafts.js";
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
+  ...certificationApiSchemas,
   ...draftSchemas,
   errors: {
     operation: "errors", readonly:true, permission:"none", phases:["inspect"], supportedVia:["local"],
@@ -288,6 +290,8 @@ courses
       ...queryMeta(source),
     });
   });
+
+registerCertificationApiCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 
 registerDraftCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,

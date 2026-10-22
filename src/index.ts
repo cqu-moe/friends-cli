@@ -4,6 +4,7 @@ export { FriendsError, FriendsErrorCode, exitCodeFor } from "./errors.js";
 export type { WriteRecovery } from "./errors.js";
 export * from "./drafts.js";
 export * from "./draft-source.js";
+export * from "./certification-api.js";
 
 declare const courseIdBrand: unique symbol;
 export type CourseId = string & { readonly [courseIdBrand]: true };

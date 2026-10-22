@@ -84,3 +84,14 @@ await courses.list({ keyword: "周周艺" });
 新增人员先通过当前学校会话只读核对姓名和草稿账号/组织/活动绑定，再保存在本地。`includedStudentNos` 始终是本次指定名单，不隐含全部认证。普通编辑和材料检查可以离线使用；新增学号需要可用学校会话。没有报名 UUID 的手动人员保留这一事实，不伪造报名记录。
 
 课程与草稿的学校查询共用 `--via api|ego`：Ego 模式直接核验现有页面会话后调用查询 API，不导航或读取本地会话。新增学号的草稿编辑也支持同样的来源选项。
+
+志愿认证 API 提交必须独立明确选择，Ego 交接不产生提交授权：
+
+```sh
+friends certification submit <draftId> --via api --dry-run
+friends certification submit <draftId> --via api --confirm
+friends certification submit --input draft.json --via api --confirm
+friends certification status <activityId> --via ego --ego-task-space 16
+```
+
+`--input -` 读取 stdin 导出的草稿。当前认证表单没有附件入口，带材料的草稿会在写入前拒绝。`UNKNOWN_OUTCOME`（退出码 7）时保留草稿，先用 `certification status` 回查，不自动重交。业务确认与回查结果分别返回；已有认证不会被这个新建命令覆盖。
