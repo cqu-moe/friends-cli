@@ -11,11 +11,11 @@ import {
 import {
   loadSession,
   readEgoSession,
-  readVerifiedEgoSession,
   saveSession,
   sessionPath,
   SessionStorageType,
 } from "../node.js";
+import { resolveQuerySession } from "./session.js";
 import { draftSchemas, registerDraftCommands } from "./drafts.js";
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
@@ -120,48 +120,6 @@ function queryMeta(source: {
   };
 }
 
-async function courseQuerySession(options: Record<string, string | undefined>) {
-  const via = options.via ?? "api";
-  if (via === "api") {
-    const mixedEgoOptions = ["egoTaskSpace", "egoPage", "levelNo", "unitNo"].filter((key) => options[key] != null);
-    if (mixedEgoOptions.length > 0) {
-      throw new FriendsError({
-        code: FriendsErrorCode.InvalidInput,
-        message: `Ego options require --via ego: ${mixedEgoOptions.join(", ")}`,
-      });
-    }
-    return { session: await loadSession(), entry: "api" as const };
-  }
-  if (via !== "ego") {
-    throw new FriendsError({
-      code: FriendsErrorCode.InvalidInput,
-      message: "--via must be api or ego",
-    });
-  }
-  if (options.egoTaskSpace === undefined) {
-    throw new FriendsError({
-      code: FriendsErrorCode.InvalidInput,
-      message: "--via ego requires --ego-task-space",
-    });
-  }
-  const taskSpaceId = Number(options.egoTaskSpace);
-  if (!Number.isInteger(taskSpaceId) || taskSpaceId < 1) {
-    throw new FriendsError({
-      code: FriendsErrorCode.InvalidInput,
-      message: "--ego-task-space must be a positive integer",
-    });
-  }
-  const session = await readVerifiedEgoSession({
-    taskSpaceId,
-    page: options.egoPage,
-    baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
-    selector:
-      options.levelNo === undefined && options.unitNo === undefined
-        ? undefined
-        : { levelNo: options.levelNo, unitNo: options.unitNo },
-  });
-  return { session, entry: "ego" as const };
-}
 
 const program = new Command()
   .name("friends")
@@ -302,7 +260,7 @@ courses
   .option("--json", "print stable JSON", true)
   .action(async (options: Record<string, string>) => {
     const query = validateCourseListInput({page:Number(options.page), pageSize:Number(options.pageSize), keyword:options.keyword});
-    const source = await courseQuerySession(options);
+    const source = await resolveQuerySession(options, process.env.FRIENDS_BASE_URL ?? productionBaseUrl);
     const client = await sdk().createCourseClient(source.session);
     const data = await client.list(query);
     output(data, {
@@ -323,7 +281,7 @@ courses
   .option("--json", "print stable JSON", true)
   .action(async (courseIdValue: string, options: Record<string, string>) => {
     const id = courseId(courseIdValue);
-    const source = await courseQuerySession(options);
+    const source = await resolveQuerySession(options, process.env.FRIENDS_BASE_URL ?? productionBaseUrl);
     const client = await sdk().createCourseClient(source.session);
     output(await client.get(id), {
       operation: "courses.get",

@@ -16,7 +16,7 @@
 - SDK 查询：受控 API 覆盖 `ae/E/af` 方法、路径、服务 Header、管理列表授权、字段投影和 token 不落草稿。
 - Node 存储：仓库外私有目录/文件权限、原子 temp+rename、并发 stale 完整稿 conflict 保存、附件哈希检查。
 - 真实 CLI 进程：help/schema、API 只读创建、文件与 stdin 输入、多次独立进程编辑/恢复、材料检查、完整校验、列表、stale patch conflict 保存、`ulimit -f 0` 模拟写入中断不破坏旧稿，并断言志愿业务远端写入为 0。
-- `npm test` 在 Node.js 22 下通过 25 项测试、0 失败、0 跳过，并同时完成 TypeScript 构建。
+- `npm test` 在 Node.js 22 下通过 26 项测试、0 失败、0 跳过，并同时完成 TypeScript 构建。
 
 ## 未验收
 
@@ -33,3 +33,7 @@
 - 当前学校登录态 SDK 查询：管理列表 5 个活动，其中 2 个认证模式未知；对显式选择的已知模式活动读取 1 个岗位、空报名名单和组织绑定成功。所有请求为只读业务请求，未录入页面、上传或提交。
 
 - 真实 CLI 单独进程 `drafts create` → `drafts show` 成功，活动绑定一致、revision=0、指定名单为空；仓库外私有临时会话与草稿在验收后清除。该验证没有学校业务写入。
+
+- CLI 来源回归：草稿查询/建稿可选现有 Ego 会话，受控外部桥接与 API 验证不依赖本地 session.json；与课程共用会话选择，未知 via 和混用参数由同一入口拒绝。
+
+- 真实 Ego CLI：`drafts activities --via ego` 返回 5 项，`drafts create --via ego` 成功创建未选择任何人的本地草稿；使用同一任务空间现有页面，未使用本地登录凭据，未执行学校业务写入，临时草稿已清除。

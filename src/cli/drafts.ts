@@ -1,4 +1,5 @@
 import type { Command } from "commander";
+import { resolveQuerySession } from "./session.js";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat, readFile } from "node:fs/promises";
@@ -14,27 +15,29 @@ import {
   type CertificationDraftMaterial,
   type VolunteerCertificationDraftPatch,
 } from "../index.js";
-import { createCertificationDraftStore, loadSession } from "../node.js";
+import { createCertificationDraftStore } from "../node.js";
 
 export const draftSchemas = {
   "drafts.activities": {
     operation: "drafts.activities", permission: "volunteer manager context", phases: ["query"],
-    input: {}, output: "manageable volunteer activities", readonly: true, remoteReadonly: true,
-    supportedVia: ["api"], verifiedWith: "public-source; controlled-api; live-manager-read-only",
+    input: {via:"api|ego",egoTaskSpace:"required with ego",egoPage:"p1"}, output: "manageable volunteer activities", readonly: true, remoteReadonly: true,
+    supportedVia: ["api", "ego"], verifiedWith: "public-source; controlled-api; live-manager-read-only",
   },
   "drafts.create": {
     operation: "drafts.create", permission: "verified local session and manageable volunteer activity",
     phases: ["query", "local-create"], input: {
+      via: {type:"api|ego",default:"api"}, egoTaskSpace: {type:"integer",required:"with ego"},
       activityId: { type: "volunteer activity UUID", required: true },
       materials: { type: "JSON file or stdin: {materials:[{kind:'local-file',path}|{kind:'web-unrecoverable'}]}" },
     }, output: "a new local certification draft and its private path", readonly: false,
     remoteReadonly: true, localWrite: true, sideEffect: "writes one draft outside Git repositories; never uploads or submits",
-    supportedVia: ["api-query+local-store"], verifiedWith: "public-source; controlled-api; live-manager-read-only",
+    supportedVia: ["api-query+local-store", "ego-query+local-store"], verifiedWith: "public-source; controlled-api; live-manager-read-only",
   },
   "drafts.edit": {
     operation: "drafts.edit", permission: "local draft access", phases: ["local-edit"],
     input: {
       draftId: { type: "draft ID", required: true },
+      via: {type:"api|ego",default:"api",when:"adding student numbers requires a school query"},
       expectedRevision: { type: "non-negative integer", required: true },
       input: { type: "JSON file or stdin", required: true, patch: ["addStudentNos", "includedStudentNos", "postIds", "durations", "materials"] },
     }, output: "the next draft revision", readonly: false, remoteReadonly: true, localWrite: true,
@@ -165,13 +168,13 @@ export function registerDraftCommands(program: Command, options: { baseUrl: stri
   const store = createCertificationDraftStore();
   const sdk = createFriendsSdk({ baseUrl: options.baseUrl });
 
-  async function volunteerSession() {
-    const session = await loadSession();
+  async function volunteerSession(queryOptions: Record<string, string | undefined> = {}) {
+    const {session, entry} = await resolveQuerySession(queryOptions, options.baseUrl);
     const inspection = await sdk.verifyLocalSession(session);
     if (inspection.account.userNo !== session.account.userNo) {
       throw new FriendsError({ code: FriendsErrorCode.AuthRequired, message: "The stored account no longer matches" });
     }
-    return { session, accountUserNo: session.account.userNo, levelNo: session.context.levelNo, unitNo: session.context.unit.unitNo };
+    return { session, entry, accountUserNo: session.account.userNo, levelNo: session.context.levelNo, unitNo: session.context.unit.unitNo };
   }
 
   function client(session: Awaited<ReturnType<typeof volunteerSession>>) {
@@ -189,21 +192,29 @@ export function registerDraftCommands(program: Command, options: { baseUrl: stri
 
   const drafts = program.command("drafts").description("Local volunteer certification drafts");
 
-  drafts.command("activities").description("List manageable volunteer activities")
+  function queryOptions(command: Command): Command {
+    return command.option("--via <api|ego>", "session source for direct API queries", "api")
+      .option("--ego-task-space <number>", "existing Ego task space")
+      .option("--ego-page <label>", "existing school page (default p1)")
+      .option("--level-no <value>", "select an available school role")
+      .option("--unit-no <value>", "select an available identity unit");
+  }
+
+  queryOptions(drafts.command("activities")).description("List manageable volunteer activities")
     .option("--json", "print stable JSON", true)
-    .action(async () => {
-      const context = await volunteerSession();
+    .action(async (options: Record<string,string>) => {
+      const context = await volunteerSession(options);
       output(await client(context).listManageableActivities(), {
-        operation: "drafts.activities", via: "api", verification: { activityContract: "public-source+controlled-api" },
+        operation: "drafts.activities", via: "api", selectedEntry: context.entry, requestMode: "direct-api", verification: { activityContract: "public-source+controlled-api" },
       });
     });
 
-  drafts.command("create").description("Create a local certification draft from an authorized activity")
+  queryOptions(drafts.command("create")).description("Create a local certification draft from an authorized activity")
     .requiredOption("--activity-id <id>", "volunteer activity UUID")
     .option("--materials <file|->", "JSON file or stdin containing local material references")
     .option("--json", "print stable JSON", true)
     .action(async (options: Record<string, string>) => {
-      const context = await volunteerSession();
+      const context = await volunteerSession(options);
       const source = await client(context).getCertificationSource(options.activityId);
       const materials = options.materials === undefined ? [] : await resolveMaterials(await readInput(options.materials));
       const draft = createPartialVolunteerCertificationDraft({
@@ -212,12 +223,12 @@ export function registerDraftCommands(program: Command, options: { baseUrl: stri
       });
       const path = await store.save(draft);
       output({ draft, path }, {
-        operation: "drafts.create", via: "api-query+local-store",
+        operation: "drafts.create", via: "api-query+local-store", selectedEntry: context.entry, requestMode: "direct-api",
         verification: { activityAndRoster: "controlled-api", remoteWrites: 0 },
       });
     });
 
-  drafts.command("edit").description("Atomically edit one draft revision")
+  queryOptions(drafts.command("edit")).description("Atomically edit one draft revision")
     .argument("<draftId>", "draft ID")
     .requiredOption("--expected-revision <number>", "revision being edited")
     .requiredOption("--input <file|->", "JSON patch file or stdin")
@@ -234,7 +245,7 @@ export function registerDraftCommands(program: Command, options: { baseUrl: stri
       }
       const { addStudentNos, ...change } = input;
       if (addStudentNos?.length) {
-        const active = client(await volunteerSession());
+        const active = client(await volunteerSession(options));
         const source = await active.getCertificationSource(current.binding.activityId);
         for (const key of ["accountUserNo", "levelNo", "unitNo", "organizationId", "activityId"] as const) {
           if (source.binding[key] !== current.binding[key]) invalid("The draft belongs to a different account, organization or activity");

@@ -26,6 +26,7 @@ test("real CLI creates, edits, restores, checks, and conflicts-saves local draft
     if (req.url.endsWith("/checkUserAndGetUserLevel")) {
       return reply(res, { code: "0", data: { loginLevels: [{ levelNo: "XS", levelName: "学生", units: [{ unitType: 2, unitNo: "24080", unitName: "计算机学院" }] }], userLoginType: "STUDENT" } });
     }
+    if (req.url.endsWith("/enterHall")) return reply(res,{code:"0",data:{account:"20210001",name:"示例",userLoginStateLevel:"XS",departmentNo:"24080"}});
     if (req.url.endsWith("/user/info")) return reply(res, { code: "0", data: { userNo: "20210001", userName: "示例" } });
     if (req.url.endsWith("/common-business/query-student?studentNo=20210002")) return reply(res,{code:"0",data:{studentNo:"20210002",studentName:"示例志愿者"}});
     if (req.url.endsWith("/school-activity-apply/manager-activity-list")) {
@@ -78,6 +79,14 @@ test("real CLI creates, edits, restores, checks, and conflicts-saves local draft
   assert.equal(schemaJson.data.operation, "drafts.create");
   assert.equal(schemaJson.data.remoteReadonly, true);
   assert.equal(schemaJson.data.localWrite, true);
+
+  const bin = join(home, "bin"); await mkdir(bin,{mode:0o700});
+  await writeFile(join(bin,"ego-browser"), "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' 'FRIENDS_CLI_EGO_SESSION:{\"token\":\"token-a\",\"userLevel\":\"XS\"}'\n", {mode:0o700});
+  const egoHome=join(home,"ego");
+  const egoCreated=JSON.parse((await run(process.execPath,[cli,"drafts","create","--activity-id","activity-1","--via","ego","--ego-task-space","7"],{env:{...env,PATH:bin+":"+env.PATH,FRIENDS_HOME:egoHome,FRIENDS_DRAFT_HOME:join(egoHome,"drafts")}})).stdout);
+  assert.equal(egoCreated.meta.selectedEntry,"ego");
+  assert.equal(egoCreated.data.draft.activity.id,"activity-1");
+  assert.equal(await readFile(join(egoHome,"session.json")).then(()=>true,()=>false),false);
 
   const created = await run(process.execPath, [cli, "drafts", "create", "--activity-id", "activity-1", "--materials", materialInput, "--json"], { env });
   const createdJson = JSON.parse(created.stdout);

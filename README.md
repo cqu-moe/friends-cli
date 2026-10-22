@@ -24,7 +24,7 @@ friends auth status --json
 friends courses list --page 1 --page-size 10 --keyword 周周艺 --json
 friends courses show <courseUuid> --json
 friends courses list --via ego --ego-task-space 12 --ego-page p1 --json
-friends drafts activities --json
+friends drafts activities --via ego --ego-task-space 16 --ego-page p1 --json
 friends drafts create --activity-id <activityUuid> --json
 friends drafts edit <draftId> --expected-revision 0 --input patch.json --json
 ```
@@ -82,3 +82,5 @@ await courses.list({ keyword: "周周艺" });
 ```
 
 新增人员先通过当前学校会话只读核对姓名和草稿账号/组织/活动绑定，再保存在本地。`includedStudentNos` 始终是本次指定名单，不隐含全部认证。普通编辑和材料检查可以离线使用；新增学号需要可用学校会话。没有报名 UUID 的手动人员保留这一事实，不伪造报名记录。
+
+课程与草稿的学校查询共用 `--via api|ego`：Ego 模式直接核验现有页面会话后调用查询 API，不导航或读取本地会话。新增学号的草稿编辑也支持同样的来源选项。
