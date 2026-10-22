@@ -156,3 +156,16 @@ Ego prepare 同样用已核验会话新建 review SDK client 并重新读取学�
 ```
 
 Ego 资料修改只执行可见 prepare：先经现有页面会话核验权限，再检查当前路由；若目标组织编辑页已经打开则不重新导航。命令先取得页面快照，再从快照引用打开“组织简介及Logo”维护弹窗；若简介已有非空人工输入，会保留该值而不覆盖，只在空字段中填入请求的简介，随后把页面交接给用户。Logo 和背景图上传控件保留在页面上由用户人工处理；命令不点击最终保存、不调用 PUT，也不会把 `--yes` 用于 Ego prepare。
+
+## 捕获人工修改
+
+用户明确交还 Ego 控制后执行：
+
+```sh
+friends drafts capture <draftId> --via ego --ego-task-space 16 \
+  --ego-page p3 --expected-revision 1 --user-returned-control
+```
+
+命令重新核验当前身份、组织和活动，通过可见编辑弹窗只读核对学号、岗位及小时，保存本地新修订。它不会点击弹窗“保存”、上传或提交认证。过期修订保留冲突文件；未完成输入、页面缺失人员和不可恢复材料会列出待处理项。未捕获的网页修改不保证在关闭浏览器后保留。
+
+按需要用 `drafts edit` 明确修改选择和时长，再单独 `drafts prepare` 恢复录入。用户最终提交后只用 `certification status` 查询。详见[捕获验收](docs/verification/2026-10-22-certification-capture.md)。

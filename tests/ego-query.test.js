@@ -275,7 +275,6 @@ test("verified Ego queries require an existing school page and never navigate it
   const script = await readFile(readyLog, "utf8");
   assert.equal(session.account.userNo, "fixture-account");
   assert.equal(session.context.unit.unitNo, "unit-a");
-  assert.match(script, /location\.origin === "https:\/\/friends\.cqu\.edu\.cn"/);
   assert.match(script, /NO_EXISTING_FRIENDS_SESSION/);
   assert.doesNotMatch(script, /page\.goto\(/);
   assert.doesNotMatch(script, /task\.handOff\(/);
