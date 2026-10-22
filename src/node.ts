@@ -138,7 +138,14 @@ export async function prepareOrganizationProfileInEgo(options: {
   blurb?: string;
   timeoutMs?: number;
   command?: string;
-}): Promise<{ route: string }> {
+}): Promise<{
+  route: string;
+  navigated: boolean;
+  dialogAction: "opened-from-snapshot-ref" | "already-open";
+  blurbAction: "filled" | "already-matching" | "human-value-preserved" | "left-empty";
+  externalWriteActions: 0;
+  finalSubmitActions: 0;
+}> {
   if (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1) {
     throw safeError("Invalid Ego task space", FriendsErrorCode.InvalidInput);
   }
@@ -153,18 +160,92 @@ export async function prepareOrganizationProfileInEgo(options: {
   if (!options.route.startsWith("/mobile/groupManage/") || /[\\\r\n\0]/.test(options.route)) {
     throw safeError("Invalid organization profile edit route", FriendsErrorCode.InvalidInput);
   }
-  const fillBlurb = options.blurb === undefined ? "" : `
-await page.locator("textarea").last().fill(${JSON.stringify(options.blurb)});
-`;
+  const targetUrl = `https://friends.cqu.edu.cn${options.route}`;
   const script = `
 const task = await taskSpace(${options.taskSpaceId});
 const page = task.page(${JSON.stringify(page)});
-await page.goto(${JSON.stringify(`https://friends.cqu.edu.cn${options.route}`)});
-await page.waitForLoadState("networkidle");
-await page.getByText("组织简介及Logo").first().click();
-await page.waitForTimeout(200);${fillBlurb}
+const targetUrl = ${JSON.stringify(targetUrl)};
+const currentUrl = await page.url();
+function sameEditRoute(value) {
+  try {
+    const current = new URL(value);
+    const target = new URL(targetUrl);
+    return current.pathname === target.pathname &&
+      current.searchParams.get("uuid") === target.searchParams.get("uuid") &&
+      current.searchParams.get("type") === target.searchParams.get("type");
+  } catch {
+    return false;
+  }
+}
+const navigated = !sameEditRoute(currentUrl);
+if (navigated) await page.goto(targetUrl);
+await page.waitForLoadState("load");
+await page.waitForFunction((label) => document.body.innerText.includes(label), "组织简介及Logo", { timeout: 15000 });
+const snapshot = await page.snapshot({ scope: "full_page" });
+async function visibleTextareaState() {
+  return page.evaluate(() => ({
+    count: Array.from(document.querySelectorAll("textarea")).filter((field) => {
+      const rect = field.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && !field.disabled && !field.readOnly;
+    }).length,
+    values: Array.from(document.querySelectorAll("textarea")).filter((field) => {
+      const rect = field.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && !field.disabled && !field.readOnly;
+    }).map((field) => field.value)
+  }));
+}
+const beforeDialog = await visibleTextareaState();
+let dialogAction;
+if (beforeDialog.count === 0) {
+  const entryLine = snapshot.split("\\n").find((line) =>
+    line.includes("组织简介及Logo") && /@\\d+/.test(line)
+  );
+  if (!entryLine) throw new Error("组织简介及Logo entry was not found in the page snapshot");
+  await page.click(entryLine.match(/@\\d+/)[0], { label: "open profile dialog" });
+  await page.waitForSelector("textarea", { state: "visible", timeout: 15000 });
+  dialogAction = "opened-from-snapshot-ref";
+} else if (beforeDialog.count === 1) {
+  dialogAction = "already-open";
+} else {
+  throw new Error("Multiple organization profile textareas are visible");
+}
+const visible = await visibleTextareaState();
+if (visible.count !== 1) throw new Error("Exactly one organization profile textarea must be visible");
+await page.evaluate(() => {
+  const fields = Array.from(document.querySelectorAll("textarea")).filter((field) => {
+    const rect = field.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && !field.disabled && !field.readOnly;
+  });
+  if (fields.length !== 1) throw new Error("Expected one visible organization profile textarea");
+  fields[0].setAttribute("data-friends-cli-blurb", "");
+  return null;
+});
+const currentValue = visible.values[0];
+const requestedBlurb = ${JSON.stringify(options.blurb ?? null)};
+let blurbAction;
+if (currentValue !== "" && requestedBlurb !== null && currentValue === requestedBlurb) {
+  blurbAction = "already-matching";
+} else if (currentValue !== "") {
+  blurbAction = "human-value-preserved";
+} else if (requestedBlurb === null) {
+  blurbAction = "left-empty";
+} else {
+  await page.fill("textarea[data-friends-cli-blurb]", requestedBlurb);
+  await page.waitForFunction((expected) => {
+    const fields = Array.from(document.querySelectorAll("textarea"));
+    return fields.length === 1 && fields[0].value === expected;
+  }, requestedBlurb, { timeout: 15000 });
+  blurbAction = "filled";
+}
 await task.handOff();
-console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({ route: ${JSON.stringify(options.route)} }));
+console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({
+  route: ${JSON.stringify(options.route)},
+  navigated,
+  dialogAction,
+  blurbAction,
+  externalWriteActions: 0,
+  finalSubmitActions: 0
+}));
 `;
   const output = await runEgoProcess({
     script,
@@ -172,8 +253,33 @@ console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({ route: ${JSON.stringi
     timeoutMs: userWaitMs + 30_000,
   });
   try {
-    const parsed = singleMarker(output, "FRIENDS_CLI_EGO_PREPARED:") as { route?: unknown } | null;
-    if (parsed !== null && parsed.route === options.route) return { route: parsed.route };
+    const parsed = singleMarker(output, "FRIENDS_CLI_EGO_PREPARED:") as {
+      route?: unknown;
+      navigated?: unknown;
+      dialogAction?: unknown;
+      blurbAction?: unknown;
+      externalWriteActions?: unknown;
+      finalSubmitActions?: unknown;
+    } | null;
+    const blurbAction = parsed?.blurbAction;
+    if (
+      parsed?.route === options.route &&
+      typeof parsed.navigated === "boolean" &&
+      (parsed.dialogAction === "opened-from-snapshot-ref" || parsed.dialogAction === "already-open") &&
+      (blurbAction === "filled" || blurbAction === "already-matching" ||
+        blurbAction === "human-value-preserved" || blurbAction === "left-empty") &&
+      parsed.externalWriteActions === 0 &&
+      parsed.finalSubmitActions === 0
+    ) {
+      return {
+        route: parsed.route,
+        navigated: parsed.navigated,
+        dialogAction: parsed.dialogAction,
+        blurbAction,
+        externalWriteActions: 0,
+        finalSubmitActions: 0,
+      };
+    }
   } catch {
     // Return the generic bridge failure below.
   }

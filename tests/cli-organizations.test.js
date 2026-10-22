@@ -74,14 +74,31 @@ test("real CLI queries organizations, prepares visibly in Ego, and confirms API 
     context: { levelNo: "XS", levelName: "学生", unit: { unitType: 2, unitNo: "24080", unitName: "示例学院" } },
   }) + "\n", { mode: 0o600 });
   await chmod(sessionPath, 0o600);
-  const ego = join(egoRoot, "ego-browser");
-  const egoLog = join(egoRoot, "ego-script.js");
-  await writeFile(ego, "#!/bin/sh\ncat > \"" + egoLog + "\"\nprintf '%s\\n' 'FRIENDS_CLI_EGO_SESSION:{\"token\":\"ego-token\",\"userLevel\":\"XS\"}'\nprintf '%s\\n' 'FRIENDS_CLI_EGO_PREPARED:{\"route\":\"/mobile/groupManage/studentClubEdit?uuid=org-cli&type=isPrincipal\"}'\n");
-  await chmod(ego, 0o700);
   const baseUrl = `http://127.0.0.1:${server.address().port}/gateway`;
+  async function egoFixture(mode) {
+    const root = await mkdtemp(join(tmpdir(), `friends-org-ego-${mode}-`));
+    const scriptPath = join(root, "ego-script.js");
+    const evidencePath = join(root, "evidence.json");
+    const runner = join(root, "ego-organization-page.mjs");
+    const ego = join(root, "ego-browser");
+    await writeFile(runner, await readFile(join(process.cwd(), "tests/fixtures/ego-organization-page.mjs")));
+    await writeFile(ego, [
+      "#!/bin/sh",
+      `cat > ${JSON.stringify(scriptPath)}`,
+      `EGO_ORGANIZATION_FIXTURE_MODE=${JSON.stringify(mode)}`,
+      `EGO_ORGANIZATION_SCRIPT_PATH=${JSON.stringify(scriptPath)}`,
+      `EGO_ORGANIZATION_EVIDENCE_PATH=${JSON.stringify(evidencePath)}`,
+      "export EGO_ORGANIZATION_FIXTURE_MODE EGO_ORGANIZATION_SCRIPT_PATH EGO_ORGANIZATION_EVIDENCE_PATH",
+      `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(runner)}`,
+      "",
+    ].join("\n"), { mode: 0o700 });
+    await chmod(ego, 0o700);
+    return { root, scriptPath, evidencePath, env: { PATH: `${root}:${process.env.PATH}` } };
+  }
+  const cleanEgo = await egoFixture("clean");
   const env = {
     ...process.env,
-    PATH: `${egoRoot}:${process.env.PATH}`,
+    PATH: cleanEgo.env.PATH,
     FRIENDS_HOME: home,
     FRIENDS_BASE_URL: baseUrl,
   };
@@ -112,7 +129,8 @@ test("real CLI queries organizations, prepares visibly in Ego, and confirms API 
   assert.match(help.stdout, /managed student organizations/);
   const schema = JSON.parse((await run(["schema", "organizations.profile.save", "--json"])).stdout);
   assert.equal(schema.data.readonly, false);
-  assert.equal(schema.data.confirmation, "requires --yes");
+  assert.equal(schema.data.confirmation, "requires independent --via api and --yes");
+  assert.equal(schema.data.input.via.required, true);
   assert.deepEqual(schema.data.input.changes, ["logo", "backgroundGroupUuid", "blurb"]);
   assert.equal(schema.data.submittedViaEgo, "never");
 
@@ -138,12 +156,46 @@ test("real CLI queries organizations, prepares visibly in Ego, and confirms API 
   assert.equal(prepared.data.submitted, false);
   assert.equal(prepared.data.editRoute.path, "/groupManage/studentClubEdit");
   assert.equal(prepared.meta.requestMode, "visible-ego-prepare");
-  const egoScript = await readFile(egoLog, "utf8");
-  assert.match(egoScript, /page\.goto\("https:\/\/friends\.cqu\.edu\.cn\/mobile\/groupManage\/studentClubEdit\?uuid=org-cli&type=isPrincipal"\)/);
+  assert.equal(prepared.data.ego.blurbAction, "filled");
+  assert.equal(prepared.data.ego.externalWriteActions, 0);
+  assert.equal(prepared.data.ego.finalSubmitActions, 0);
+  const egoScript = await readFile(cleanEgo.scriptPath, "utf8");
   assert.match(egoScript, /task\.handOff\(\)/);
   assert.match(egoScript, /组织简介及Logo/);
   assert.match(egoScript, /Ego新简介/);
-  assert.doesNotMatch(egoScript, /保存/);
+  for (const forbidden of [
+    /page\.locator\(/,
+    /page\.getByText\(/,
+    /\.first\(\)/,
+    /\.last\(\)/,
+    /waitForTimeout\(/,
+    /保存/,
+  ]) assert.doesNotMatch(egoScript, forbidden);
+  const cleanEvidence = JSON.parse(await readFile(cleanEgo.evidencePath, "utf8"));
+  assert.equal(cleanEvidence.gotoCount, 1);
+  assert.equal(cleanEvidence.snapshotCount >= 1, true);
+  assert.deepEqual(cleanEvidence.clickSelectors, ["@7"]);
+  assert.deepEqual(cleanEvidence.fillSelectors, ["textarea[data-friends-cli-blurb]"]);
+  assert.equal(cleanEvidence.waitForTimeoutCount, 0);
+  assert.equal(cleanEvidence.externalWrites, 0);
+  assert.equal(cleanEvidence.finalSubmitActions, 0);
+  assert.equal(cleanEvidence.finalValue, "Ego新简介");
+
+  const dirtyEgo = await egoFixture("dirty");
+  const preserved = JSON.parse((await run([
+    "organizations", "profile", "prepare", "org-cli", "--via", "ego",
+    "--ego-task-space", "16", "--ego-page", "p1", "--blurb", "脚本想覆盖", "--json",
+  ], { env: dirtyEgo.env })).stdout);
+  assert.equal(preserved.data.status, "awaiting-user");
+  assert.equal(preserved.data.ego.blurbAction, "human-value-preserved");
+  const dirtyEvidence = JSON.parse(await readFile(dirtyEgo.evidencePath, "utf8"));
+  assert.equal(dirtyEvidence.gotoCount, 0);
+  assert.equal(dirtyEvidence.snapshotCount >= 1, true);
+  assert.deepEqual(dirtyEvidence.clickSelectors, []);
+  assert.deepEqual(dirtyEvidence.fillSelectors, []);
+  assert.equal(dirtyEvidence.finalValue, "用户正在编辑的简介");
+  assert.equal(dirtyEvidence.externalWrites, 0);
+  assert.equal(dirtyEvidence.finalSubmitActions, 0);
 
   const putCountBefore = requests.filter((request) => request.method === "PUT").length;
   await assert.rejects(
@@ -153,14 +205,20 @@ test("real CLI queries organizations, prepares visibly in Ego, and confirms API 
       requests.filter((request) => request.method === "PUT").length === putCountBefore,
   );
   await assert.rejects(
-    () => run(["organizations", "profile", "save", "org-cli", "--input", "-", "--yes", "--json"], {
+    () => run(["organizations", "profile", "save", "org-cli", "--blurb", "新简介", "--yes", "--json"]),
+    (error) => error.code === 2 &&
+      JSON.parse(error.stdout).error.code === "INVALID_INPUT" &&
+      requests.filter((request) => request.method === "PUT").length === putCountBefore,
+  );
+  await assert.rejects(
+    () => run(["organizations", "profile", "save", "org-cli", "--via", "api", "--input", "-", "--yes", "--json"], {
       input: '{"organizationName":"越权"}',
       env: {},
     }),
     (error) => error.code === 2 && JSON.parse(error.stdout).error.code === "INVALID_INPUT",
   );
 
-  const saved = JSON.parse((await run(["organizations", "profile", "save", "org-cli", "--input", "-", "--yes", "--json"], {
+  const saved = JSON.parse((await run(["organizations", "profile", "save", "org-cli", "--via", "api", "--input", "-", "--yes", "--json"], {
     input: '{"blurb":"CLI新简介","logo":"logo-new"}',
     env: {},
   })).stdout);
@@ -175,5 +233,6 @@ test("real CLI queries organizations, prepares visibly in Ego, and confirms API 
   assert.equal(put.body.blurb, "CLI新简介");
 
   await rm(home, { recursive: true, force: true });
-  await rm(egoRoot, { recursive: true, force: true });
+  await rm(cleanEgo.root, { recursive: true, force: true });
+  await rm(dirtyEgo.root, { recursive: true, force: true });
 });

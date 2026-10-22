@@ -91,7 +91,7 @@ export const organizationSchemas = {
     permission: "organization profile editor returned by the school API",
     phases: ["api-write"],
     input: {
-      via: { type: "api", default: "api" },
+      via: { type: "api", required: true },
       organizationId: { type: "organization UUID", required: true },
       changes: ["logo", "backgroundGroupUuid", "blurb"],
       input: { type: "JSON file or stdin containing only whitelisted changes" },
@@ -99,7 +99,7 @@ export const organizationSchemas = {
     output: "saved profile after read-only server readback",
     readonly: false,
     remoteReadonly: false,
-    confirmation: "requires --yes",
+    confirmation: "requires independent --via api and --yes",
     sideEffect: "one confirmed profile PUT followed by one read-only GET; never retries PUT",
     supportedVia: ["api"],
     requestMode: "api-write",
@@ -264,7 +264,7 @@ export function registerOrganizationCommands(program: Command, options: { baseUr
         type: prepared.editRoute.query.type,
       });
       const route = `/mobile${prepared.editRoute.path}?${query.toString()}`;
-      await prepareOrganizationProfileInEgo({
+      const ego = await prepareOrganizationProfileInEgo({
         taskSpaceId,
         page: commandOptions.egoPage,
         route,
@@ -280,6 +280,7 @@ export function registerOrganizationCommands(program: Command, options: { baseUr
           changes: prepared.changes,
           editRoute: prepared.editRoute,
           manualFields,
+          ego,
         },
         {
           operation: "organizations.profile.prepare",
@@ -296,7 +297,7 @@ export function registerOrganizationCommands(program: Command, options: { baseUr
   profile.command("save")
     .description("Confirm and save whitelisted organization profile fields through the API")
     .argument("<organizationId>", "organization UUID")
-    .option("--via <source>", "write execution path", "api")
+    .requiredOption("--via <source>", "independent API write intent")
     .option("--blurb <text>", "organization introduction")
     .option("--logo <value>", "organization logo")
     .option("--background-group-uuid <value>", "organization background group UUID")
@@ -311,7 +312,11 @@ export function registerOrganizationCommands(program: Command, options: { baseUr
         organizationId: organizationId(organizationIdValue),
         changes,
       });
-      const saved = await client.saveProfile(prepared);
+      const saved = await client.saveProfile(prepared, {
+        via: "api",
+        intent: "save-organization-profile",
+        confirm: true,
+      });
       output(saved, {
         operation: "organizations.profile.save",
         via: "api",

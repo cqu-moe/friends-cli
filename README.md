@@ -115,10 +115,10 @@ friends certification status <activityId> --via ego --ego-task-space 16
 
 组织查询先通过生产前端已核实的 `POST /student-organization-info/my` 获取当前账号上下文返回的组织，再按返回对象推导 `principal`、`manager` 或 `member`。成员列表只调用已核实的 `organizational-members-list`，请求固定绑定 `organizationId` 和在岗状态，输出仅投影学号、姓名、职务与负责人/管理员标志，不透传学校返回的其他字段。
 
-组织资料只接受 `logo`、`backgroundGroupUuid` 和 `blurb` 三个源码核实字段。API 保存必须显式 `--yes`：先重新读取学校完整详情，克隆后仅覆盖这三个字段，执行一次 PUT，再用只读 GET 回查；PUT 响应丢失时只做只读回查，不能证明结果则返回 `UNKNOWN_OUTCOME`，不会重试写入。
+组织资料只接受 `logo`、`backgroundGroupUuid` 和 `blurb` 三个源码核实字段。API 保存必须同时显式 `--via api` 和 `--yes`；Ego prepare 不产生任何写入授权。写入前会重新核验同一账号和身份、刷新组织权限、读取学校完整详情，克隆后仅覆盖这三个字段，执行一次 PUT，再用只读 GET 回查。PUT 响应丢失时即使回查值匹配也保留 `UNKNOWN_OUTCOME`（退出码 7）；学校已确认但回查不可用时同样返回不可重试的 `UNKNOWN_OUTCOME`。命令不会重试 PUT。
 
 ```json
 {"blurb":"新的组织简介","logo":"logo-reference","backgroundGroupUuid":"background-reference"}
 ```
 
-Ego 资料修改只执行可见 prepare：先经现有页面会话核验权限，再导航到对应组织编辑页，打开“组织简介及Logo”维护弹窗并填写简介，随后把页面交接给用户。Logo 和背景图上传控件保留在页面上由用户人工处理；命令不点击最终保存、不调用 PUT，也不会把 `--yes` 用于 Ego prepare。
+Ego 资料修改只执行可见 prepare：先经现有页面会话核验权限，再检查当前路由；若目标组织编辑页已经打开则不重新导航。命令先取得页面快照，再从快照引用打开“组织简介及Logo”维护弹窗；若简介已有非空人工输入，会保留该值而不覆盖，只在空字段中填入请求的简介，随后把页面交接给用户。Logo 和背景图上传控件保留在页面上由用户人工处理；命令不点击最终保存、不调用 PUT，也不会把 `--yes` 用于 Ego prepare。

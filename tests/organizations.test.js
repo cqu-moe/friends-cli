@@ -39,6 +39,8 @@ const profile = {
 test("organization SDK uses managed context, whitelisted profile fields, and non-retryable unknown writes", async (t) => {
   const requests = [];
   let putMode = "ok";
+  let readbackMode = "ok";
+  let managedMode = "initial";
   let currentProfile = { ...profile };
   const server = createServer((req, res) => {
     let body = "";
@@ -53,6 +55,9 @@ test("organization SDK uses managed context, whitelisted profile fields, and non
         return json(res, 200, { code: "0", data: { account: "20210001", name: "示例学生", userLoginStateLevel: "XS", departmentNo: "24080" } });
       }
       if (req.url.endsWith("/student-organization-info/my")) {
+        if (managedMode === "revoked") {
+          return json(res, 200, { code: "0", data: [] });
+        }
         return json(res, 200, {
           code: "0",
           data: [{
@@ -72,6 +77,10 @@ test("organization SDK uses managed context, whitelisted profile fields, and non
         });
       }
       if (req.method === "GET" && req.url.endsWith("/student-organization-info/org-fixture")) {
+        if (readbackMode === "lost") {
+          req.destroy();
+          return;
+        }
         return json(res, 200, { code: "0", data: currentProfile });
       }
       if (req.method === "GET" && req.url.endsWith("/student-organization-info/org-manager")) {
@@ -101,10 +110,16 @@ test("organization SDK uses managed context, whitelisted profile fields, and non
       }
       if (req.method === "PUT" && req.url.endsWith("/student-organization-info")) {
         if (putMode === "lost") {
+          currentProfile = { ...currentProfile, ...JSON.parse(body) };
           req.destroy();
           return;
         }
         if (putMode === "stale") {
+          return json(res, 200, { code: "0", message: "ok" });
+        }
+        if (putMode === "readback-lost") {
+          currentProfile = { ...currentProfile, ...JSON.parse(body) };
+          readbackMode = "lost";
           return json(res, 200, { code: "0", message: "ok" });
         }
         currentProfile = { ...currentProfile, ...JSON.parse(body) };
@@ -209,7 +224,38 @@ test("organization SDK uses managed context, whitelisted profile fields, and non
   assert.equal(prepared.payload.internalField, "school-internal-value");
   assert.equal(prepared.payload.organizationName, "示例组织");
 
-  const saved = await client.saveProfile(prepared);
+  const writeIntent = {
+    via: "api",
+    intent: "save-organization-profile",
+    confirm: true,
+  };
+  const beforeIntentCheck = requests.length;
+  for (const invalidIntent of [
+    undefined,
+    { ...writeIntent, via: "ego" },
+    { ...writeIntent, intent: "submit-volunteer-certification" },
+    { ...writeIntent, confirm: false },
+  ]) {
+    await assert.rejects(
+      () => client.saveProfile(prepared, invalidIntent),
+      (error) => error.code === FriendsErrorCode.InvalidInput,
+    );
+  }
+  assert.equal(requests.length, beforeIntentCheck);
+
+  const refreshStart = requests.length;
+  managedMode = "revoked";
+  await assert.rejects(
+    () => client.saveProfile(prepared, writeIntent),
+    (error) => error.code === FriendsErrorCode.PermissionDenied,
+  );
+  assert.deepEqual(
+    requests.slice(refreshStart).map((request) => request.url.split("/").slice(-1)[0]),
+    ["checkUserAndGetUserLevel", "info", "enterHall", "my"],
+  );
+  managedMode = "initial";
+
+  const saved = await client.saveProfile(prepared, writeIntent);
   assert.equal(saved.status, "saved");
   assert.equal(saved.profile.blurb, "新简介");
   assert.equal(saved.profile.logo, "logo-new");
@@ -222,9 +268,12 @@ test("organization SDK uses managed context, whitelisted profile fields, and non
   putMode = "lost";
   const putsBeforeLoss = requests.filter((request) => request.method === "PUT").length;
   await assert.rejects(
-    () => client.saveProfile({ ...prepared, changes: { blurb: "结果未知" } }),
+    () => client.saveProfile({ ...prepared, changes: { blurb: "结果未知" } }, writeIntent),
     (error) => error.code === FriendsErrorCode.UnknownOutcome &&
+      error.retryable === false &&
       error.recovery.organizationId === "org-fixture" &&
+      error.recovery.serverAcknowledged === "unknown" &&
+      error.recovery.readback === "matched" &&
       requests.filter((request) => request.method === "PUT").length === putsBeforeLoss + 1,
   );
 
@@ -234,8 +283,23 @@ test("organization SDK uses managed context, whitelisted profile fields, and non
     () => client.saveProfile({
       ...prepared,
       changes: { blurb: "服务器未回显" },
-    }),
+    }, writeIntent),
     (error) => error.code === FriendsErrorCode.UpstreamBusiness &&
+      error.recovery.readback === "unmatched" &&
       requests.filter((request) => request.method === "PUT").length === putsBeforeStale + 1,
+  );
+
+  putMode = "readback-lost";
+  const putsBeforeReadbackLoss = requests.filter((request) => request.method === "PUT").length;
+  await assert.rejects(
+    () => client.saveProfile({
+      ...prepared,
+      changes: { blurb: "确认后回查失败" },
+    }, writeIntent),
+    (error) => error.code === FriendsErrorCode.UnknownOutcome &&
+      error.retryable === false &&
+      error.recovery.serverAcknowledged === true &&
+      error.recovery.readback === "unavailable" &&
+      requests.filter((request) => request.method === "PUT").length === putsBeforeReadbackLoss + 1,
   );
 });
