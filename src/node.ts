@@ -743,3 +743,6 @@ export * from "./certification-capture.js";
 export {prepareVolunteerActivityReviewInEgo} from './volunteer-activity-review-ego.js';
 
 export {prepareOrganizationParticipationInEgo} from "./organization-participation-ego.js";
+export { prepareOrganizationActivityReviewInEgo } from "./organization-activity-review-ego.js";
+
+export {prepareCourseReviewInEgo} from './course-review-ego.js';

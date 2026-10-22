@@ -13,7 +13,7 @@ const domOptions={url:configuration.url,runScripts:'dangerously',beforeParse(w){
  for(const key of ['userInfo_obj','account_str','loginModel_str'])w.localStorage.setItem(key,'fixture');
 }};
 const contentDom=new JSDOM(html,domOptions);
-const dom=configuration.frame?new JSDOM('<iframe></iframe>',domOptions):contentDom;
+const dom=configuration.frame?new JSDOM('<iframe></iframe>',{...domOptions,url:configuration.outerUrl??configuration.url}):contentDom;
 if(configuration.frame){const frame=dom.window.document.querySelector('iframe');Object.defineProperty(frame,'contentDocument',{get:()=>contentDom.window.document});Object.defineProperty(frame,'contentWindow',{get:()=>contentDom.window});}
 const w=dom.window,d=contentDom.window.document;
 let saved=configuration.state?JSON.parse(await readFile(configuration.state,'utf8').catch(()=>'{"ownership":"agent"}')):{ownership:'agent'};
@@ -31,7 +31,7 @@ function matches(selector,includeHidden=false){
 function one(selector){const elements=matches(selector);if(elements.length!==1)throw new Error(`Expected exactly one visible match: ${selector}, got ${elements.length}`);return elements[0];}
 function active(){if(saved.ownership==='user'||stats.handoffs)throw new Error('Browser operation after handOff');}
 const page={
- async url(){active();return configuration.url;},
+ async url(){active();return configuration.outerUrl??configuration.url;},
  async goto(){stats.navigations++;throw new Error('Unexpected navigation would discard fixture edits');},
  async snapshot(){active();stats.snapshots++;if(configuration.changeOnSecondSnapshot&&stats.snapshots===2){d.querySelector('#edit input[name=requiredCourseCount]').value='9';d.querySelector('.hours span:last-child').textContent='9';}return d.body.textContent;},
  async evaluate(fn,arg){active();if(arguments.length>1&&arg===undefined)throw new Error("page.evaluate argument must be JSON-serializable");w.__argument=structuredClone(arg);return JSON.parse(JSON.stringify(await w.eval(`(${fn.toString()})(__argument)`)));},

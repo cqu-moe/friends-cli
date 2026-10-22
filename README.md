@@ -217,3 +217,37 @@ friends organization-participation prepare <activity-id> --action register --via
 ```
 
 `answers.json` 为问卷 ID 到字符串/字符串数组的映射；附件答案为已存在且可读取的学校资源组 ID。Ego 填写文本、数字和选择项，保留人工值；日期和附件需人工完成，最终提交始终由用户本人操作。`show` 与 `list --mine` 可回查个人记录；未知结果不自动重试。
+
+## 组织活动开办与报名审批（#20）
+
+`createOrganizationActivityReviewClient({ session })` 的 `offering` 与 `registration` 分别提供 `list/get/prepare/decide/verify`。操作既有学校申请，不要求由本工具创建活动。开办输入必须指定组织与开办申请 UUID；报名另需活动 UUID，报名 UUID 不能代替活动 UUID。
+
+```sh
+friends organization-activities offering-reviews list --organization <组织UUID>
+friends organization-activities registration-reviews show <报名UUID> --organization <组织UUID> --activity <活动UUID>
+friends organization-activities offering-reviews decide <开办申请UUID> --organization <组织UUID> --decision pass --input review.json --via api --dry-run
+friends organization-activities registration-reviews prepare <报名UUID> --organization <组织UUID> --activity <活动UUID> --decision refuse --input review.json --via ego --ego-task-space 8 --ego-page p2
+friends organization-activities registration-reviews verify <报名UUID> --organization <组织UUID> --activity <活动UUID> --via ego --ego-task-space 8 --ego-page p2
+```
+
+`review.json`（或 `--input -` 的 stdin JSON）只含 `message`（1–100 字）和 `time`（YYYY-MM-DD）。开办允许 `pass/back/refuse`，打回和拒绝可附 `callbackActivityId`，且必须匹配学校当前首个退回节点；报名只允许 `pass/refuse`。未支持字段和日期、空意见均拒绝。
+
+API 真正执行必须同时显式指定 `--via api --yes`。开办通过按学校源码先保存现有活动资料，再审批；预览会列出 `saveBeforeApproval`，不会执行这两步。每次执行前重新核对学校身份、组织权限、活动/申请绑定和待办；准备结果是一次性执行计划。API 响应丢失或超时保留 `UNKNOWN_OUTCOME`/退出码 7，即使随后只读回查已不在待办中也不改判、不重试、不继续下一次写入。恢复信息保留申请/组织/活动标识及已确认的部分步骤。
+
+Ego 查询使用刚核对的现有会话直接读 API；写操作仅打开源页面的审批弹窗、填入空意见，保留已有人工输入并交接。日期不同会列为人工处理字段。用户亲自点击最终“确定”，然后用 `verify` 只读核对；`prepare --yes` 和 `decide --via ego` 均拒绝。Ego `--dry-run` 不点击、不填表。
+
+`readback: matched` 仅表示学校已确认请求且申请不再位于当前角色的待办，`decisionVerified: false` 不把源码尚未确认的流程记录字段解释成最终通过/拒绝证明。详情见 [#20 验证记录](docs/verification/2026-10-23-organization-activity-reviews.md)。
+
+## 课程开办与报名审批
+
+`courses reviews` 分别处理学校已有的开办申请和报名申请，无需先用本工具创建课程。`show` 返回待办归属和当前可用决定：开办为 `pass/back/refuse`，报名为 `pass/refuse`。审批 UUID 必须属于选定 `--type`；报名另外绑定课程 UUID 与学生。
+
+```sh
+friends courses reviews list --type offering --via api
+friends courses reviews show <报名申请UUID> --type registration --via ego --ego-task-space 16
+friends courses reviews decide <开办申请UUID> --type offering --decision pass --via api --input review.json --dry-run
+friends courses reviews decide <开办申请UUID> --type offering --decision pass --via api --input review.json --yes
+friends courses reviews prepare <报名申请UUID> --type registration --decision refuse --via ego --ego-task-space 16 --input review.json
+```
+
+`review.json` 只接受 `{"message":"审批意见","time":"2026-10-23"}`，也可用 `--input -` 从 stdin 读取。API 实际执行必须显式 `--via api --yes`，执行前刷新身份、待办和详情；`--dry-run` 只读。Ego 查询直接使用核验后的学校 API；Ego 写入只准备可见对话框并保留人工现值，交接后 `submitted:false`，用户亲自最终确定，`--yes` 无法绕过。返回 `UNKNOWN_OUTCOME`（exit 7）时即使回查匹配也不能自动重交；先用 `show` 只读检查。详情见 [#15 验收记录](docs/verification/2026-10-23-course-reviews.md)。
