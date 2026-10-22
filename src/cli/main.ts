@@ -30,8 +30,11 @@ import { organizationSchemas, registerOrganizationCommands } from "./organizatio
 import { registerVolunteerReviewCommands, volunteerReviewSchemas } from "./volunteer-reviews.js";
 import { offeringSchemas, registerOfferingCommands } from "./offerings.js";
 
+import {organizationParticipationSchemas,registerOrganizationParticipationCommands} from "./organization-participation.js";
+
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
+  ...organizationParticipationSchemas,
   ...offeringSchemas,
   ...volunteerActivityReviewSchemas,
   ...certificationApiSchemas,
@@ -403,6 +406,7 @@ courses
     });
   });
 
+registerOrganizationParticipationCommands(program,{baseUrl:process.env.FRIENDS_BASE_URL??productionBaseUrl});
 registerVolunteerActivityReviewCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 registerCertificationApiCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 
