@@ -685,9 +685,10 @@ export async function prepareCourseRegistrationInEgo(options: {
     }
     if (matches !== 1) invalid("The selected personal course is no longer visible");
   }
+  const origin = new URL(options.baseUrl ?? "https://friends.cqu.edu.cn/gateway").origin;
   const route = options.operation === "apply"
-    ? `https://friends.cqu.edu.cn/mobile/course/stuCourseDetail?uuid=${encodeURIComponent(options.courseId!)}&type=Apply`
-    : "https://friends.cqu.edu.cn/mobile/course/stuCourseQuery";
+    ? `${origin}/mobile/course/stuCourseDetail?uuid=${encodeURIComponent(options.courseId!)}&type=Apply`
+    : `${origin}/mobile/course/stuCourseQuery`;
   const runtime = new URL("./course-participation-page.js", import.meta.url).href;
   const input = { operation: options.operation, page, route, session, courseId: options.courseId,
     registrationId: options.registrationId, courseName: options.courseName, prepared, roleId: options.roleId,

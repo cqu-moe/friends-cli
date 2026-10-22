@@ -5,8 +5,9 @@ let script = ''; for await (const chunk of process.stdin) script += chunk;
 const config = JSON.parse(await readFile(process.env.FRIENDS_COURSE_EGO_CONFIG, 'utf8'));
 if (process.env.EGO_SCRIPT_LOG) await writeFile(process.env.EGO_SCRIPT_LOG, script, { flag: 'a' });
 const stats = { clicks: [], fills: [], uploads: [], finalWrites: 0, handoffs: 0, navigations: 0, callbacks: [], snapshots: 0 };
-const dom = new JSDOM(`<iframe src="${config.url}"></iframe>`, { url: 'https://friends.cqu.edu.cn/mobile/index', runScripts: 'dangerously' });
+const dom = new JSDOM(`<iframe src="${config.url}"></iframe>`, { url: new URL(config.url).origin + '/mobile/index', runScripts: 'dangerously' });
 const outer = dom.window, frame = outer.document.querySelector('iframe').contentWindow;
+outer.document.body.insertAdjacentHTML('afterbegin', config.outerHtml ?? '');
 const d = frame.document;
 d.open(); d.write(config.html); d.close();
 for (const w of [outer, frame]) {
@@ -22,10 +23,12 @@ const visible = e => { for (let n = e; n; n = n.parentElement) if (frame.getComp
 function all(selector) {
   let css = selector.replace(/^loc=css:/, '');
   const nth = css.match(/ >> nth=(\d+)$/); if (nth) css = css.slice(0, nth.index);
-  const nodes = [...d.querySelectorAll(css)].filter(visible);
+  const top = [...outer.document.querySelectorAll(css)].filter(visible);
+  const nodes = top.length ? top : [...d.querySelectorAll(css)].filter(visible);
   return nth ? nodes.slice(Number(nth[1]), Number(nth[1]) + 1) : nodes;
 }
 function one(selector) { const nodes = all(selector); if (nodes.length !== 1) throw new Error('Ambiguous selector: ' + selector); return nodes[0]; }
+outer.document.querySelectorAll('input,textarea').forEach(e => e.addEventListener('change', () => { stats.finalWrites++; }));
 const model = {};
 const buffers = new WeakMap(), pendingUploads = [];
 d.querySelectorAll('input:not([type=file]),textarea').forEach((e, i) => {
@@ -96,4 +99,4 @@ const page = {
 };
 const task = { page(label) { if (label !== (config.page ?? 'p2')) throw new Error('Wrong page'); return page; }, async handOff() { active(); stats.handoffs++; handedOff = true; } };
 try { await new Function('taskSpace', `return (async()=>{${script}})()`)(async id => { if (id !== 8) throw new Error('Wrong task'); return task; }); }
-finally { await writeFile(config.result, JSON.stringify({ ...stats, model, values: [...d.querySelectorAll('input:not([type=file]),textarea')].map(e => e.value), html: d.body.innerHTML })); dom.window.close(); }
+finally { await writeFile(config.result, JSON.stringify({ ...stats, model, values: [...d.querySelectorAll('input:not([type=file]),textarea')].map(e => e.value), outerValues: [...outer.document.querySelectorAll('input,textarea')].map(e => e.value), html: d.body.innerHTML })); dom.window.close(); }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -780,12 +780,10 @@ test("real CLI covers course registration records, dry-run, explicit writes, and
   t.after(async () => {
     server.closeAllConnections();
     server.close();
-    await rm(join(tmpdir(), "friends-course-cli-ready"), { recursive: true, force: true }).catch(() => {});
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const home = join(tmpdir(), "friends-course-cli-ready");
-  await rm(home, { recursive: true, force: true });
-  await mkdir(home, { recursive: true, mode: 0o700 });
+  const home = await mkdtemp(join(tmpdir(), "friends-course-cli-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
   const previousHome = process.env.FRIENDS_HOME;
   process.env.FRIENDS_HOME = home;
   await saveSession({
@@ -811,7 +809,7 @@ test("real CLI covers course registration records, dry-run, explicit writes, and
   const egoConfig = join(egoRoot, "config.json");
   const sourceForm = (name, contents = "") => `<div class="app-container"><div class="activity-info"><div class="van-cell"><span class="van-cell__title">课程名称</span><span class="van-cell__value">${name}</span></div></div><div class="report-info-set">${contents}</div><div class="footer"><button>申请加入</button></div></div>`;
   const setEgoPage = async (id, name, contents = "", extra = {}) => writeFile(egoConfig, JSON.stringify({
-    url: `https://friends.cqu.edu.cn/mobile/course/stuCourseDetail?uuid=${id}&type=Apply`,
+    url: `http://127.0.0.1:${server.address().port}/mobile/course/stuCourseDetail?uuid=${id}&type=Apply`,
     html: sourceForm(name, contents), result: egoResult, page: "p4", gateway: `http://127.0.0.1:${server.address().port}/gateway`, ...extra,
   }));
   await setEgoPage("course-fixture", "示例课程");
@@ -1197,7 +1195,7 @@ test("real CLI covers course registration records, dry-run, explicit writes, and
 
   for (const operation of ["withdraw", "exit"]) {
     await setEgoPage("course-fixture", "示例课程", "", {
-      url: "https://friends.cqu.edu.cn/mobile/course/stuCourseQuery",
+      url: `http://127.0.0.1:${server.address().port}/mobile/course/stuCourseQuery`,
       html: `<div class="app-container"><div class="list-group"><div class="list-item-bottom-line">示例课程</div><div class="list-action"><div>撤销</div><div>退出报名</div></div></div></div>`,
     });
     const prepared = JSON.parse((await run(process.execPath, [
@@ -1769,7 +1767,7 @@ test("Node public SDK verifies live context and prepares actual iframe controls 
   process.env.FRIENDS_COURSE_EGO_CONFIG = configPath;
   t.after(() => { if (previousConfig === undefined) delete process.env.FRIENDS_COURSE_EGO_CONFIG; else process.env.FRIENDS_COURSE_EGO_CONFIG = previousConfig; });
   const html = `<div class="app-container"><div class="activity-info"><div class="van-cell"><span class="van-cell__title">课程名称</span><span class="van-cell__value">示例课程</span></div></div><div class="report-info-set"><div class="form-content"><div class="top-title">1.备注</div><div class="options"><textarea></textarea></div></div></div><div class="footer"><button>申请加入</button></div></div>`;
-  const config = { url: "https://friends.cqu.edu.cn/mobile/course/stuCourseDetail?uuid=course-fixture&type=Apply", html, result: resultPath, gateway: `http://127.0.0.1:${server.address().port}/gateway` };
+  const config = { url: `http://127.0.0.1:${server.address().port}/mobile/course/stuCourseDetail?uuid=course-fixture&type=Apply`, html, result: resultPath, gateway: `http://127.0.0.1:${server.address().port}/gateway` };
   await writeFile(configPath, JSON.stringify(config));
   const options = { operation: "apply", taskSpaceId: 8, page: "p2", courseId: "course-fixture", courseName: "示例课程", roleId: "role-a", command: launcher,
     baseUrl: `http://127.0.0.1:${server.address().port}/gateway`,
@@ -1792,6 +1790,9 @@ test("Node public SDK verifies live context and prepares actual iframe controls 
   observed = JSON.parse(await readFile(resultPath, "utf8"));
   assert.deepEqual(observed.values, ["human answer"]); assert.deepEqual(observed.fills, []);
   await writeFile(configPath, JSON.stringify({ ...config, account: "other-account" }));
+  await assert.rejects(() => prepareCourseRegistrationInEgo(options), error => error.code === FriendsErrorCode.PermissionDenied);
+  observed = JSON.parse(await readFile(resultPath, "utf8")); assert.deepEqual(observed.fills, []); assert.equal(observed.finalWrites, 0);
+  await writeFile(configPath, JSON.stringify({ ...config, outerHtml: '<div class="report-info-set"><div class="form-content"><textarea></textarea></div></div>' }));
   await assert.rejects(() => prepareCourseRegistrationInEgo(options), error => error.code === FriendsErrorCode.PermissionDenied);
   observed = JSON.parse(await readFile(resultPath, "utf8")); assert.deepEqual(observed.fills, []); assert.equal(observed.finalWrites, 0);
   await writeFile(configPath, JSON.stringify({ ...config, changeOnSnapshot: true }));
@@ -1856,7 +1857,7 @@ test("Node public SDK verifies live context and prepares actual iframe controls 
   });
   observed = JSON.parse(await readFile(resultPath, "utf8")); assert.equal(observed.uploads.length, 1); assert.equal(observed.handoffs, 1); assert.equal(observed.finalWrites, 0); assert.equal(uploaded.length, 7);
   for (const operation of ["withdraw", "exit"]) {
-    const listConfig = { ...config, url: "https://friends.cqu.edu.cn/mobile/course/stuCourseQuery", html: `<div class="app-container"><div class="list-group"><div class="list-item-bottom-line">示例课程</div><div class="list-action"><div>撤销</div><div>退出报名</div></div></div></div>` };
+    const listConfig = { ...config, url: `http://127.0.0.1:${server.address().port}/mobile/course/stuCourseQuery`, html: `<div class="app-container"><div class="list-group"><div class="list-item-bottom-line">示例课程</div><div class="list-action"><div>撤销</div><div>退出报名</div></div></div></div>` };
     await writeFile(configPath, JSON.stringify(listConfig));
     const preparedDialog = await prepareCourseRegistrationInEgo({ operation, taskSpaceId: 8, page: "p2", registrationId: "registration-fixture", courseName: "示例课程", command: launcher, baseUrl: options.baseUrl, session: options.session });
     assert.equal(preparedDialog.submitted, false);

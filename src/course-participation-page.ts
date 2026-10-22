@@ -35,7 +35,7 @@ export async function prepareCourseParticipationPage(task: Task, input: Input) {
   const completedActions: string[] = [], preservedInputs: string[] = [], pendingInputs: string[] = [];
   let attempted: string | undefined;
   let handoffAttempted = false;
-  const capture = () => page.evaluate(({ session, operation, courseId, courseName, definitions }) => {
+  const capture = () => page.evaluate(({ session, operation, courseId, courseName, definitions, expectedOrigin }) => {
     const frame = document.querySelector<HTMLIFrameElement>("iframe");
     const d = frame?.contentDocument ?? document;
     const w = d.defaultView!;
@@ -49,7 +49,7 @@ export async function prepareCourseParticipationPage(task: Task, input: Input) {
       };
       const info = JSON.parse(w.localStorage.getItem("userInfo_obj") ?? "null");
       const url = new URL(w.location.href);
-      bound = location.origin === "https://friends.cqu.edu.cn" && w.location.origin === location.origin &&
+      bound = location.origin === expectedOrigin && w.location.origin === location.origin &&
         token(localStorage) === session.token && token(w.localStorage) === session.token &&
         localStorage.getItem("userLevel_str") === session.userLevel && w.localStorage.getItem("userLevel_str") === session.userLevel &&
         info?.account === session.account.userNo && info?.userLoginStateLevel === session.context.levelNo && info?.departmentNo === session.context.unit.unitNo &&
@@ -58,6 +58,8 @@ export async function prepareCourseParticipationPage(task: Task, input: Input) {
     const cell = [...d.querySelectorAll(".activity-info .van-cell")].find(e => clean(e.querySelector(".van-cell__title")?.textContent) === "课程名称");
     const name = clean(cell?.querySelector(".van-cell__value")?.textContent);
     if (operation === "apply" && name !== courseName) bound = false;
+    // Ego selectors prefer the outer document; never let a lookalike form intercept an iframe action.
+    if (frame && document.querySelector(operation === "apply" ? ".report-info-set" : ".list-group")) bound = false;
     const groups = [...d.querySelectorAll(".report-info-set > .form-content")];
     const questions = definitions.map((definition, i) => {
       const q = groups[i];
@@ -84,7 +86,7 @@ export async function prepareCourseParticipationPage(task: Task, input: Input) {
       role: d.querySelector<HTMLInputElement>('input[name="roleName"]')?.value ?? "",
       applyButton: [...d.querySelectorAll<HTMLButtonElement>(".footer button")].some(e => clean(e.textContent) === "申请加入" && !e.disabled),
       dialogTitle: clean(d.querySelector(".van-dialog__header")?.textContent) };
-  }, { session: input.session, operation: input.operation, courseId: input.courseId, courseName: input.courseName, definitions: input.prepared?.questionnaires ?? [] });
+  }, { session: input.session, operation: input.operation, courseId: input.courseId, courseName: input.courseName, definitions: input.prepared?.questionnaires ?? [], expectedOrigin: new URL(input.route).origin });
   const inspect = async () => {
     const state = await capture();
     if (!state.bound) throw new FriendsError({ code: FriendsErrorCode.PermissionDenied, message: "The visible course page, account or context does not match the verified request" });
