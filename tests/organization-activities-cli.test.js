@@ -23,7 +23,10 @@ test('real CLI covers every organization activity API command, file/stdin, schem
   const schema=body(await cli(['schema','organization-activities.'+operation],f.env));assert.equal(schema.data.operation,'organization-activities.'+operation);
  }
  body(await run(['list','--kind','manageable','--keyword','示例','--page','2']));
- for(const operation of ['show','requirements','status'])body(await run([operation,'activity-1']));
+ for(const operation of ['show','requirements','status']){
+  const result=body(await run([operation,'activity-1']));
+  if(operation==='status')assert.deepEqual(result.data.flow,{nodeList:[{activityname:'组织审核',state:'UNKNOWN_NODE_STATE'}],evaluationRecords:[{msg:'等待学校处理',state:'UNKNOWN_RECORD_STATE'}]});
+ }
  assert.equal(body(await run(['prepare','--input','-'],JSON.stringify(f.input))).data.submitted,false);
  body(await run(['materials','--input',f.path,'--dry-run']));body(await run(['submit','--input',f.path,'--dry-run']));
  const denied=await run(['materials','--input',f.path]);assert.equal(denied.code,2);assert.equal(JSON.parse(denied.stdout).error.code,'INVALID_INPUT');assert.equal(f.api.state.uploads,0);
@@ -40,7 +43,11 @@ test('real CLI reuses Ego sessions for all queries and prepares editable control
  const f=await setup(t);const ego=['--via','ego','--ego-task-space','7','--ego-page','p2'];const run=(args,input)=>cli(['organization-activities',...args],f.env,input);
  for(const operation of ['list','show','requirements','status']){
   const args=operation==='list'?[operation]:[operation,'activity-1'];const result=body(await run([...args,...ego]));assert.equal(result.meta.selectedEntry,'ego');assert.equal(result.meta.requestMode,'direct-api');
+  if(operation==='status')assert.deepEqual(result.data.flow,{nodeList:[{activityname:'组织审核',state:'UNKNOWN_NODE_STATE'}],evaluationRecords:[{msg:'等待学校处理',state:'UNKNOWN_RECORD_STATE'}]});
  }
+ f.api.state.workflow={nodeList:[],evaluationRecords:null};
+ const unavailable=body(await run(['status','activity-1',...ego]));assert.deepEqual(unavailable.data.flow,{nodeList:[],evaluationRecords:null});
+ assert.equal(unavailable.meta.selectedEntry,'ego');assert.equal(unavailable.meta.requestMode,'direct-api');
  const preview=body(await run(['prepare','--input',f.path,...ego,'--dry-run']));assert.equal(preview.data.submitted,false);assert.equal((await f.ego.observed()).fills.length,0);
  const prepared=body(await run(['prepare','--input','-',...ego],JSON.stringify(f.input)));assert.equal(prepared.data.status,'awaiting-user');assert.equal(prepared.data.submitted,false);assert.equal(prepared.data.handoff,'completed');assert.ok(prepared.data.manualFields.includes('registration-settings'));
  const observed=await f.ego.observed();assert.equal(observed.fills.length,2);assert.equal(observed.clicks.length,0);assert.equal(observed.handoffs,1);assert.match(observed.html,/data-model="活动简介"/);
