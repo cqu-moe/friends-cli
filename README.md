@@ -2,7 +2,7 @@
 
 重庆大学第二课堂平台的 Agent-first CLI 与可复用 SDK。当前处于设计阶段，尚无可安装的命令行工具。
 
-- [整体设计草案](docs/plans/2026-10-22-initial-design.md)：TypeScript + Node.js，共享 SDK、API/Ego 双路径与本地认证草稿。
+- [整体设计草案](docs/plans/2026-10-22-initial-design.md)：TypeScript + Node.js，共享 SDK、API/Ego 双路径与本地认证草稿；Ego 录入后交给用户审核并亲自提交。
 - [CQU Auth 登录设计](docs/plans/2026-10-22-cqu-auth-login.md)：统一 Better Auth，说明 PKCE、DPoP 与二课会话的接入边界。
 - [领域术语](GLOSSARY.md)。规格与任务使用 [GitHub Issues](https://github.com/cqu-moe/friends-cli/issues)。
 - 上游依赖：[Auth #94：friends 固定服务与取票权限](https://github.com/cqu-moe/auth/issues/94)。

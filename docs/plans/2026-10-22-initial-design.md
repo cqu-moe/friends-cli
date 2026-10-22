@@ -1,6 +1,6 @@
 # friends-cli 初步设计
 
-日期：2026-10-22。状态：整体设计草案；技术栈、双登录、API/Ego 双操作方式、Better Auth 选型与团组织首版范围已确认，详细接口契约仍待验证。命令、类型与目录均为提案，不代表已有实现。
+日期：2026-10-22。状态：整体设计草案；技术栈、双登录、API/Ego 双操作方式、Ego 录入后人工审核及提交、Better Auth 选型与团组织首版范围已确认，详细接口契约仍待验证。命令、类型与目录均为提案，不代表已有实现。
 
 ## 已确认的目标
 
@@ -9,7 +9,7 @@
 - 公开仓库：https://github.com/cqu-moe/friends-cli 。规格与任务使用 GitHub Issues；采用默认五个 triage 标签。
 - 技术栈采用 TypeScript + Node.js；首版单包分别提供 SDK 导出与 friends 命令（Q4 已确认）。
 - 首版同时支持独立本地学校登录和 CQU Auth 登录（Q5 已确认）。
-- 所有范围内业务均以 API 直接调用和 Ego 有头浏览器显式操作为目标，共享业务契约、数据与本地草稿；每项能力分别验收两条路径。
+- 所有范围内业务均以 API 直接调用和 Ego 有头浏览器显式操作为目标，共享业务数据与本地草稿；两条路径的自动化终点按操作明确声明。志愿者录入等需人工审阅的 Ego 流程止于填表与交接，由用户审核并亲自最终提交。
 - 认证统一采用 Better Auth 的客户端及官方 OAuth 工具；优先使用现成库，不另起 OAuth 实现。DPoP 客户端能力缺口单独验证，不因选型而降低安全要求。
 - 团组织首版覆盖组织资料、成员查询、加入/退出审批、负责人变更申请；下设部门编辑与团员入团/注册/评议留待后续（Q6 已确认）。
 - 本轮先完成勘测和整体设计，不执行真实报名、审批、认证或组织成员变更。
@@ -107,7 +107,7 @@ docs/
   agents/
 ```
 
-- SDK 核心不访问本地文件、终端、剪贴板或浏览器全局变量；两种适配器实现相同业务操作，复用输入校验和结果模型。Ego 不是替换 HTTP 的传输层，而是业务操作的另一种实现。
+- SDK 核心不访问本地文件、终端、剪贴板或浏览器全局变量；两种适配器复用领域数据、输入校验和通用错误模型，各自声明可执行的操作阶段。Ego 录入使用 prepare，API 正式提交使用 submit；不能强行用同一个 submit 接口掩盖人工边界。
 - API 客户端仍可单独使用；Ego 与本地存储从可选的 Node 导出加载。普通 SDK 导入不启动浏览器，不要求安装 Ego。
 - CLI 负责文件读取、登录交互、输出格式和确认选项；不重复实现领域规则。
 - 初期只用两个具体适配器，不建设通用工作流引擎、插件注册系统或完整学校接口生成器。
@@ -116,15 +116,26 @@ docs/
 
 ### API 与 Ego 的操作约定
 
-登录来源由 `auth login --method local|cqu-auth` 选择，业务执行方式由 `--via api|ego` 选择，二者独立。提案默认 API，显式指定 Ego 时在可见页面中操作。
+登录来源由 `auth login --method local|cqu-auth` 选择，业务执行方式由 `--via api|ego` 选择，二者独立。查询提案默认 API，显式指定 Ego 时在可见页面中操作；录入与提交必须使用不同动作，不能只换 via 就改变其副作用。
 
-- 同一业务命令使用相同输入、领域 ID、权限检查和结果含义。每个操作记录 API 与 Ego 各自的可用性和验证证据，不能用一条路径的成功替代另一条。
+- 两条路径共享人员、活动、组织等领域数据和草稿格式；相同查询保持相同语义。写入流程按 prepare、submit、status 区分阶段，分别声明 supportedVia 和结果含义，不能用填表成功替代提交成功。
 - Ego 通过已安装的 `ego-browser` 完成正常导航、点击、填写和文件选择；不重新封装浏览器引擎，也不以页面中的隐藏 fetch 冒充显式操作。
 - 同一协作流程复用一个 task space，提供可恢复的会话引用。人接管后停止 Agent 操作；明确交还后重新检查页面、账号、组织和活动，再继续。
 - API 会话与浏览器会话分别管理，每次写入前核对目标账号及组织。CQU Auth 到 Ego 的会话交接须实测；不默认复制 token 就能登录，不复用已核销 ST。
-- 目标功能两边都覆盖；若网页没有对应入口或 API 契约尚未确定，报告该路径的具体缺口，不能默默切换路径。尤其写操作结果不确定时，不从 API 自动改到 Ego 再提交一次。
-- 区分 `prepared`（已填表）、`awaiting-user`（交给用户）、`submitted`（已提交）和 `verified`（结果已回查）。打开页面、完成点击或出现 HTTP 200 都不能单独代表业务完成。
+- 目标业务两边都覆盖；Ego 的人工审阅和最终点击是该路径的一部分，不要求 Agent 自动完成提交。若网页没有入口或 API 契约未确定，报告具体缺口，不能默默切换路径；不能在 Ego 录入后转为 API 提交。
+- 区分 `prepared`（已填表）、`awaiting-user`（等待人工审核与亲自提交）、`submitted`（已提交）和 `verified`（结果已回查）。Ego prepare 只能返回前两种状态及 submitted=false；用户提交后，经允许的只读回查才能记录后两种状态。
 - 未来 MCP/App 复用业务层；Ego 能力要求本机有浏览器运行环境，不能宣称普通远端 MCP 主机可直接使用用户本机页面。
+
+### Ego 表单录入的人工边界
+
+用户明确要求：志愿者录入等表单流程只填入页面，由人审阅并亲自提交。这里的“人工审核”指提交前检查，不是学校后续指导教师/单位的认证审批。
+
+- `certifications.prepare --via ego` 根据草稿使用可见表单操作录入人员与时长，展示录入结果、差异和未处理项，然后 handOff 并保留页面。完成条件是页面已准备好等待人处理。
+- 不点击“提交认证”，不触发表单 submit/快捷键提交，不调用 SDK 提交方法，也不通过页面 fetch/evaluate、隐藏按钮或其他通道最终提交。正常页面操作触发的人员查询等请求不等于正式提交；须先验证“添加名单/设置时长”等控件的真实副作用。
+- `certifications.submit` 仅支持显式 `--via api`；`submit --via ego` 在执行前返回不支持该操作的输入错误（退出码 2），引导使用 prepare。`--yes`、dry-run 或人工说“已审核”都不将 Ego prepare 变为 Agent 代提交。
+- prepare 不自动链到 API submit。独立 API 提交能力保留，但必须是另行明确选择的 API 操作；不能用于完成这次要求人工提交的 Ego 任务。
+- 交接后停止 Agent 控制；用户可以继续编辑、取消或亲自点击提交。用户明确交还后重新读页面，必要时捕获新版草稿；用户要求核对提交结果时，只读查询状态，不补点提交。
+- 回填失败、网页自动最终提交或控件副作用不明时停止并报告，不能为了“完成”改走 API。页面和本地草稿保留已知状态；提交结果未知时不得重放。
 
 ### 志愿认证的本地草稿
 
@@ -132,10 +143,10 @@ docs/
 
 1. 从已授权的活动与报名数据建立草稿，或从 Ego 当前表单捕获已编辑内容。保存活动/组织/账号绑定、人员标识、岗位、时长与材料引用；业务字段仍以实测契约为准。
 2. 草稿允许尚未填完，保存前检查结构；最终提交另做完整校验。每次 CLI 修改原子保存，冲突时保留双方内容，不覆盖更新版本。
-3. 同一草稿可交给 API 提交，或在 Ego 打开对应活动并逐项回填。回填前预览差异，不覆盖用户新编辑，也不把未知人员自动加入另一活动。
+3. 同一草稿可经明确选择用于独立 API 提交，或通过 Ego prepare 打开目标活动、逐项添加指定人员并设置指定时长。Ego 只录入和交接，人工检查后由用户亲自点击“提交认证”。回填前预览差异，不覆盖用户新编辑，也不把未知人员自动加入另一活动。
 4. 人在 Ego 修改后可再次捕获并保存；在离开/交接前提供保存检查点。不能承诺关闭浏览器时未捕获的手动修改自动落盘。
 5. 本地保存不上传附件、不调用学校提交接口。附件记录本地引用和校验信息，恢复时验证文件仍可用；网页已上传附件无法导出时明确列为缺失，不能宣称完整恢复。
-6. 提交只走选定路径，并记录可用的申请 ID 与回查结果。网络中断保留草稿与 `UNKNOWN_OUTCOME`，先查服务器再决定是否重试。已提交记录不能作为新草稿误重复提交。
+6. API submit 需要独立、明确的提交意图；Ego 只等待用户亲自提交，用户交还后只读回查可用申请 ID 和结果。网络中断保留草稿与 `UNKNOWN_OUTCOME`，先查服务器再决定是否重试。未观察到最终提交时保持 awaiting-user，不能自行提交或宣称成功。
 
 草稿带 schemaVersion 和 revision，保存在仓库外的用户数据目录。它可能含人员信息，默认限制本机访问权限；输出、示例、Git 和 Issue 不包含真实名单。当前阶段无需数据库、同步服务或专门的草稿 Web UI。
 
@@ -171,24 +182,33 @@ friends volunteers registrations list --activity activity_demo --json
 friends volunteers registrations approve registration_demo --input approval.json --dry-run --json
 friends volunteers certifications draft create --activity activity_demo --via api --json
 friends volunteers certifications draft capture --via ego --session session_demo --json
-friends volunteers certifications draft open draft_demo --via ego
+friends volunteers certifications prepare --draft draft_demo --via ego --json
 friends volunteers certifications submit --draft draft_demo --via api --dry-run --json
-friends volunteers certifications submit --draft draft_demo --via ego --dry-run --json
+friends volunteers certifications status --activity activity_demo --via ego --json
 friends volunteers certifications submit --input certification.json --via api --dry-run --json
 friends courses applications submit --input course.json --dry-run --json
 friends organizations list --scope managed --json
 friends organizations members list organization_demo --json
 friends organizations membership-requests approve request_demo --dry-run --json
+friends schema volunteers.certifications.prepare --json
 friends schema volunteers.certifications.submit --json
 ```
+
+上例 Ego prepare 只录入并交接；status 是用户交还页面后可用的只读查询。prepare 的结果示例：
+
+```json
+{"schemaVersion":1,"ok":true,"data":{"operation":"volunteers.certifications.prepare","status":"awaiting-user","submitted":false,"draftId":"draft_demo","session":"session_demo","nextAction":"请在 Ego 中核对名单与时长，并亲自点击提交认证"},"meta":{"via":"ego"}}
+```
+
+这里 ok=true 仅表示准备和交接成功，不表示认证已提交。prepare --dry-run 只校验，不录入、不提交。
 
 Agent-First 输出与调用约定：
 
 - `--json` 在 stdout 输出一个稳定版本的 JSON 文档，诊断日志写 stderr；`--help`、schema、错误码可独立查询。
 - 复杂输入支持 `--input 文件` 与 `--input -`；只接受已核实字段，不能把任意对象直接转发给学校。
 - 正常调用直接完成单个明确操作；`--dry-run` 只做本地校验和必要只读检查，不能上传附件或保存远端草稿。
-- 写操作展示对象、账号/角色/组织上下文及影响。非交互审批等操作要求显式确认选项，例如 `--yes`，不能等待隐藏提示。
-- SDK 不弹确认框；相同输入校验与错误语义由所有入口共享，CLI/MCP/App 决定如何收集用户确认。
+- 写操作展示对象、账号/角色/组织上下文及影响。允许自动执行的非交互审批等操作要求显式确认选项，例如 `--yes`；该选项不能绕过 Ego 表单必须人工提交的边界。
+- SDK 不弹确认框；输入校验、支持的操作阶段和禁止自动提交的规则由所有入口共享。CLI/MCP/App 可以选择呈现方式，不能把 awaiting-user 自动转换成 submit。
 - 页面参数和返回值包含 items、page、pageSize、total（若服务提供）、hasMore；默认只请求一页。
 - 不能假装支持学校未提供的服务端筛选。若增加本地筛选，必须显式报告扫描范围、是否完整及请求预算。
 - 命令描述至少说明输入 schema、输出 shape、读写性质、两条路径的可用性和验证状态，避免 Agent 调用只有名称没有可用契约的功能。
@@ -242,15 +262,15 @@ Agent-First 输出与调用约定：
 每一步都交付一条可用业务链，全部阶段完成才覆盖用户提出的范围。
 
 1. 登录与查询：本地与 CQU Auth 两条路径分别建立会话 → 共用能力/上下文确认 → 课程搜索 → 详情；固定 JSON、错误和分页契约，并分别验证 API 和 Ego。补齐 Better Auth CLI 互操作与 DPoP 客户端缺口，才算完成相应登录能力。
-2. 志愿管理优先交付认证草稿：活动查询 → 添加人员/时长 → 本地保存 → 关闭恢复 → API/Ego 任一路径准备及提交 → 状态回查；并覆盖开办申请/审批、报名审批、学生报名、退出、时长查询。
+2. 志愿管理优先交付认证草稿：活动查询 → 添加人员/时长 → 本地保存 → 关闭恢复 → API 独立提交，或 Ego 录入后交接人工审核及亲自提交 → 状态回查；并覆盖开办申请/审批、报名审批、学生报名、退出、时长查询。
 3. 课程与组织活动：开办申请、报名与审批、课程认证，分别核实各自流程；未确认入口先列为缺口。
 4. 组织管理：组织资料维护、成员查询、加入/退出审批、负责人变更申请。首版不包含下设部门编辑、任意权限调整，以及另一模块的团员入团/注册/评议。
 5. 后续接入 MCP 与客户端，复用 SDK，不在第一版搭空壳服务。
 
-所有范围内操作建立 API/Ego 覆盖矩阵：输入/输出是否一致、权限是否一致、页面入口/API 是否实测、写入能否回查、是否存在未解决缺口。矩阵逐操作填写，未完成的路径不能标为双入口支持。
+所有范围内业务建立 API/Ego 覆盖矩阵：共享数据、可执行阶段、最终提交执行者、权限、页面入口/API 实测、回查和缺口。志愿认证明确标为 API submit / Ego prepare + human submit；人工提交是既定设计，不是等待补齐的自动化缺口。
 
 验收层次分别记录：输入/状态转换单测、脱敏响应契约测试、CLI 子进程 JSON 与退出码测试、真实登录态只读测试、Ego 可见操作与人工接管/恢复、草稿关闭重开及跨路径恢复、经授权样例的写入及结果回查。Mock 通过不等于真实写操作可用。
-重点回归：非零业务码、登录失效、分页边界、未知状态、错误 ID、无权限、写入超时与重复执行。
+重点回归：非零业务码、登录失效、分页边界、未知状态、错误 ID、无权限、写入超时与重复执行。Ego 另验收 prepare 过程中未发生最终提交请求、未点击提交、页面保持可人工编辑、--yes 不能绕过、拒绝 submit --via ego 且不回退 API；用户修改后捕获保存不提交，用户亲自提交后仅做只读回查。
 
 ## 待技术验证的事实
 
