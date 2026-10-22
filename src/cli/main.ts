@@ -2,6 +2,7 @@
 import {courseReviewSchemas, registerCourseReviewCommands} from "./course-reviews.js";
 import {volunteerActivityReviewSchemas,registerVolunteerActivityReviewCommands} from "./volunteer-activity-reviews.js";
 import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
+import { courseOfferingSchemas, registerCourseOfferingCommands } from "./course-offering.js";
 import { Command } from "commander";
 import { organizationActivityReviewSchemas, registerOrganizationActivityReviewCommands } from "./organization-activity-reviews.js";
 import {
@@ -36,12 +37,16 @@ import { organizationSchemas, registerOrganizationCommands } from "./organizatio
 import { registerVolunteerReviewCommands, volunteerReviewSchemas } from "./volunteer-reviews.js";
 import { offeringSchemas, registerOfferingCommands } from "./offerings.js";
 
+import {organizationParticipationSchemas,registerOrganizationParticipationCommands} from "./organization-participation.js";
+
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
+  ...organizationParticipationSchemas,
   ...courseReviewSchemas,
   ...offeringSchemas,
   ...volunteerActivityReviewSchemas,
   ...certificationApiSchemas,
+  ...courseOfferingSchemas,
   ...draftSchemas,
   ...courseParticipationSchemas,
   ...organizationSchemas,
@@ -416,6 +421,7 @@ courses
     });
   });
 
+registerOrganizationParticipationCommands(program,{baseUrl:process.env.FRIENDS_BASE_URL??productionBaseUrl});
 registerOrganizationActivityReviewCommands(program, { baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl });
 
 
@@ -430,6 +436,10 @@ registerDraftCommands(program, {
 });
 
 registerOrganizationCommands(program, {
+  baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+});
+
+registerCourseOfferingCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
 });
 

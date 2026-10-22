@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "kind": "course-offering",
+  "binding": {
+    "accountUserNo": "DEMO-STUDENT",
+    "levelNo": "XS",
+    "unitNo": "DEMO-UNIT",
+    "organizationId": "DEMO-ORG"
+  },
+  "uuid": null,
+  "firstStep": {
+    "curriculumName": "示例课程",
+    "curriculumType": "DEMO-TYPE",
+    "curriculumLevel": "DEMO-LEVEL",
+    "curriculumPlace": "示例教室",
+    "beginTime": "2026-11-01 09:00",
+    "endTime": "2026-11-01 12:00",
+    "curriculumContent": "示例课程介绍，提交前请替换。",
+    "role": {
+      "roleName": "参与者",
+      "integral": 0.5,
+      "classHour": 2
+    },
+    "attestationType": "AUTO",
+    "isOpenSign": true,
+    "signNumber": 1,
+    "isEnroll": true,
+    "isAppraise": true
+  },
+  "reportSet": {
+    "openType": "AUTO",
+    "openTime": "2026-10-25 09:00",
+    "finishType": "AUTO",
+    "deadline": "2026-10-31 18:00",
+    "isEnrollExamine": true,
+    "isHideList": false,
+    "isDraft": false,
+    "isOrgMember": false,
+    "limitCollegeNo": [],
+    "limitGrade": [],
+    "limitSpecialtyTypeOne": [],
+    "questionnaires": [],
+    "posts": []
+  },
+  "materials": {
+    "attachmentGroupUuid": null,
+    "publicityPicturesGroupUuid": null
+  }
+}

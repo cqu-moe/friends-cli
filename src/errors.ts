@@ -19,9 +19,28 @@ export interface WriteRecovery {
   draftId?: string;
   attachmentGroupUuids?: string[];
   resourceIds?: string[];
+  input?: unknown;
   completed?: string[];
   serverAcknowledged?: boolean | "unknown";
   readback?: "matched" | "unmatched" | "unavailable";
+  materialGroups?: {
+    attachmentGroupUuid: string | null;
+    publicityPicturesGroupUuid: string | null;
+  };
+  uploadedMaterials?: Array<{
+    kind: "attachment" | "publicity";
+    fileName: string;
+    resourceId: string | null;
+    serverAcknowledged: boolean;
+  }>;
+  inFlightMaterial?: {
+    kind: "attachment" | "publicity";
+    fileName: string;
+    resourceId: null;
+    serverAcknowledged: "unknown";
+  };
+  applicationReadback?: "matched" | "unmatched" | "unavailable";
+  submitRetries?: 0;
 }
 
 export class FriendsError extends Error {

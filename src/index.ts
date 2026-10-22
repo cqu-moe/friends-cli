@@ -6,6 +6,10 @@ import {
   createVerifiedOrganizationClient,
   type OrganizationSession,
 } from "./organizations.js";
+import {
+  createCourseOfferingClient,
+  type CourseOfferingSession,
+} from "./course-offering.js";
 
 export { FriendsError, FriendsErrorCode, exitCodeFor } from "./errors.js";
 export type { WriteRecovery } from "./errors.js";
@@ -33,25 +37,50 @@ export type {
   CourseQuestionnaireResult,
 } from "./course-participation.js";
 export * from "./certification-prepare.js";
-export { organizationId, validateOrganizationMemberListInput } from "./organizations.js";
+export {
+  organizationId,
+  organizationApplicationId,
+  validateOrganizationMemberListInput,
+  validateOrganizationApplicationListInput,
+} from "./organizations.js";
 export type {
   EditableOrganizationProfileField,
+  OrganizationApplicationDetail,
+  OrganizationApplicationId,
+  OrganizationApplicationListInput,
+  OrganizationApplicationPage,
+  OrganizationApplicationRelation,
+  OrganizationApplicationSummary,
+  OrganizationApplicationType,
+  OrganizationApplicationDecision,
+  PreparedOrganizationApplicationDecision,
+  DecidedOrganizationApplication,
+  OrganizationApplicationDecisionIntent,
   OrganizationAccess,
   OrganizationClient,
   OrganizationId,
   OrganizationMember,
   OrganizationMemberListInput,
   OrganizationMemberPage,
+  OrganizationLeaderChangeCandidate,
+  OrganizationLeaderChangeApplication,
+  OrganizationLeaderChangeInput,
+  OrganizationLeaderChangeState,
+  OrganizationLeaderChangeSubmitIntent,
   OrganizationProfile,
   OrganizationProfileChanges,
   OrganizationProfileSaveIntent,
   OrganizationSession,
   OrganizationSummary,
+  PreparedOrganizationLeaderChange,
   PreparedOrganizationProfileUpdate,
+  SubmittedOrganizationLeaderChange,
   SavedOrganizationProfile,
 } from "./organizations.js";
 export * from "./certification-api.js";
+export * from "./course-offering.js";
 export * from "./volunteer-reviews.js";
+
 
 export * from "./volunteer-offering.js";
 export * from "./volunteer-offering-api.js";
@@ -685,12 +714,23 @@ export function createFriendsSdk(options: {
         },
       });
     },
+    async createCourseOfferingClient(input: CourseOfferingSession) {
+      const session = snapshotSession(input);
+      await sdk.activateLocalContext({
+        token: session.token,
+        userLevel: session.userLevel,
+        expectedAccount: session.account.userNo,
+        selector: { levelNo: session.context.levelNo, unitNo: session.context.unit.unitNo },
+      });
+      return createCourseOfferingClient({ baseUrl, session, fetch: fetchImpl, timeoutMs });
+    },
   };
   return sdk;
 }
 export {createVolunteerActivityReviewClient} from './volunteer-activity-reviews.js';
 export type {VolunteerActivityReviewType, VolunteerActivityReviewInput, PreparedVolunteerActivityReview, VolunteerActivityReviewClientOptions} from './volunteer-activity-reviews.js';
 
+export * from "./organization-participation.js";
 export { createOrganizationActivityReviewClient, validateOrganizationActivityReviewInput } from "./organization-activity-reviews.js";
 export type { OrganizationActivityReviewKind, OrganizationOfferingReviewQuery, OrganizationRegistrationReviewQuery, OrganizationOfferingReviewInput, OrganizationRegistrationReviewInput, PreparedOrganizationActivityReview, OrganizationActivityReviewClientOptions } from "./organization-activity-reviews.js";
 

@@ -35,11 +35,31 @@ friends courses registrations apply <courseUuid> --via api --confirm apply --jso
 friends courses registrations withdraw <registrationUuid> --via api --confirm withdraw --json
 friends courses registrations exit <registrationUuid> --via api --confirm exit --json
 friends courses registrations apply <courseUuid> --via ego --ego-task-space 12 --ego-page p1 --confirm apply --json
+
+friends course-offering prepare --input course-application.json --json
+friends course-offering materials --input course-materials.json --via api --dry-run
+friends course-offering materials --input course-materials.json --via api --confirm
+friends course-offering next-step --input course-application.json --via api --confirm
+friends course-offering submit --input course-application.json --via api --confirm
+friends course-offering status <courseUuid> --json
+friends course-offering prepare-ego --input course-application.json \
+  --via ego --ego-task-space 16 --json
 friends organizations list --json
 friends organizations profile show <organizationUuid> --json
 friends organizations members <organizationUuid> --page 1 --page-size 10 --json
 friends organizations profile prepare <organizationUuid> \
   --via ego --ego-task-space 12 --ego-page p1 --blurb "新的组织简介" --json
+friends organizations approvals list <organizationUuid> --type join --json
+friends organizations approvals show <applicationUuid> --type join --json
+friends organizations approvals prepare <organizationUuid> <applicationUuid> \
+  --type join --decision approve --via ego --ego-task-space 12 --ego-page p1 \
+  --message "同意加入" --time 2026-10-22 --json
+friends organizations approvals decide <organizationUuid> <applicationUuid> \
+  --type join --decision approve --via api --dry-run --json
+friends organizations approvals decide <organizationUuid> <applicationUuid> \
+  --type join --decision approve --via api --yes --message "同意加入" \
+  --time 2026-10-22 --json
+
 friends volunteer-hours list --page 1 --page-size 10 --json
 friends volunteer-hours show <transcriptUuid> --json
 friends volunteer-certification-reviews list --via ego \
@@ -86,6 +106,14 @@ const session = await readVerifiedEgoSession({ taskSpaceId: 12, page: "p1" });
 const courses = await sdk.createCourseClient(session);
 await courses.list({ keyword: "周周艺" });
 
+const offering = await sdk.createCourseOfferingClient(session);
+const prepared = await offering.prepare(application);
+const staged = await offering.stageMaterials(prepared, files, {
+  via: "api",
+  intent: "stage-course-materials",
+  confirm: true,
+});
+
 const organizationClient = await sdk.createOrganizationClient(session);
 const organizations = await organizationClient.listManaged();
 const profile = await organizationClient.get(organizationId(organizations[0].id));
@@ -117,6 +145,20 @@ API 写入要求 `--via api` 和字面确认：报名 `--confirm apply`、撤销
 
 当前公开源码的角色选择块被注释，因此 Ego 校验所选角色并列为人工核对事项，不注入隐藏模型；日期等只读选择器也交给用户。撤销/退出只打开与当前个人记录唯一匹配的确认层。最终按钮、提交 API、快捷键和 `--yes` 都不能代替用户亲自提交。上述路径通过源码与受控 SDK/CLI/DOM 测试，真实 Ego、学校生产读写及用户最终提交由集中验收另行确认。
 
+## 课程开办申请
+
+以 [虚构输入示例](docs/examples/course-offering.json) 为结构参考，替换为当前账号、角色、身份单位、课程组织和字典代码。`prepare --input <file|->` 校验学校当前学年/学期、课程类型/级别与组织权限，并生成本地材料分组候选 UUID。它只查询来源数据，不创建学校申请；学校返回的学期编号保持原始类型。所有命令的输入、阶段和支持路径可通过 `friends schema course-offering.<command>` 查看。
+
+`materials` 独立接受 `materials.files: [{"kind":"attachment","path":"/absolute/syllabus.pdf"},{"kind":"publicity","path":"/absolute/poster.png"}]`，其他命令拒绝这个字段。上传走 `POST /gateway/ek-agg-mob/biz-common/protected-file-upload`，AppKey 为 `zovecenter-saip-ek-agg-mob`，multipart 字段是 `files`、`groupId`。使用材料阶段返回的 `groups` 更新申请的 `materials` 后再执行下一阶段。海报与附件在公开课程表单源码中未启用必填校验，可分别准备；若声明已有组，写入前会回查该组。海报最多五张，文件格式与大小按课程上传组件检查。`--dry-run` 只校验并进行必要只读查询。
+
+`next-step --via api --confirm` 新建时调用课程服务的 `POST apply/next-step`，已有 UUID 时调用 `PUT apply`；只保存第一步并返回课程 UUID，`finalSubmission:false`。将这个 UUID 放回申请的 `uuid`，再独立调用 `submit --via api --confirm`：复核身份、组织、材料和草稿/退回状态，调用 `POST apply/apply`，随后只读回查。不会自动从第一步续交。当前只支持空的问卷、岗位和院系/年级/学历限制数组；非空输入明确拒绝。`AUTO|MAN` 与签到设置独立校验；完整范围和限制见 [验收记录](docs/verification/2026-10-23-course-offering.md)。
+
+上传、第一步保存或最终提交响应丢失时返回 `UNKNOWN_OUTCOME`（退出码 7）。`error.recovery` 保留可另存为申请 JSON 的 `input`、已确认上传项、待确认文件、材料组和已有课程 UUID；已知 UUID 或上传组只做只读回查。即使回查匹配仍保持未知，不重试、不继续下一写操作，也不跨 API/Ego 续交。首次创建丢失 UUID 时无法按 ID 回查，必须人工核实。确认提交后回查失败，也会保留 `serverAcknowledged:true` 并以未知结果停止。
+
+`prepare-ego` 核验既有 Ego 页面中的账号、角色、路由和课程标识，只通过同源 iframe 内的可见控件准备名称、地址、介绍、类型、级别、组织和日期。既支持直接具名控件，也支持公开源码中的 Vant 标签、slot 和分行文本域；picker 等待选项选中及动画结束后才确认。已有人工值会保留，积分、认证设置、材料和下一页报名设置交给用户审阅；缺项及中途失败记录在 `missing`、`executionError` 中，然后 `handOff()`。`submitted:false`，不点“下一步/提交”，`--yes`、`--confirm` 无法绕过。dry-run 不导航、不录入、不点击、不交接。
+
+`status <courseUuid> --via api|ego` 直接查询 `GET apply/approve-detail/{uuid}`；Ego 来源先核验登录上下文。只投影必要课程、组织与流程状态，未知枚举不解释为获批。材料上传、第一步保存、提交确认和开办批准是不同结果。本任务仅完成源码核对与受控 SDK/CLI/iframe 验证，真实 Ego 和生产写入尚未验收。
+
 ## 志愿认证草稿
 
 `drafts create` 只读查询当前上下文可管理的志愿活动、活动详情和报名名单，然后绑定账号/角色/身份单位/活动创建本地草稿。草稿保存在仓库外专用目录，目录 `0700`、JSON `0600`，每次编辑通过临时文件和原子替换保存；过期 revision 的完整并发结果或 CLI patch 会保存为可恢复 conflict 文件。材料只记录本地路径、大小和 SHA-256，恢复时检查存在性与哈希；当前生产认证页面没有材料上传字段，包含材料的草稿不能通过正式完整校验。
@@ -127,9 +169,22 @@ API 写入要求 `--via api` 和字面确认：报名 `--confirm apply`、撤销
 
 `--dry-run` 仅验证和读取已有认证页，不导航、不点击、不交接。`drafts submit ... --via ego` 及 `--yes`、`--retry`、`--api-fallback` 都无法提交。遇到同名人员等无法从可见页面唯一确认的内容会明确列为待人工处理。
 
+### 捕获人工修改
+
+用户明确交还 Ego 控制后执行：
+
+```sh
+friends drafts capture <draftId> --via ego --ego-task-space 16 \
+  --ego-page p3 --expected-revision 1 --user-returned-control
+```
+
+命令重新核验当前身份、组织和活动，通过可见编辑弹窗只读核对学号、岗位及小时，保存本地新修订。它不会点击弹窗“保存”、上传或提交认证。过期修订保留冲突文件；未完成输入、页面缺失人员和不可恢复材料会列出待处理项。未捕获的网页修改不保证在关闭浏览器后保留。
+
+按需要用 `drafts edit` 明确修改选择和时长，再单独 `drafts prepare` 恢复录入。用户最终提交后只用 `certification status` 查询。详见[捕获验收](docs/verification/2026-10-22-certification-capture.md)。
+
 ## 输出与错误
 
-业务命令与 schema 输出为版本化 JSON；`auth login --method cqu-auth --no-open` 会先输出一行只含授权 URL 的 JSON 事件，完成后输出最终 JSON。`--help`/`--version` 使用普通文本，错误诊断写 stderr。退出码：0 成功，2 输入错误，3 认证失效，4 权限不足，5 业务拒绝/状态冲突，6 网络或协议错误。HTTP 200 但 `code !== "0"` 不是成功；HTTP 非 2xx 即使业务码为 0 也不是成功。
+业务命令与 schema 输出为版本化 JSON；`auth login --method cqu-auth --no-open` 会先输出一行只含授权 URL 的 JSON 事件，完成后输出最终 JSON。`--help`/`--version` 使用普通文本，错误诊断写 stderr。退出码：0 成功，2 输入错误，3 认证失效，4 权限不足，5 业务拒绝/状态冲突，6 网络或协议错误，7 写入结果不确定且禁止自动重试。HTTP 200 但 `code !== "0"` 不是成功；HTTP 非 2xx 即使业务码为 0 也不是成功。
 
 ## 验证边界
 
@@ -137,6 +192,7 @@ API 写入要求 `--via api` 和字面确认：报名 `--confirm apply`、撤销
 - CQU Auth 生产 native/public client 尚未注册，线上真实 Auth 登录、同意、ST 核销和学校 API 验收由后续配置与主线程验收完成；仓库内受控 HTTP 服务通过不能替代这些生产验收。
 - 课程接口和身份形状已按 2026-10-22 只读实测固化；接口资料中的历史 `verified` 不被当作当前生产验收。
 - 本仓库测试使用虚构 HTTP/Ego 场景。学校登录与只读查询单独记录于 [验收记录](docs/verification/2026-10-22-local-courses.md)，CI 通过不代表生产写入能力。
+- 课程开办的 SDK、真实 CLI 子进程和 strict Ego 脚本已用受控 HTTP/jsdom 场景验证；真实 Ego 页面、材料上传和最终开办写入尚未执行，不能宣称生产验收。
 - 查询类操作可使用 API；后续 Ego 写操作按阶段执行，需要审阅的表单只录入并交接，由用户亲自最终提交。
 - Ego 查询的受控 SDK/CLI 验收见 [Ego 课程查询验收](docs/verification/2026-10-22-ego-course-query.md)；真实已安装 Ego 与学校登录态实测由集中操作另行记录，不能由本仓库受控测试替代。
 
@@ -199,14 +255,13 @@ Ego prepare 同样用已核验会话新建 review SDK client 并重新读取学�
 
 Ego 资料修改只执行可见 prepare：先经现有页面会话核验权限，再检查当前路由；若目标组织编辑页已经打开则不重新导航。命令先取得页面快照，再从快照引用打开“组织简介及Logo”维护弹窗；若简介已有非空人工输入，会保留该值而不覆盖，只在空字段中填入请求的简介，随后把页面交接给用户。Logo 和背景图上传控件保留在页面上由用户人工处理；命令不点击最终保存、不调用 PUT，也不会把 `--yes` 用于 Ego prepare。
 
-## 捕获人工修改
+加入/退出申请查询分别调用生产前端已核实的 `POST /student-organization-apply/approve-list`：加入使用 `applyType: 1`，退出使用 `applyType: 0`，并绑定已验证组织 UUID。输出仅投影申请 UUID、组织 UUID、学号、姓名和当前流程消息。详情先调用 `GET /student-organization-apply/{uuid}`，要求返回的组织与学生标识存在，再按所选加入/退出列表分页核验申请类型，最后用 `organizationId + studentNo` 只读查询当前成员关系。普通成员上下文不能读取或审批申请。
 
-用户明确交还 Ego 控制后执行：
+申请决定只允许 `approve -> AGREEMENT` 和 `reject -> ADJUSTMENT`；生产页面可见的 `REJECTION`（打回）未纳入本任务公开契约。决定输入只接受不超过 100 字符的 `message` 和 `yyyy-MM-dd` 的 `time`。准备阶段会重新核验身份、刷新可管理组织、读取学校完整申请详情、确认组织归属、确认指定类型仍处于唯一“等待”流程状态，并读取当前关系；这些检查都不写入。API 决定必须独立给出 `--via api` 和 `--yes`，提交 exact payload `{identified,msg,handleType:"XS02",studentOrganizationInfoApproveAddReqDto:{...学校详情,uuid:申请UUID},time,uuid}`，执行一次 POST 后只读回查待办与关系，不重试 POST。POST 响应丢失时即使待办已消失也保留不可重试的 `UNKNOWN_OUTCOME`（退出码 7）并报告 readback 证据；学校已确认但回查失败同样是不可重试的 `UNKNOWN_OUTCOME`，已确认但申请仍在待办中则返回业务拒绝。
 
-```sh
-friends drafts capture <draftId> --via ego --ego-task-space 16 \
-  --ego-page p3 --expected-revision 1 --user-returned-control
-```
+Ego 审批准备只执行可见步骤：先检查当前路由和可见非空人工输入，必要时才导航到对应加入/退出详情页；取得全页快照后用快照引用打开“通过”或“拒绝”弹窗，核验弹窗标题，并只填写空的审批意见。若意见已有相同值则保留，已有不同人工值则原样保留；日期留给用户复核，不替用户修改。随后命令把页面交接给用户，不点击“确认”，不调用审批 POST，`--yes` 会被拒绝。当前仓库只完成虚构 HTTP 与 strict DOM fixture 验收；真实 Ego、学校登录态只读查询、明确授权的 API 写入和用户人工提交未在本任务中执行。
+
+组织加入/退出审批的 Ego 准备方法 `prepareOrganizationApplicationDecisionInEgo` 从 Node 入口导出；调用必须包含 `organizationId`、`applicationId`、`type`、`decision`、`message`、`time` 及匹配的详情 `route`。公开方法自行重新验证现有 Ego 会话、组织管理权限、申请归属及等待状态，不依赖 CLI 先行校验。准备阶段读取同源 iframe 的实际表单，使用当前快照的 `[ref=N]` 定位可见动作，仅填空的审批意见，保留其他人工字段与已填意见；不覆盖其他申请页。返回 `submitted:false` 并把日期与最终确认交给用户。返回值不把固定计数当作真实零写入证据。
 
 命令重新核验当前身份、组织和活动，通过可见编辑弹窗只读核对学号、岗位及小时，保存本地新修订。它不会点击弹窗“保存”、上传或提交认证。过期修订保留冲突文件；未完成输入、页面缺失人员和不可恢复材料会列出待处理项。未捕获的网页修改不保证在关闭浏览器后保留。
 
@@ -222,6 +277,54 @@ friends volunteer activity-reviews decide <申请UUID> --type offering --decisio
 ```
 
 `review.json` 含 `message`、`time`（YYYY-MM-DD）；开办审批还需 `isSafeEducation: 0|1`，打回多个节点时需 `callbackActivityId`。API 实际决定须显式 `--yes`；Ego 仅准备并交接，用户亲自点最终确定。响应不确定返回 exit 7，不会自动重试。见 [#11 验收记录](docs/verification/2026-10-22-volunteer-activity-reviews.md)。
+
+### 组织活动参与
+
+`createOrganizationParticipationClient` 提供 `list/get/prepare/execute`；Node 导出 `prepareOrganizationParticipationInEgo`。活动与报名记录 ID 独立，开放窗口/个人状态从当前学校会话读取。
+
+```sh
+friends organization-participation list --keyword 志愿 --via api
+friends organization-participation list --mine --via ego --ego-task-space 16 --ego-page p3
+friends organization-participation show <activity-id> --via api
+friends organization-participation register <activity-id> --via api --input answers.json --dry-run
+friends organization-participation register <activity-id> --via api --input answers.json --yes
+friends organization-participation exit <activity-id> --via api --yes
+friends organization-participation prepare <activity-id> --action register --via ego --ego-task-space 16 --ego-page p3 --input answers.json
+```
+
+`answers.json` 为问卷 ID 到字符串/字符串数组的映射；附件答案为已存在且可读取的学校资源组 ID。Ego 填写文本、数字和选择项，保留人工值；日期和附件需人工完成，最终提交始终由用户本人操作。`show` 与 `list --mine` 可回查个人记录；未知结果不自动重试。
+
+## 组织负责人变更申请（#23）
+
+该流程使用 `responsiblePersonChangeInfo`，与加入/退出申请审批分开。候选人来自指定组织的 `new-response-person/{organizationUuid}?key=...`，职务列表使用组织详情中的 `labelCode` 查询。准备和提交都重新验证账号、身份、当前负责人权限、候选学号、组织归属、职务配置与现有申请状态；管理员身份本身不足以发起变更。
+
+```sh
+friends organizations leader-change candidates <organizationUuid> --keyword <studentNo> --via api
+friends organizations leader-change status <organizationUuid> --via ego --ego-task-space 16 --ego-page p1
+friends organizations leader-change submit <organizationUuid> --via api --input change.json --dry-run
+friends organizations leader-change submit <organizationUuid> --via api --input change.json --yes
+friends organizations leader-change prepare <organizationUuid> --via ego --ego-task-space 16 --ego-page p1 --input change.json
+```
+
+`change.json` 只接受下列字段，`--input -` 可以读取 stdin；也可使用同名 kebab-case 参数，例如 `--candidate-student-no`、`--new-responsible-phone`：
+
+```json
+{
+  "candidateStudentNo": "20210002",
+  "newResponsiblePhone": "13800000002",
+  "newResponsiblePolitical": "共青团员",
+  "newPostUuid": "post-fixture",
+  "reason": "毕业交接"
+}
+```
+
+手机号遵守生产表单的 `^1\d{10}$`；组织开启职务分工时必须指定已查询到的职务 UUID；原因最多 256 字符，按源码保持可选。候选列表不含完整政治面貌资料，API 路径要求调用者提供并核实该资料。Ego 只比对页面回填的政治面貌，无法确认时标为待人工复核，不修改只读政治面貌字段。
+
+Ego 准备要求指定页面已打开对应组织的 `/mobile/groupManage/studentLeaderApply?uuid=...` 表单。命令在同源 iframe 里通过可见选人、搜索、radio 与职务选择器录入，文本使用实际的 `input[name="newResponsiblePhone"]` 和原因 textarea；不会导航覆盖其他表单。已有人工候选、电话、原因或职务会保留；同名的既有候选不能仅凭姓名证明学号，交给用户核对。`manualFields` 列出尚待复核的内容；`submitted:false` 表示最终“提交申请”必须由用户亲自点击。`prepare --yes` 和 `submit --via ego` 都拒绝，`prepare --dry-run` 不导航、不点击、不填写、不交接。
+
+SDK 根入口的组织 client 提供 `listLeaderChangeCandidates`、`getLeaderChangeState`、`prepareLeaderChange` 和 `submitLeaderChange`。写方法需要独立 `{via:"api",intent:"submit-organization-leader-change",confirm:true}`，不能使用 Ego 准备作为 API 写授权。可见准备从 Node 入口导出 `prepareOrganizationLeaderChangeInEgo({input,taskSpaceId,page})`，并自行读取新鲜的 Ego 会话和核实学校权限。
+
+API 只提交一次申请，再分别回查申请及当前组织负责人。`status:"submitted"` 不代表审批通过，`responsiblePersonChanged` 单独表示查询到的实际负责人是否为候选学号。响应丢失、超时、已确认但回查丢失或不匹配均保持不可重试的 `UNKNOWN_OUTCOME`（exit 7），含组织/已知申请标识与回查证据；不会重交、跨路径续交或回滚。详见 [#23 验收记录](docs/verification/2026-10-23-organization-leader-change.md)。
 
 
 ## 组织活动开办与报名审批（#20）
