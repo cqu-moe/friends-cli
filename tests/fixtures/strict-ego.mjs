@@ -3,6 +3,7 @@ import {JSDOM} from 'jsdom';
 import {readFile,writeFile} from 'node:fs/promises';
 let script='';for await(const chunk of process.stdin)script+=chunk;
 const configuration=JSON.parse(await readFile(process.env.FRIENDS_EGO_FIXTURE_CONFIG,'utf8'));
+configuration.iframe ||= configuration.frame;
 if(!configuration.executeSession&&script.includes('FRIENDS_CLI_EGO_SESSION:')) {
   console.log('FRIENDS_CLI_EGO_SESSION:'+JSON.stringify({token:'ego-fixture-token',userLevel:'XS'}));
   process.exit(0);
@@ -17,7 +18,7 @@ function initialize(w){
     return fetch(new URL(url,configuration.url),init);
   };
   w.localStorage.setItem('token_str',configuration.token??'ego-fixture-token');
-  w.localStorage.setItem('userLevel_str','XS');
+  w.localStorage.setItem('userLevel_str',configuration.userLevel??'XS');
   w.localStorage.setItem('account_str',configuration.accountUserNo??'20210001');
   w.localStorage.setItem('loginModel_str','STUDENT');
   w.localStorage.setItem('userInfo_obj',JSON.stringify({userNo:configuration.accountUserNo??'20210001'}));
@@ -106,8 +107,8 @@ const page={
     if(element.disabled||element.readOnly)throw new Error('Cannot fill disabled or readonly input');
     stats.fills.push(selector);
     element.value=value;
-    element.dispatchEvent(new w.Event('input',{bubbles:true}));
-    element.dispatchEvent(new w.Event('change',{bubbles:true}));
+    element.dispatchEvent(new content.Event('input',{bubbles:true}));
+    element.dispatchEvent(new content.Event('change',{bubbles:true}));
   },
   async waitForSelector(selector,{state='visible'}={}){
     active();
