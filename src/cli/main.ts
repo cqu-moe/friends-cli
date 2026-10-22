@@ -17,10 +17,12 @@ import {
 } from "../node.js";
 import { resolveQuerySession } from "./session.js";
 import { draftSchemas, registerDraftCommands } from "./drafts.js";
+import { organizationSchemas, registerOrganizationCommands } from "./organizations.js";
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
   ...draftSchemas,
+  ...organizationSchemas,
   errors: {
     operation: "errors", readonly:true, permission:"none", phases:["inspect"], supportedVia:["local"],
     exitCodes: {0:"success", 2:"INVALID_INPUT", 3:"AUTH_REQUIRED", 4:"PERMISSION_DENIED", 5:"BUSINESS_REJECTED", 6:"NETWORK_PROTOCOL_ERROR", 7:"UNKNOWN_OUTCOME"},
@@ -123,7 +125,7 @@ function queryMeta(source: {
 
 const program = new Command()
   .name("friends")
-  .description("Query courses and manage local volunteer certification drafts")
+  .description("Query courses and manage local volunteer certification drafts and student organizations")
   .version("0.1.0")
   .configureOutput({
     writeOut: (text) => process.stdout.write(text),
@@ -290,6 +292,10 @@ courses
   });
 
 registerDraftCommands(program, {
+  baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+});
+
+registerOrganizationCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
 });
 

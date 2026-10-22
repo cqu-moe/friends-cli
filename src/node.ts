@@ -59,12 +59,11 @@ function parseToken(value: unknown): string {
   return "";
 }
 
-async function runEgo(options: {
+async function runEgoProcess(options: {
   script: string;
   command: string;
   timeoutMs: number;
-  missingSessionMessage?: string;
-}): Promise<BrowserOutput> {
+}): Promise<string> {
   const child = spawn(options.command, ["nodejs"], { stdio: ["pipe", "pipe", "pipe"] });
   let stdout = "";
   let stderr = "";
@@ -93,14 +92,28 @@ async function runEgo(options: {
   if (exitCode !== 0) {
     throw safeError("The Ego friends login bridge failed");
   }
+  return `${stdout}\n${stderr}`;
+}
+
+function singleMarker(output: string, marker: string): unknown {
+  const lines = output.split("\n").filter(line => line.startsWith(marker));
+  return lines.length === 1 ? JSON.parse(lines[0].slice(marker.length)) : null;
+}
+
+async function runEgo(options: {
+  script: string;
+  command: string;
+  timeoutMs: number;
+  missingSessionMessage?: string;
+}): Promise<BrowserOutput> {
+  const output = await runEgoProcess(options);
   const marker = "FRIENDS_CLI_EGO_SESSION:";
-  const lines = `${stdout}\n${stderr}`.split("\n").filter(line => line.startsWith(marker));
-  const lastLine = lines.length === 1 ? lines[0].slice(marker.length) : undefined;
-  if (lastLine === undefined && options.missingSessionMessage !== undefined) {
+  const hasMarker = output.split("\n").some(line => line.startsWith(marker));
+  if (!hasMarker && options.missingSessionMessage !== undefined) {
     throw safeError(options.missingSessionMessage);
   }
   try {
-    const parsed = lastLine === undefined ? null : JSON.parse(lastLine) as Record<string, unknown>;
+    const parsed = singleMarker(output, marker) as Record<string, unknown> | null;
     if (parsed?.error === "NO_EXISTING_FRIENDS_SESSION") {
       throw safeError(options.missingSessionMessage ?? "No existing Ego friends session is ready");
     }
@@ -116,6 +129,55 @@ async function runEgo(options: {
     // Use the safe generic error below.
   }
   throw safeError("The Ego friends login bridge returned an invalid session");
+}
+
+export async function prepareOrganizationProfileInEgo(options: {
+  taskSpaceId: number;
+  page?: string;
+  route: string;
+  blurb?: string;
+  timeoutMs?: number;
+  command?: string;
+}): Promise<{ route: string }> {
+  if (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1) {
+    throw safeError("Invalid Ego task space", FriendsErrorCode.InvalidInput);
+  }
+  const page = options.page ?? "p1";
+  if (!/^p[1-9][0-9]*$/.test(page)) {
+    throw safeError("Invalid Ego page label", FriendsErrorCode.InvalidInput);
+  }
+  const userWaitMs = options.timeoutMs ?? 300_000;
+  if (!Number.isSafeInteger(userWaitMs) || userWaitMs < 1) {
+    throw safeError("Invalid Ego timeout", FriendsErrorCode.InvalidInput);
+  }
+  if (!options.route.startsWith("/mobile/groupManage/") || /[\\\r\n\0]/.test(options.route)) {
+    throw safeError("Invalid organization profile edit route", FriendsErrorCode.InvalidInput);
+  }
+  const fillBlurb = options.blurb === undefined ? "" : `
+await page.locator("textarea").last().fill(${JSON.stringify(options.blurb)});
+`;
+  const script = `
+const task = await taskSpace(${options.taskSpaceId});
+const page = task.page(${JSON.stringify(page)});
+await page.goto(${JSON.stringify(`https://friends.cqu.edu.cn${options.route}`)});
+await page.waitForLoadState("networkidle");
+await page.getByText("组织简介及Logo").first().click();
+await page.waitForTimeout(200);${fillBlurb}
+await task.handOff();
+console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({ route: ${JSON.stringify(options.route)} }));
+`;
+  const output = await runEgoProcess({
+    script,
+    command: options.command ?? "ego-browser",
+    timeoutMs: userWaitMs + 30_000,
+  });
+  try {
+    const parsed = singleMarker(output, "FRIENDS_CLI_EGO_PREPARED:") as { route?: unknown } | null;
+    if (parsed !== null && parsed.route === options.route) return { route: parsed.route };
+  } catch {
+    // Return the generic bridge failure below.
+  }
+  throw safeError("The Ego organization profile preparation did not return its route");
 }
 
 export async function readEgoSession(options: {
