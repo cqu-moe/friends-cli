@@ -264,9 +264,10 @@ export async function installCourseOfferingEgoFixture(home, token = "course-fixt
     const control = select
       ? options.sourceSlots ? `<div data-model="${key}">请选择</div>` : `<input${name} readonly style="pointer-events:none" data-model="${key}">`
       : multiline ? `<textarea${name} data-model="${key}"></textarea>` : `<input${name} data-model="${key}">`;
+    const slot = select && options.sourceSlots ? `<div class="van-field__control van-field__control--custom"${options.previousPreparation ? ` data-friends-course-field="${key}"` : ""}>${control}</div>` : control;
     const title = `<div class="van-cell__title van-field__label"><label>${label}</label></div>`;
     if (options.sourceSlots && multiline) return `<div class="borderf5"><div class="van-cell">${title}</div></div><div class="borderf5"><div class="van-cell">${control}</div></div>`;
-    return `<div class="van-cell">${title}<div class="van-cell__value"><div class="van-field__body">${control}</div></div></div>`;
+    return `<div class="van-cell">${title}<div class="van-cell__value"><div class="van-field__body">${slot}</div></div></div>`;
   };
   const html = `<!doctype html><meta charset="utf-8"><div class="cmine"><form>
     ${field('curriculumName','课程名称')}${field('curriculumType','课程类型',true)}${field('curriculumLevel','课程级别',true)}${field('organizationName','主办方',true)}
@@ -291,8 +292,16 @@ export async function installCourseOfferingEgoFixture(home, token = "course-fixt
       done.onclick=()=>{apply(chosen);popup.remove();};document.body.append(popup);
     }
     const selections={curriculumType:${JSON.stringify(options.missingType ? ['其他类型'] : ['其他类型','通识课'])},curriculumLevel:['其他级别','校级'],organizationName:['其他组织','示例课程组织']};
-    for(const [key,values] of Object.entries(selections)) document.querySelector('[data-model="'+key+'"]').parentElement.onclick=()=>picker([values],v=>{model[key]=v[0];setValue(document.querySelector('[data-model="'+key+'"]'),v[0]);});
-    for(const key of ['beginTime','endTime']) document.querySelector('[data-model="'+key+'"]').parentElement.onclick=()=>picker([['2026'],['09','10'],['01','31'],['08','18'],['00']],v=>{const value=v[0]+'-'+v[1]+'-'+v[2]+' '+v[3]+':'+v[4];model[key]=value;setValue(document.querySelector('[data-model="'+key+'"]'),value);});
+    for(const [key,values] of Object.entries(selections)) {
+      const control=document.querySelector('[data-model="'+key+'"]');
+      const trigger=control.matches('input')?control.parentElement:control;
+      trigger.onclick=()=>picker([values],v=>{model[key]=v[0];setValue(control,v[0]);});
+    }
+    for(const key of ['beginTime','endTime']) {
+      const control=document.querySelector('[data-model="'+key+'"]');
+      const trigger=control.matches('input')?control.parentElement:control;
+      trigger.onclick=()=>picker([['2026'],['09','10'],['01','31'],['08','18'],['00']],v=>{const value=v[0]+'-'+v[1]+'-'+v[2]+' '+v[3]+':'+v[4];model[key]=value;setValue(control,value);});
+    }
     document.querySelector('#next').onclick=()=>fetch('/business/course-next-step',{method:'POST',body:JSON.stringify(model)});
     </script></div>`;
   const htmlPath = join(home, "course.html");

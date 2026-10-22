@@ -126,7 +126,7 @@ test("course offering CLI prepares a visible Ego page and hands it off without s
   const upstream = await courseOfferingSchool(t);
   const { home, env } = await courseOfferingCliSetup(t, upstream);
   const url = `${upstream.baseUrl.replace("/gateway", "")}/mobile/course/courseInfo?type=add`;
-  const ego = await installCourseOfferingEgoFixture(home, "ego-fixture-token", url);
+  const ego = await installCourseOfferingEgoFixture(home, "ego-fixture-token", url, { sourceSlots: true, previousPreparation: true });
   const egoEnv = {
     ...env,
     FRIENDS_EGO_FIXTURE_CONFIG: ego.config,
@@ -144,7 +144,7 @@ test("course offering CLI prepares a visible Ego page and hands it off without s
   assert.equal(result.stderr, "");
   assert.equal(result.json.data.submitted, false);
   assert.equal(result.json.data.handoff, "completed");
-  assert.equal(result.json.data.finalSubmitActions, 0);
+  assert.equal(result.json.data.executionError, null);
   assert.equal(
     upstream.requests.filter((request) => request.url.endsWith("/mob/organization/drop-down")).length,
     1,
@@ -153,6 +153,12 @@ test("course offering CLI prepares a visible Ego page and hands it off without s
   assert.equal(result.stdout.includes("course-fixture-token"), false);
   assert.equal(result.stdout.includes("ego-fixture-token"), false);
   const observed = JSON.parse(await readFile(ego.result, "utf8"));
+  assert.equal(observed.model.curriculumType, "通识课");
+  assert.equal(observed.model.curriculumLevel, "校级");
+  assert.equal(observed.model.organizationName, "示例课程组织");
+  assert.equal(observed.model.beginTime, "2026-10-01 08:00");
+  assert.equal(observed.model.endTime, "2026-10-31 18:00");
+  assert.equal(observed.submits, 0);
   assert.equal(observed.remoteWrites, 0);
   assert.equal(observed.handoffs, 1);
   assert.equal(observed.clicks.some(selector => selector.includes(".field-select input")), false);

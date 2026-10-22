@@ -87,13 +87,14 @@ export async function prepareCourseOfferingPage(task: Task, input: Input) {
     const d = document.querySelector("iframe")?.contentDocument ?? document;
     const normalize = (s: string | null | undefined) => s?.replace(/\s+/g, "") ?? "";
     const cells = Array.from(d.querySelectorAll(".van-cell"));
+    for (const node of d.querySelectorAll("[data-friends-course-field]")) node.removeAttribute("data-friends-course-field");
     for (const [field, label] of Object.entries(labels)) {
       const named = Array.from(d.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input[name],textarea[name]")).find(n => n.name === field || n.name === label);
       const cell = named?.closest(".van-cell") ?? cells.find(n => normalize(n.querySelector(".van-cell__title")?.textContent) === label);
       const textField = ["curriculumName", "curriculumPlace", "curriculumContent"].includes(field);
       const target = textField
         ? named ?? cell?.querySelector("input:not([readonly]),textarea:not([readonly])") ?? cell?.closest(".borderf5")?.nextElementSibling?.querySelector("input:not([readonly]),textarea:not([readonly])")
-        : named?.closest(".field-select") ?? cell?.querySelector(".van-field__body > div") ?? cell?.querySelector(".van-field__body");
+        : cell?.querySelector(".van-field__body > .van-field__control--custom > div") ?? named?.closest(".field-select") ?? cell?.querySelector(".van-field__body > div") ?? cell?.querySelector(".van-field__body");
       target?.setAttribute("data-friends-course-field", field);
     }
     return true;
@@ -157,5 +158,5 @@ export async function prepareCourseOfferingPage(task: Task, input: Input) {
   await page.snapshot();
   await task.handOff();
   return { status: "awaiting-user" as const, submitted: false as const, handoff: "completed" as const,
-    actions, missing, executionError, page: final.fields, finalSubmitActions: 0 };
+    actions, missing, executionError, page: final.fields };
 }

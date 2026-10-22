@@ -71,18 +71,27 @@ test("course offering Ego preparation fails closed on a different visible sessio
 
 
 test("course offering Ego preserves human input with source slot controls and reports remaining manual work", async (t) => {
-  const fixture = await setup(t, { humanName: "人工课程名称", sourceSlots: true });
+  const fixture = await setup(t, { humanName: "人工课程名称", sourceSlots: true, previousPreparation: true });
   const result = await prepareCourseOfferingInEgo(fixture.options);
   assert.equal(result.executionError, null);
   assert.equal(result.page.curriculumName, "人工课程名称");
   assert.equal(result.page.curriculumType, "通识课");
+  assert.equal(result.page.curriculumLevel, "校级");
   assert.equal(result.page.organizationName, "示例课程组织");
+  assert.equal(result.page.beginTime, "2026-10-01 08:00");
+  assert.equal(result.page.endTime, "2026-10-31 18:00");
   assert.ok(result.actions.some(a => a.field === "curriculumName" && a.action === "human-value-preserved"));
   assert.ok(result.missing.includes("role"));
   assert.ok(result.missing.includes("human-review:report-settings-and-final-submit"));
   const observed = await fixture.observed();
   assert.equal(observed.model.curriculumName, "人工课程名称");
   assert.equal(observed.model.curriculumContent, "受控课程介绍");
+  assert.equal(observed.model.curriculumType, "通识课");
+  assert.equal(observed.model.curriculumLevel, "校级");
+  assert.equal(observed.model.organizationName, "示例课程组织");
+  assert.equal(observed.model.beginTime, "2026-10-01 08:00");
+  assert.equal(observed.model.endTime, "2026-10-31 18:00");
+  assert.equal(observed.submits, 0);
   assert.equal(observed.remoteWrites, 0);
   assert.equal(observed.handoffs, 1);
 });

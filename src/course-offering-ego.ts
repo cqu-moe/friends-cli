@@ -13,7 +13,6 @@ export interface CourseOfferingEgoResult {
   missing?: string[];
   executionError?: { code: string; message: string } | null;
   prepared?: PreparedCourseOfferingApplication;
-  finalSubmitActions: 0;
 }
 
 interface Options {
@@ -98,7 +97,7 @@ export async function prepareCourseOfferingInEgo(options: Options): Promise<Cour
   const client = await createFriendsSdk({ baseUrl }).createCourseOfferingClient(options.session);
   const prepared = await client.prepare(options.application);
   if (options.dryRun) {
-    return { status: "ready", submitted: false, dryRun: true, prepared, finalSubmitActions: 0 };
+    return { status: "ready", submitted: false, dryRun: true, prepared };
   }
   const runtime = new URL("./course-offering-page.js", import.meta.url).href;
   const input = {
@@ -133,8 +132,7 @@ try {
   if (
     raw.status !== "awaiting-user" ||
     raw.submitted !== false ||
-    raw.handoff !== "completed" ||
-    raw.finalSubmitActions !== 0
+    raw.handoff !== "completed"
   ) {
     throw error("The Ego course preparation did not preserve the required handoff boundary", FriendsErrorCode.UnknownOutcome);
   }

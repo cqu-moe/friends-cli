@@ -50,3 +50,12 @@ node --test tests/course-offering.test.js tests/course-offering-cli.test.js test
 ## 尚未验收的层次
 
 真实课程 Ego 页面和 picker 兼容性、学校当前登录态的课程开办只读查询、明确授权的生产材料上传/API 写入、用户最终人工提交和生产服务器回查均未执行。没有 CI、生产部署或获批结论。WAF/native Auth 限制由主集成任务记录，本任务没有修改 WAF。生产层次必须由主任务分别记录，不能由上述受控测试替代。
+
+
+## 真实页面反馈后的内层控件修复
+
+主任务随后报告：真实 SDK prepare 已使用学校组织和字典成功，但 p3 填完名称、地点和介绍后，点击课程类型未打开 picker。公开源码 `CourseInfo.ce5eecb6.js.txt` 第 177–211 行确认，类型、级别、主办方及两个日期的回调绑定在 Vant custom-control 的内层 slot div；外层容器不是点击目标。主任务另已验证直接点该内层元素能打开真实六选项 picker，确认按钮文字为“确认”。这些是主任务提供的实测反馈，本 worker 没有访问真实浏览器。
+
+修复将定位标记落到 `.van-field__body > .van-field__control--custom > div`，保留旧具名控件的支持；再次准备前只清除本助手以前的定位标记，防止旧外层和新内层同时匹配，保留表单中的已有值。严格 iframe fixture 仅让内层节点绑定打开回调，外层 click 不会打开；还模拟上次准备遗留的外层标记。旧实现分别复现 picker 超时和重复匹配，修复后公开 SDK 与真实 CLI 回归通过，五个选择/日期值均由实际 DOM 回调写入独立表单模型。
+
+移除 #14 运行时及 Node 结果类型、桥接检查中的硬编码 `finalSubmitActions:0`。提交数是受控 fixture 的观测值；测试断言真实 fixture 的 `submits` 和 `remoteWrites` 均为零，运行时结果不再伪装成真实浏览器计数。补丁仍不上传、不点下一步、不最终提交；真实页面补丁复验由主任务单独记录。
