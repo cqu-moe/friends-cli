@@ -87,6 +87,10 @@ const page={
   },
   async waitForFunction(fn,arg){
     active();
+    if(configuration.unreliablePickerWait&&typeof arg==='boolean'){
+      await new Promise(resolve=>setTimeout(resolve,30));
+      throw new Error('Fixture function wait lost the live iframe popup transition');
+    }
     w.__argument=structuredClone(arg);
     for(let attempt=0;attempt<30;attempt++){
       if(await w.eval(`(${fn.toString()})(__argument)`))return;
@@ -114,6 +118,10 @@ const page={
   },
   async waitForSelector(selector,{state='visible'}={}){
     active();
+    if(configuration.unreliablePickerWait&&selector.includes('.van-picker')&&state==='visible'){
+      await new Promise(resolve=>setTimeout(resolve,30));
+      throw new Error('Fixture locator wait lost the live iframe picker');
+    }
     if(matches(selector,true).length>1)throw new Error('Ambiguous wait selector including hidden elements');
     for(let i=0;i<30;i++){
       const list=matches(selector);

@@ -257,16 +257,17 @@ export async function courseOfferingCliSetup(t, upstream) {
 }
 
 export async function installCourseOfferingEgoFixture(home, token = "course-fixture-token", url = "https://friends.cqu.edu.cn/mobile/course/courseInfo?type=add", options = {}) {
-  const initial = { curriculumName: options.humanName ?? "", curriculumPlace: "", curriculumContent: "", curriculumType: "", curriculumLevel: "", organizationName: "", beginTime: "", endTime: "" };
+  const initial = { curriculumName: options.humanName ?? "", curriculumPlace: "", curriculumContent: "", curriculumType: "", curriculumLevel: "", organizationName: "", beginTime: options.humanBeginTime ?? "", endTime: "" };
   const field = (key, label, select = false) => {
     const multiline = key === "curriculumName" || key === "curriculumContent";
     const name = options.sourceSlots ? "" : ` name="${label}"`;
     const control = select
       ? options.sourceSlots ? `<div data-model="${key}">请选择</div>` : `<input${name} readonly style="pointer-events:none" data-model="${key}">`
       : multiline ? `<textarea${name} data-model="${key}"></textarea>` : `<input${name} data-model="${key}">`;
+    const slot = select && options.sourceSlots ? `<div class="van-field__control van-field__control--custom"${options.previousPreparation ? ` data-friends-course-field="${key}"` : ""}>${control}</div>` : control;
     const title = `<div class="van-cell__title van-field__label"><label>${label}</label></div>`;
     if (options.sourceSlots && multiline) return `<div class="borderf5"><div class="van-cell">${title}</div></div><div class="borderf5"><div class="van-cell">${control}</div></div>`;
-    return `<div class="van-cell">${title}<div class="van-cell__value"><div class="van-field__body">${control}</div></div></div>`;
+    return `<div class="van-cell">${title}<div class="van-cell__value"><div class="van-field__body">${slot}</div></div></div>`;
   };
   const html = `<!doctype html><meta charset="utf-8"><div class="cmine"><form>
     ${field('curriculumName','课程名称')}${field('curriculumType','课程类型',true)}${field('curriculumLevel','课程级别',true)}${field('organizationName','主办方',true)}
@@ -279,8 +280,8 @@ export async function installCourseOfferingEgoFixture(home, token = "course-fixt
     const model = window.__courseForm = ${JSON.stringify(initial)};
     function setValue(node,value){if(node.matches('input,textarea'))node.value=value;else node.textContent=value||'请选择';}
     for (const node of document.querySelectorAll('[data-model]')) { setValue(node,model[node.dataset.model]); node.oninput=()=>model[node.dataset.model]=node.value; }
-    function picker(columns, apply) {
-      const popup=document.createElement('div'); popup.className='van-popup'; const panel=document.createElement('div'); panel.className='van-picker'; popup.append(panel);
+    function picker(columns, apply, openingMs=0) {
+      const popup=document.createElement('div'); popup.className='van-popup'; const panel=document.createElement('div'); panel.className='van-picker'; panel.getBoundingClientRect=()=>({width:858,height:308}); popup.append(panel); popup.style.display='none';let opening=openingMs>0;popup.getAnimations=()=>[{playState:opening?'running':'finished'}];if(opening)setTimeout(()=>opening=false,openingMs);
       const done=document.createElement('button'); done.type='button'; done.className='van-picker__confirm'; done.textContent='确认'; panel.append(done);
       const all=document.createElement('div'); all.className='van-picker__columns'; panel.append(all); const chosen=columns.map(c=>c[0]); const moving=columns.map(()=>false);
       columns.forEach((items,index)=>{ const col=document.createElement('div'); col.className='van-picker-column'; all.append(col); const list=document.createElement('ul'); list.className='van-picker-column__wrapper'; col.append(list); list.getAnimations=()=>[{playState:moving[index]?'running':'finished'}];
@@ -288,11 +289,20 @@ export async function installCourseOfferingEgoFixture(home, token = "course-fixt
           option.onclick=()=>{ moving[index]=true; list.querySelectorAll('li').forEach(n=>n.classList.remove('van-picker-column__item--selected')); option.classList.add('van-picker-column__item--selected'); setTimeout(()=>{chosen[index]=item;moving[index]=false;},25); };
         });
       });
-      done.onclick=()=>{apply(chosen);popup.remove();};document.body.append(popup);
+      done.onclick=()=>{if(opening)return;apply(chosen);setTimeout(()=>{popup.style.display='none'},20);};document.body.append(popup);setTimeout(()=>{popup.style.display='block'},20);return popup;
     }
-    const selections={curriculumType:${JSON.stringify(options.missingType ? ['其他类型'] : ['其他类型','通识课'])},curriculumLevel:['其他级别','校级'],organizationName:['其他组织','示例课程组织']};
-    for(const [key,values] of Object.entries(selections)) document.querySelector('[data-model="'+key+'"]').parentElement.onclick=()=>picker([values],v=>{model[key]=v[0];setValue(document.querySelector('[data-model="'+key+'"]'),v[0]);});
-    for(const key of ['beginTime','endTime']) document.querySelector('[data-model="'+key+'"]').parentElement.onclick=()=>picker([['2026'],['09','10'],['01','31'],['08','18'],['00']],v=>{const value=v[0]+'-'+v[1]+'-'+v[2]+' '+v[3]+':'+v[4];model[key]=value;setValue(document.querySelector('[data-model="'+key+'"]'),value);});
+    const selections={curriculumType:${JSON.stringify(options.missingType ? ['其他类型'] : ['其他类型','通识课'])},curriculumLevel:${JSON.stringify(options.openingAnimation ? ['校级','其他级别'] : ['其他级别','校级'])},organizationName:['其他组织','示例课程组织']};
+    for(const [key,values] of Object.entries(selections)) {
+      const control=document.querySelector('[data-model="'+key+'"]');
+      const trigger=control.matches('input')?control.parentElement:control;
+      trigger.onclick=()=>{if(Array.from(document.querySelectorAll('.van-popup')).some(p=>p.style.display!=='none'))return;picker([values],v=>{model[key]=v[0];setValue(control,v[0]);},key==='curriculumLevel'&&${JSON.stringify(options.openingAnimation === true)}?250:0);};
+    }
+    for(const key of ['beginTime','endTime']) {
+      const control=document.querySelector('[data-model="'+key+'"]');
+      const trigger=control.matches('input')?control.parentElement:control;
+      trigger.onclick=()=>{if(Array.from(document.querySelectorAll('.van-popup')).some(p=>p.style.display!=='none'))return;picker([['2026'],['09','10'],['01','31'],['08','18'],['00']],v=>{const value=v[0]+'-'+v[1]+'-'+v[2]+' '+v[3]+':'+v[4]+':00';model[key]=value;setValue(control,value);});};
+    }
+    if(${JSON.stringify(options.openPicker === true)}) picker([['人工选项']],()=>{}).style.display='block';
     document.querySelector('#next').onclick=()=>fetch('/business/course-next-step',{method:'POST',body:JSON.stringify(model)});
     </script></div>`;
   const htmlPath = join(home, "course.html");
@@ -301,7 +311,7 @@ export async function installCourseOfferingEgoFixture(home, token = "course-fixt
   const bin = join(home, "bin");
   const command = join(bin, "ego-browser");
   await writeFile(htmlPath, html);
-  await writeFile(config, JSON.stringify({ html: htmlPath, result, token, url, outerUrl: `${new URL(url).origin}/mobile/stuhall`, frame: true, executeSession: true }));
+  await writeFile(config, JSON.stringify({ html: htmlPath, result, token, url, outerUrl: `${new URL(url).origin}/mobile/stuhall`, frame: true, executeSession: true, unreliablePickerWait: options.unreliablePickerWait === true }));
   await mkdir(bin, { recursive: true });
   const runner = pathToFileURL(resolve("tests/fixtures/strict-ego.mjs")).href;
   await writeFile(command, `#!/usr/bin/env node\nawait import(${JSON.stringify(runner)});\n`, { mode: 0o700 });

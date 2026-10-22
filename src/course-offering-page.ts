@@ -29,6 +29,45 @@ type Field = keyof typeof labels;
 const activePicker = '.van-popup:not([style*="display: none"]) .van-picker';
 const selector = (field: Field) => `loc=css:[data-friends-course-field="${field}"]`;
 
+function sameDateTime(actual: string | null, expected: string): boolean {
+  const withSeconds = (value: string | null) => value?.length === 16 ? `${value}:00` : value;
+  return withSeconds(actual) === withSeconds(expected);
+}
+
+function pickerVisibility(visible: boolean): boolean {
+  const frame = document.querySelector("iframe");
+  const d = frame ? frame.contentDocument : document;
+  const w = d?.defaultView;
+  if (!d || !w) return false;
+  const shown = Array.from(d.querySelectorAll(".van-popup .van-picker")).filter(picker => {
+    for (let node: Element | null = picker; node; node = node.parentElement) {
+      const style = w.getComputedStyle(node);
+      if (node.hasAttribute("hidden") || style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return false;
+    }
+    const rect = picker.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  if (!visible) return shown.length === 0;
+  if (shown.length !== 1) return false;
+  for (let node: Element | null = shown[0]!; node; node = node.parentElement) {
+    if (node.getAnimations?.().some(animation => animation.playState === "running")) return false;
+  }
+  return true;
+}
+
+async function waitForPicker(page: Page, visible: boolean) {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (await page.evaluate(pickerVisibility, visible)) return;
+    const remaining = deadline - Date.now();
+    if (remaining > 0) await new Promise(resolve => setTimeout(resolve, Math.min(100, remaining)));
+  }
+  throw new FriendsError({
+    code: FriendsErrorCode.UnknownOutcome,
+    message: `Timed out after 15000ms waiting for the course picker to ${visible ? "open" : "close"}`,
+  });
+}
+
 async function choose(page: Page, column: number, expected: string) {
   const selector = `${activePicker} .van-picker-column:nth-child(${column})`;
   // Vant clips distant options; move through visible neighbours and wait for its transition.
@@ -87,13 +126,14 @@ export async function prepareCourseOfferingPage(task: Task, input: Input) {
     const d = document.querySelector("iframe")?.contentDocument ?? document;
     const normalize = (s: string | null | undefined) => s?.replace(/\s+/g, "") ?? "";
     const cells = Array.from(d.querySelectorAll(".van-cell"));
+    for (const node of d.querySelectorAll("[data-friends-course-field]")) node.removeAttribute("data-friends-course-field");
     for (const [field, label] of Object.entries(labels)) {
       const named = Array.from(d.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input[name],textarea[name]")).find(n => n.name === field || n.name === label);
       const cell = named?.closest(".van-cell") ?? cells.find(n => normalize(n.querySelector(".van-cell__title")?.textContent) === label);
       const textField = ["curriculumName", "curriculumPlace", "curriculumContent"].includes(field);
       const target = textField
         ? named ?? cell?.querySelector("input:not([readonly]),textarea:not([readonly])") ?? cell?.closest(".borderf5")?.nextElementSibling?.querySelector("input:not([readonly]),textarea:not([readonly])")
-        : named?.closest(".field-select") ?? cell?.querySelector(".van-field__body > div") ?? cell?.querySelector(".van-field__body");
+        : cell?.querySelector(".van-field__body > .van-field__control--custom > div") ?? named?.closest(".field-select") ?? cell?.querySelector(".van-field__body > div") ?? cell?.querySelector(".van-field__body");
       target?.setAttribute("data-friends-course-field", field);
     }
     return true;
@@ -121,10 +161,11 @@ export async function prepareCourseOfferingPage(task: Task, input: Input) {
     beginTime: input.prepared.firstStep.beginTime, endTime: input.prepared.firstStep.endTime,
   };
   try {
+    if (!await page.evaluate(pickerVisibility, false)) throw new FriendsError({ code: FriendsErrorCode.UnknownOutcome, message: "An existing course picker is open; preserve it for human review" });
     for (const [field, expected] of Object.entries(requested) as Array<[Field, string]>) {
       const value = (await capture()).fields[field];
       const isDate = field === "beginTime" || field === "endTime";
-      if (value === expected || (isDate && value === expected.slice(0, 16))) {
+      if (value === expected || (isDate && sameDateTime(value, expected))) {
         actions.push({ field, action: "already-matching" });
       } else if (value !== null) {
         actions.push({ field, action: "human-value-preserved" });
@@ -134,14 +175,14 @@ export async function prepareCourseOfferingPage(task: Task, input: Input) {
         actions.push({ field, action: "filled" });
       } else {
         await page.click(selector(field));
-        await page.waitForSelector(`loc=css:${activePicker}`, { state: "visible", timeout: 15_000 });
+        await waitForPicker(page, true);
         await page.snapshot();
         const columns = isDate ? expected.slice(0, 16).split(/[- :]/) : [expected];
         for (const [i, label] of columns.entries()) await choose(page, i + 1, label);
         await page.click(`loc=css:${activePicker} .van-picker__confirm`);
-        await page.waitForSelector(`loc=css:${activePicker}`, { state: "hidden", timeout: 15_000 });
+        await waitForPicker(page, false);
         const actual = (await capture()).fields[field];
-        if (actual !== expected && !(isDate && actual === expected.slice(0, 16))) throw new Error(`Course picker did not retain its value: ${field}`);
+        if (actual !== expected && !(isDate && sameDateTime(actual, expected))) throw new Error(`Course picker did not retain its value: ${field}`);
         actions.push({ field, action: "filled" });
       }
     }
@@ -157,5 +198,5 @@ export async function prepareCourseOfferingPage(task: Task, input: Input) {
   await page.snapshot();
   await task.handOff();
   return { status: "awaiting-user" as const, submitted: false as const, handoff: "completed" as const,
-    actions, missing, executionError, page: final.fields, finalSubmitActions: 0 };
+    actions, missing, executionError, page: final.fields };
 }
