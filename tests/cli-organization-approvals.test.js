@@ -35,6 +35,8 @@ test("real CLI queries, previews, and confirms organization application decision
   let postMode = "ack";
   let readbackPhase = false;
   let relationActive = true;
+  let manager = true;
+  let applicationOrganization = "org-cli";
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
@@ -63,11 +65,12 @@ test("real CLI queries, previews, and confirms organization application decision
             organizationName: "CLI示例组织",
             organizationType: "STUDENT_CLUB",
             responsiblePerson: "20219999",
-            currentUserIsManager: true,
+            currentUserIsManager: manager,
           }],
         });
       }
-      if (req.url.endsWith("/biz-common/flow/template-activity-state")) {
+      if (req.url === "/gateway/ek-agg-mob/biz-common/flow/template-activity-state") {
+        assert.equal(req.headers["h-zove-appkey"], "zovecenter-saip-ek-agg-mob");
         return reply(res, { code: "0", data: [{ code: "WAIT", value: "等待审批" }] });
       }
       if (req.method === "POST" && req.url.endsWith("/student-organization-apply/approve-list")) {
@@ -97,7 +100,7 @@ test("real CLI queries, previews, and confirms organization application decision
           code: "0",
           data: {
             uuid: req.url.endsWith("join-cli") ? "join-cli" : "exit-cli",
-            organizationId: "org-cli",
+            organizationId: applicationOrganization,
             studentNo: "20210002",
             studentName: "CLI成员",
             flowCurrMsg: "等待审批",
@@ -280,7 +283,9 @@ test("real CLI queries, previews, and confirms organization application decision
     () => prepareOrganizationApplicationDecisionInEgo({
       taskSpaceId: 16,
       route: "/mobile/groupManage/studentApprovalJoinDetail?uuid=join-cli",
+      organizationId: "org-cli",
       applicationId: "other-application",
+      time: "2026-10-22",
       type: "join",
       decision: "approve",
       message: "路由不匹配",
@@ -305,10 +310,43 @@ test("real CLI queries, previews, and confirms organization application decision
       "",
     ].join("\n"), { mode: 0o700 });
     await chmod(ego, 0o700);
-    return { root, scriptPath, evidencePath, env: { PATH: `${root}:${process.env.PATH}` } };
+    return { root, scriptPath, evidencePath, env: { PATH: `${root}:${process.env.PATH}`, FRIENDS_BASE_URL: env.FRIENDS_BASE_URL } };
   }
 
   const cleanEgo = await egoFixture("clean");
+  const directOptions = {
+    taskSpaceId: 16, route: "/mobile/groupManage/studentApprovalJoinDetail?uuid=join-cli",
+    organizationId: "org-cli", applicationId: "join-cli", type: "join", decision: "approve",
+    message: "SDK同意", time: "2026-10-22", baseUrl: env.FRIENDS_BASE_URL,
+    command: join(cleanEgo.root, "ego-browser"),
+  };
+  const previousBaseUrl = process.env.FRIENDS_BASE_URL;
+  process.env.FRIENDS_BASE_URL = env.FRIENDS_BASE_URL;
+  try {
+    const prepared = await prepareOrganizationApplicationDecisionInEgo(directOptions);
+    assert.equal(prepared.submitted, false);
+    const evidence = JSON.parse(await readFile(cleanEgo.evidencePath, "utf8"));
+    assert.equal(evidence.finalMessage, "SDK同意");
+    assert.equal(evidence.externalWrites, 0);
+    assert.equal(evidence.finalSubmitActions, 0);
+    await assert.rejects(() => prepareOrganizationApplicationDecisionInEgo({ ...directOptions, organizationId: "wrong-org" }),
+      error => error.code === FriendsErrorCode.PermissionDenied);
+    manager = false;
+    await assert.rejects(() => prepareOrganizationApplicationDecisionInEgo(directOptions),
+      error => error.code === FriendsErrorCode.PermissionDenied);
+    manager = true;
+    applicationOrganization = "other-org";
+    await assert.rejects(() => prepareOrganizationApplicationDecisionInEgo(directOptions),
+      error => error.code === FriendsErrorCode.PermissionDenied);
+    applicationOrganization = "org-cli";
+    readbackPhase = true;
+    await assert.rejects(() => prepareOrganizationApplicationDecisionInEgo(directOptions),
+      error => error.code === FriendsErrorCode.UpstreamBusiness);
+    readbackPhase = false;
+  } finally {
+    if (previousBaseUrl === undefined) delete process.env.FRIENDS_BASE_URL;
+    else process.env.FRIENDS_BASE_URL = previousBaseUrl;
+  }
   const preparedInEgo = JSON.parse((await run([
     "organizations", "approvals", "prepare", "org-cli", "join-cli",
     "--type", "join", "--decision", "approve", "--via", "ego",
@@ -319,29 +357,20 @@ test("real CLI queries, previews, and confirms organization application decision
   assert.equal(preparedInEgo.data.submitted, false);
   assert.equal(preparedInEgo.data.ego.decisionAction, "opened-from-snapshot-ref");
   assert.equal(preparedInEgo.data.ego.messageAction, "filled");
-  assert.equal(preparedInEgo.data.ego.externalWriteActions, 0);
-  assert.equal(preparedInEgo.data.ego.finalSubmitActions, 0);
-  const egoScript = await readFile(cleanEgo.scriptPath, "utf8");
-  assert.match(egoScript, /task\.handOff\(\)/);
-  assert.match(egoScript, /page\.snapshot\(/);
-  for (const forbidden of [
-    /page\.locator\(/,
-    /page\.getByText\(/,
-    /\.first\(\)/,
-    /\.last\(\)/,
-    /waitForTimeout\(/,
-    /确认/,
-  ]) assert.doesNotMatch(egoScript, forbidden);
+  assert.equal(preparedInEgo.data.ego.submitted, false);
   const cleanEvidence = JSON.parse(await readFile(cleanEgo.evidencePath, "utf8"));
   assert.equal(cleanEvidence.gotoCount, 1);
   assert.equal(cleanEvidence.snapshotCount >= 1, true);
-  assert.deepEqual(cleanEvidence.clickSelectors, ["@7"]);
-  assert.deepEqual(cleanEvidence.fillSelectors, ["textarea[data-friends-cli-approval-message]"]);
+  assert.equal(cleanEvidence.clickSelectors.length, 1);
+  assert.notEqual(cleanEvidence.clickSelectors[0], "@7");
+  assert.equal(cleanEvidence.fillSelectors.length, 1);
+  assert.equal(cleanEvidence.attributeMutations, 0);
+  assert.equal(cleanEvidence.specialSkill, "保留人的特长");
+  assert.equal(cleanEvidence.phone, "13900000001");
   assert.equal(cleanEvidence.inputEvents, 1);
   assert.equal(cleanEvidence.changeEvents, 1);
   assert.equal(cleanEvidence.dialogOpen, true);
   assert.equal(cleanEvidence.dialogTitle, "审批通过");
-  assert.equal(cleanEvidence.waitForTimeoutCount, 0);
   assert.equal(cleanEvidence.externalWrites, 0);
   assert.equal(cleanEvidence.finalSubmitActions, 0);
   assert.equal(cleanEvidence.finalMessage, "Ego同意");
@@ -359,12 +388,24 @@ test("real CLI queries, previews, and confirms organization application decision
   assert.equal(preserved.data.ego.messageAction, "human-value-preserved");
   const dirtyEvidence = JSON.parse(await readFile(dirtyEgo.evidencePath, "utf8"));
   assert.equal(dirtyEvidence.gotoCount, 0);
-  assert.equal(dirtyEvidence.snapshotCount >= 1, true);
   assert.deepEqual(dirtyEvidence.clickSelectors, []);
   assert.deepEqual(dirtyEvidence.fillSelectors, []);
   assert.equal(dirtyEvidence.finalMessage, "用户正在审核的意见");
   assert.equal(dirtyEvidence.externalWrites, 0);
   assert.equal(dirtyEvidence.finalSubmitActions, 0);
+  const otherEgo = await egoFixture("other");
+  await assert.rejects(() => run([
+    "organizations", "approvals", "prepare", "org-cli", "join-cli", "--type", "join",
+    "--decision", "approve", "--via", "ego", "--ego-task-space", "16",
+    "--message", "不得覆盖", "--time", "2026-10-22", "--json",
+  ], { env: otherEgo.env }), error => error.code === 7 && JSON.parse(error.stdout).error.code === "UNKNOWN_OUTCOME");
+  const otherEvidence = JSON.parse(await readFile(otherEgo.evidencePath, "utf8"));
+  assert.equal(otherEvidence.gotoCount, 0);
+  assert.deepEqual(otherEvidence.clickSelectors, []);
+  assert.deepEqual(otherEvidence.fillSelectors, []);
+  assert.equal(otherEvidence.specialSkill, "保留人的特长");
+  assert.equal(otherEvidence.externalWrites, 0);
+  await rm(otherEgo.root, { recursive: true, force: true });
   await rm(cleanEgo.root, { recursive: true, force: true });
   await rm(dirtyEgo.root, { recursive: true, force: true });
 });

@@ -805,9 +805,9 @@ export function createVerifiedOrganizationClient(options: {
   }
 
   async function pendingApprovalState(): Promise<string> {
-    const envelope = await request("/biz-common/flow/template-activity-state", {
+    const envelope = await request("/ek-agg-mob/biz-common/flow/template-activity-state", {
       method: "POST",
-      headers: headers(session),
+      headers: { ...headers(session), "h-zove-appkey": "zovecenter-saip-ek-agg-mob" },
       body: JSON.stringify({
         businessTypeCode: "社团加入退出申请",
         handleType: "XS02",

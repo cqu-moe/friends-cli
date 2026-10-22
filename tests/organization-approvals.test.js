@@ -238,7 +238,7 @@ test("organization SDK prepares one pending application without submitting it", 
           }],
         });
       }
-      if (req.url.endsWith("/biz-common/flow/template-activity-state")) {
+      if (req.url === "/gateway/ek-agg-mob/biz-common/flow/template-activity-state") {
         assert.deepEqual(JSON.parse(body), {
           businessTypeCode: "社团加入退出申请",
           handleType: "XS02",
@@ -427,7 +427,7 @@ test("organization SDK confirms one application decision once and preserves unkn
           }],
         });
       }
-      if (req.url.endsWith("/biz-common/flow/template-activity-state")) {
+      if (req.url === "/gateway/ek-agg-mob/biz-common/flow/template-activity-state") {
         return reply(res, { code: "0", data: [{ code: "WAIT", value: "等待审批" }] });
       }
       if (req.method === "POST" && req.url.endsWith("/student-organization-apply/approve-list")) {
