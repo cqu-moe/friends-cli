@@ -151,3 +151,28 @@ test("real CLI preserves UNKNOWN_OUTCOME after lost material response, with no r
  await assert.rejects(()=>run(resolve("dist/cli/main.js"),env,["offerings","materials","--input","-","--via","api","--confirm","--json"],JSON.stringify(raw)),e=>{assert.equal(e.code,7);const out=JSON.parse(e.stdout);assert.equal(out.error.code,"UNKNOWN_OUTCOME");return true;});
  assert.equal(upstream.state.uploads.length,1);
 });
+
+
+test("public offering SDK and real CLI retain exit 7 when Ego disappears after verified session extraction",async t=>{
+ const upstream=await offeringSchool(t),fixture=await setupOfferingEgo(t,{baseUrl:upstream.baseUrl});
+ const executable=`#!${process.execPath}\nprocess.env.FRIENDS_EGO_FIXTURE_CONFIG=${JSON.stringify(fixture.configPath)};\nawait import(${JSON.stringify(new URL('./fixtures/strict-ego.mjs',import.meta.url).href)});\n`;
+ await writeFile(fixture.command,executable,{mode:0o700});
+ const config=JSON.parse(await readFile(fixture.configPath,'utf8'));
+ Object.assign(config,{executeSession:true,removeCommandAfterSession:fixture.command});
+ await writeFile(fixture.configPath,JSON.stringify(config));
+ const value=offeringInput();
+ await t.test('public SDK',async()=>assert.rejects(()=>prepareVolunteerOfferingInEgo({value,taskSpaceId:7,baseUrl:upstream.baseUrl,command:fixture.command}),error=>{
+  assert.equal(error.code,'UNKNOWN_OUTCOME');assert.equal(error.retryable,false);assert.equal(error.recovery.operation,'offerings.prepare');assert.match(error.message,/Could not start the configured Ego browser command/);return true;
+ }));
+ await assert.rejects(()=>readFile(fixture.command),{code:'ENOENT'});
+ await writeFile(fixture.command,executable,{mode:0o700});
+ const banner=join(fixture.root,'banner.png'),input=join(fixture.root,'input.json');await writeFile(banner,new Uint8Array([1]));
+ await writeFile(input,JSON.stringify({...value,materials:{publicityPictures:[{path:banner}]}}));
+ const env={...process.env,FRIENDS_HOME:fixture.root,FRIENDS_BASE_URL:upstream.baseUrl,PATH:fixture.root};
+ await t.test('real CLI',async()=>assert.rejects(()=>run(resolve('dist/cli/main.js'),env,['offerings','prepare','--via','ego','--ego-task-space','7','--input',input]),error=>{
+  assert.equal(error.code,7);const result=JSON.parse(error.stdout);assert.equal(result.error.code,'UNKNOWN_OUTCOME');assert.equal(result.error.retryable,false);assert.equal(result.error.recovery.operation,'offerings.prepare');assert.match(result.error.message,/Could not start the configured Ego browser command/);return true;
+ }));
+ await assert.rejects(()=>readFile(fixture.command),{code:'ENOENT'});
+ const observed=await fixture.observed();assert.deepEqual(observed.clicks,[]);assert.deepEqual(observed.fills,[]);assert.equal(observed.handoffs,0);assert.equal(observed.submits,0);
+ assert.equal(upstream.state.uploads.length,0);assert.equal(upstream.state.stored,null);
+});

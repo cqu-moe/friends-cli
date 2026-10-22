@@ -1,6 +1,6 @@
 # 最终 review 修复的受控验收
 
-本轮修复 SPEC F1–F7、STANDARDS S1–S5（F3 与 S1 重叠）。测试调用公开 SDK、真实 CLI 子进程；学校 API 使用外部本地 HTTP 服务，Ego 使用执行真实 DOM 回调及事件的同源 iframe 场景。回执损坏在实际填入和交接后注入；没有真实学校请求、浏览器、GitHub 或最终提交。
+本轮修复 SPEC F1–F7、STANDARDS S1–S5（F3 与 S1 重叠）；复核后追加 R1 的 runner 启动错误兼容修复。测试调用公开 SDK、真实 CLI 子进程；学校 API 使用外部本地 HTTP 服务，Ego 使用执行真实 DOM 回调及事件的同源 iframe 场景。回执损坏在实际填入和交接后注入；没有真实学校请求、浏览器、GitHub 或最终提交。
 
 | 项目 | 修复后的契约 | 主要回归边界 |
 | --- | --- | --- |
@@ -15,9 +15,13 @@
 | S3 | course/volunteer activity review 及 volunteer certification review 的所有调用方传递新核验会话；实际 iframe 的路由、token、角色匹配后才点击或填写 | `course-reviews-ego.test.js`、`volunteer-activity-reviews-ego.test.js`、`volunteer-review-cli.test.js`：正确外层 URL 下的错误 frame URL/会话，人工意见保留，零最终操作 |
 | S4 | 布尔字段必须是 boolean，星级及问卷等必须是规定数组，不静默改义 | `volunteer-offering-api-contract.test.js`、`volunteer-offering-cli.test.js`：SDK 与 CLI 输入拒绝 |
 | S5 | 材料按实际 Blob/File.size 检查上限，并拒绝不一致的 wrapper.size；拒绝发生在上传前 | `volunteer-offering-api-contract.test.js`：21 MiB 伪报为 1 byte 和声明大小不一致，零上传 |
+| R1 | 志愿开办保留准备进程启动失败的 UNKNOWN_OUTCOME/7 和恢复标识；共享 runner 的其他调用方保留既有启动分类，真正的认证/权限前置错误不改类 | `volunteer-offering-cli.test.js`：真实会话 DOM 回调后删除命令，公开 SDK/实际 CLI 的第二次启动均 ENOENT；认证、课程公开 SDK 同时固定原有启动契约 |
 
 F1 是进程内保护，不能保证其他进程或外部学校客户端的服务器会话隔离。审批计划在发起后即消费；发生冲突或未知结果后不会自动重试。
 
 F4 新增精确版本 `fs-native-extensions@1.5.2`，使用其 `tryLock(fd)` 的系统锁。持久的 `.write-lock` 文件权限为 0600，保留稳定 inode，不靠删锁或时间过期夺取活锁。旧版本的目录锁协议与新版本不共同协调；升级前需结束旧写入进程，新实现不删除旧锁目录或遗留临时数据。本机实际运行仅覆盖 macOS；其他平台运行与 CI 留待主任务独立验收。
 
 本轮合并最新 integration 后统一执行全量测试；准确 SHA、测试数、安装包内容审计与安装后公开 draft store 的 save/load/conflict 结果记录在主任务的外部修复交付证据。受控测试不能替代真实学校读写、完整交接、CI 或生产验收。原生 Auth 的 `403 cf-mitigated: challenge` 外部阻塞、#22 缺少有权限且待审批的真实样本仍保留。#16/#17 已取消，不纳入修复。
+
+
+R1 回归将 CLI 的 PATH 限定为临时 fixture 目录，使用绝对 Node shebang；成功读取 iframe 会话后移除 Ego fixture，再验证准备进程启动失败。记录的点击、填写、交接、提交及上传均为零，不把启动故障作为重新登录的依据。仅复跑相关 SDK、真实 CLI 与回执回归；没有重复安装包。前次 `da00f4d` 的 274 项全量及安装证据仍按原 SHA 保留，R1 的准确测试数和最终提交见外部交接；最终包验收由主任务统一执行。

@@ -8,6 +8,7 @@ export async function runEgoJson<T>(options: {
   timeoutMs: number;
   marker: string;
   failure: string;
+  startupErrorCode?: FriendsErrorCode;
 }): Promise<T> {
   const child = spawn(options.command, ["nodejs"], { stdio: ["pipe", "pipe", "pipe"] });
   let stdout = "";
@@ -30,7 +31,7 @@ export async function runEgoJson<T>(options: {
     exitCode = await closed;
   } catch {
     child.kill("SIGTERM");
-    throw error("Could not start the configured Ego browser command");
+    throw error("Could not start the configured Ego browser command", options.startupErrorCode ?? FriendsErrorCode.AuthRequired);
   } finally {
     clearTimeout(timer);
   }

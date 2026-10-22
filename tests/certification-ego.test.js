@@ -47,3 +47,10 @@ test('SDK binds the actual iframe account and preserves readonly school hours',a
  assert.equal(observed.handoffs,1);assert.equal(observed.submits,0);
  assert.equal(observed.fieldValues.find(field=>field.value==='2')?.value,'2');
 });
+
+
+test('public certification SDK preserves its existing Ego startup error contract',async t=>{
+ const f=await setupCertification(t);
+ await assert.rejects(()=>prepare(f,{command:f.home+'/missing-ego'}),error=>{assert.equal(error.code,'AUTH_REQUIRED');assert.match(error.message,/Could not start the configured Ego browser command/);return true;});
+ await assert.rejects(()=>f.observed(),{code:'ENOENT'});
+});
