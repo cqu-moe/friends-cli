@@ -30,11 +30,14 @@ import {
 import { FriendsError, FriendsErrorCode, type WriteRecovery } from "./errors.js";
 import { courseRegistrationId, type CourseParticipationSession, type CourseRegistrationSummary, type CourseQuestionnaireDefinition, type PreparedCourseApply } from "./course-participation.js";
 import { loadCourseQuestionnaireFiles } from "./course-questionnaire-files.js";
+import { organizationApplicationId, organizationId } from "./organizations.js";
+import { runEgoJson } from "./certification-ego.js";
 
 export * from "./draft-store.js";
 export * from "./certification-ego.js";
 export * from "./volunteer-offering-ego.js";
 export * from "./course-offering-ego.js";
+export * from "./organization-leader-ego.js";
 
 export type SessionStorageType = "keyring" | "file";
 
@@ -328,6 +331,181 @@ console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({
     // Return the generic bridge failure below.
   }
   throw safeError("The Ego organization profile preparation did not return its route");
+}
+
+export async function prepareOrganizationApplicationDecisionInEgo(options: {
+  taskSpaceId: number;
+  page?: string;
+  route: string;
+  organizationId: string;
+  applicationId: string;
+  type: "join" | "exit";
+  decision: "approve" | "reject";
+  message: string;
+  time: string;
+  baseUrl?: string;
+  selector?: { levelNo?: string; unitNo?: string };
+  timeoutMs?: number;
+  command?: string;
+}): Promise<{
+  status: "awaiting-user";
+  submitted: false;
+  route: string;
+  navigated: boolean;
+  decisionAction: "opened-from-snapshot-ref" | "already-open";
+  messageAction: "filled" | "already-matching" | "human-value-preserved";
+  timeAction: "left-for-human-review";
+}> {
+  if (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1) {
+    throw safeError("Invalid Ego task space", FriendsErrorCode.InvalidInput);
+  }
+  const page = options.page ?? "p1";
+  if (!/^p[1-9][0-9]*$/.test(page)) throw safeError("Invalid Ego page label", FriendsErrorCode.InvalidInput);
+  const timeoutMs = options.timeoutMs ?? 300_000;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) throw safeError("Invalid Ego timeout", FriendsErrorCode.InvalidInput);
+  const organizationIdValue = organizationId(options.organizationId);
+  const applicationIdValue = organizationApplicationId(options.applicationId);
+  if ((options.type !== "join" && options.type !== "exit") ||
+      (options.decision !== "approve" && options.decision !== "reject")) {
+    throw safeError("Invalid organization application decision", FriendsErrorCode.InvalidInput);
+  }
+  const path = options.type === "join"
+    ? "/mobile/groupManage/studentApprovalJoinDetail"
+    : "/mobile/groupManage/studentApprovalExitDetail";
+  if (options.route !== `${path}?uuid=${encodeURIComponent(applicationIdValue)}`) {
+    throw safeError("Invalid organization application detail route", FriendsErrorCode.InvalidInput);
+  }
+  const session = await readVerifiedEgoSession(options);
+  const client = await createFriendsSdk({ baseUrl: options.baseUrl }).createOrganizationClient(session);
+  await client.prepareApplicationDecision({
+    organizationId: organizationIdValue,
+    applicationId: applicationIdValue,
+    type: options.type,
+    decision: options.decision,
+    message: options.message,
+    time: options.time,
+  });
+  const origin = new URL(options.baseUrl ?? "https://friends.cqu.edu.cn/gateway").origin;
+  const script = String.raw`
+const task = await taskSpace(${options.taskSpaceId});
+const page = task.page(${JSON.stringify(page)});
+const targetUrl = ${JSON.stringify(origin + options.route)};
+const expected = ${JSON.stringify({ origin, token: session.token, userLevel: session.userLevel })};
+async function inspect() {
+  return page.evaluate((expected) => {
+    const frame = document.querySelector("iframe");
+    const target = frame ? frame.contentWindow : window;
+    if (!target || location.origin !== expected.origin || target.location.origin !== expected.origin ||
+        localStorage.getItem("token_str") !== expected.token || target.localStorage.getItem("token_str") !== expected.token ||
+        localStorage.getItem("userLevel_str") !== expected.userLevel || target.localStorage.getItem("userLevel_str") !== expected.userLevel) {
+      throw new Error("The verified Ego session changed");
+    }
+    const doc = target.document;
+    const visible = (field) => {
+      const rect = field.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && !field.disabled && !field.readOnly;
+    };
+    const messages = Array.from(doc.querySelectorAll('textarea[name="msg"]')).filter(visible);
+    const docs = target === window ? [document] : [document, doc];
+    return {
+      url: target.location.href,
+      inputPresent: docs.some(d => Array.from(d.querySelectorAll('input,textarea,select,[contenteditable="true"]'))
+        .some(f => visible(f) && String(f.value ?? f.textContent).trim() !== "")),
+      messages: messages.map(f => f.value),
+      title: Array.from(doc.querySelectorAll(".title,h2")).filter(visible).map(e => e.textContent.trim()),
+    };
+  }, expected);
+}
+function snapshotRef(snapshot, label, role) {
+  const entries = snapshot.split(/\n(?=[^\n]*\[ref=\d+\])/);
+  const matches = entries.flatMap(entry => {
+    const ref = entry.match(/\[ref=(\d+)\]/);
+    if (!ref || !role.test(entry)) return [];
+    const text = entry.replace(/\[ref=\d+\]/g, "").replace(/^[\s-]*(button|generic|textbox)\b/, "").replace(/["']/g, "").trim();
+    return text === label || text === "请输入" + label ? ["@" + ref[1]] : [];
+  });
+  if (matches.length !== 1) throw new Error("Expected one snapshot target: " + label);
+  return matches[0];
+}
+try {
+  const before = await inspect();
+  const current = new URL(before.url);
+  if (!current.pathname.startsWith("/mobile/") || /login|sso|roles/i.test(current.pathname) || current.searchParams.has("ticket")) {
+    throw new Error("An existing school business page is required");
+  }
+  const navigated = before.url !== targetUrl;
+  if (navigated && (before.inputPresent || /studentApproval(?:Join|Exit)Detail/.test(current.pathname))) {
+    throw new Error("Keep the current application and human input; open the requested application in another page");
+  }
+  if (navigated) await page.goto(targetUrl);
+  await page.waitForLoadState("load");
+  await page.waitForFunction((url) => {
+    const target = document.querySelector("iframe")?.contentWindow ?? window;
+    return target.location.href === url && target.document.readyState === "complete" &&
+      target.document.body.innerText.includes("通过") && target.document.body.innerText.includes("拒绝");
+  }, targetUrl, { timeout: 15000 });
+  const ready = await inspect();
+  if (ready.url !== targetUrl) throw new Error("The visible application does not match the verified application");
+  let decisionAction = "already-open";
+  const decisionTitle = ${JSON.stringify(options.decision === "approve" ? "审批通过" : "审批拒绝")};
+  if (ready.messages.length === 0) {
+    const snapshot = await page.snapshot({ scope: "full_page" });
+    await page.click(snapshotRef(snapshot, ${JSON.stringify(options.decision === "approve" ? "通过" : "拒绝")}, /\b(button|generic)\b/));
+    await page.waitForFunction(() => {
+      const doc = (document.querySelector("iframe")?.contentWindow ?? window).document;
+      return Array.from(doc.querySelectorAll('textarea[name="msg"]')).some(f => {
+        const rect = f.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+    }, undefined, { timeout: 15000 });
+    decisionAction = "opened-from-snapshot-ref";
+  }
+  const dialog = await inspect();
+  if (dialog.url !== targetUrl || dialog.messages.length !== 1 || !dialog.title.includes(decisionTitle)) {
+    throw new Error("Expected the selected application decision dialog");
+  }
+  const requested = ${JSON.stringify(options.message.trim())};
+  let messageAction = dialog.messages[0] === requested ? "already-matching" : "human-value-preserved";
+  if (dialog.messages[0] === "") {
+    const snapshot = await page.snapshot({ scope: "full_page" });
+    await page.fill(snapshotRef(snapshot, "审批意见", /\btextbox\b/), requested);
+    const after = await inspect();
+    if (after.url !== targetUrl || after.messages.length !== 1 || after.messages[0] !== requested) throw new Error("Review opinion did not remain visible");
+    messageAction = "filled";
+  }
+  await task.handOff();
+  console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({ status: "awaiting-user", submitted: false,
+    route: ${JSON.stringify(options.route)}, navigated, decisionAction, messageAction, timeAction: "left-for-human-review" }));
+} catch (error) {
+  await task.handOff();
+  console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({ error: error.message, errorCode: "UNKNOWN_OUTCOME" }));
+}
+`;
+  type Result = {
+    status: "awaiting-user"; submitted: false; route: string; navigated: boolean;
+    decisionAction: "opened-from-snapshot-ref" | "already-open";
+    messageAction: "filled" | "already-matching" | "human-value-preserved";
+    timeAction: "left-for-human-review";
+  };
+  let result: Result;
+  try {
+    result = await runEgoJson<Result>({ script, command: options.command ?? "ego-browser", timeoutMs: timeoutMs + 30_000,
+    marker: "FRIENDS_CLI_EGO_PREPARED:", failure: "Inspect the organization application page before any further action" });
+  } catch {
+    throw new FriendsError({ code: FriendsErrorCode.UnknownOutcome,
+      message: "The organization review preparation result was lost or invalid; inspect the existing form before continuing",
+      recovery: { operation: "organizations.approvals.prepare", organizationId: organizationIdValue,
+        applicationId: applicationIdValue, completed: ["visible-preparation-started"] } });
+  }
+  if (typeof result !== "object" || result === null || result.status !== "awaiting-user" || result.submitted !== false || result.route !== options.route ||
+      typeof result.navigated !== "boolean" || !["opened-from-snapshot-ref", "already-open"].includes(result.decisionAction) ||
+      !["filled", "already-matching", "human-value-preserved"].includes(result.messageAction) || result.timeAction !== "left-for-human-review") {
+    throw new FriendsError({ code: FriendsErrorCode.UnknownOutcome,
+      message: "The Ego organization preparation result is ambiguous",
+      recovery: { operation: "organizations.approvals.prepare", organizationId: organizationIdValue,
+        applicationId: applicationIdValue, completed: ["visible-preparation-started"] } });
+  }
+  return result;
 }
 
 export async function prepareVolunteerCertificationReviewInEgo(options: {

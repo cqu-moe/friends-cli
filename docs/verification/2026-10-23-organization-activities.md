@@ -28,6 +28,8 @@ Node 与 CLI DOM 测试运行生成的当前脚本和真实 DOM 回调，不返�
 
 CLI 覆盖所有命令 help/schema、文件与 stdin、版本化单 JSON stdout、stderr、非交互确认、错误参数、权限退出 4、身份退出 3、UNKNOWN_OUTCOME 退出 7、API/Ego 查询和实际执行方式。材料 JSON 回执可直接传给 submit，不依赖私有临时页地址。
 
+最终合入 integration `368abeec446fc36ed079c347dfd3fa3e4b3dec4e` 后，完整 `npm test` 通过：223 tests，0 failed、0 skipped（包含 TypeScript 构建）。功能提交合入之前的独立全量为 136/136；合并时保留课程、参与、审批与志愿功能，组织活动命令复用共享父命令。共享 strict fixture 同时保留真实 iframe、课程表单 model、远程写计数和已有用户输入保护。
+
 ## 尚未验收与风险
 
 本次没有真实 Ego、学校登录态只读、生产材料上传、生产 API 开办、用户最终提交或生产回查。受控测试不替代这些层次。实际学校服务对材料、权限及完整表单仍有最终决定权。
