@@ -192,6 +192,7 @@ test("real CLI performs local login, fixed-context activation, storage, and cour
   assert.equal(courseJson.data.items[0].state.known, false);
   assert.equal(courseJson.data.totalCount, 1);
   assert.equal(courseJson.meta.via, "api");
+  assert.equal(courseJson.meta.selectedEntry, "api");
   assert.equal(courseJson.stdout === undefined, true);
   assert.equal(JSON.stringify(courseJson).includes("20219999"), false);
 
