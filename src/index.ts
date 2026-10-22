@@ -1,9 +1,30 @@
 import { FriendsError, FriendsErrorCode } from "./errors.js";
+import {
+  createVerifiedOrganizationClient,
+  type OrganizationSession,
+} from "./organizations.js";
 
 export { FriendsError, FriendsErrorCode, exitCodeFor } from "./errors.js";
 export type { WriteRecovery } from "./errors.js";
 export * from "./drafts.js";
 export * from "./draft-source.js";
+export { organizationId, validateOrganizationMemberListInput } from "./organizations.js";
+export type {
+  EditableOrganizationProfileField,
+  OrganizationAccess,
+  OrganizationClient,
+  OrganizationId,
+  OrganizationMember,
+  OrganizationMemberListInput,
+  OrganizationMemberPage,
+  OrganizationProfile,
+  OrganizationProfileChanges,
+  OrganizationSession,
+  OrganizationSummary,
+  PreparedOrganizationProfileUpdate,
+  SavedOrganizationProfile,
+} from "./organizations.js";
+export * from "./certification-api.js";
 
 declare const courseIdBrand: unique symbol;
 export type CourseId = string & { readonly [courseIdBrand]: true };
@@ -565,6 +586,16 @@ export function createFriendsSdk(options: {
           }};
         },
       };
+    },
+    async createOrganizationClient(input: OrganizationSession) {
+      const session = snapshotSession(input);
+      await sdk.activateLocalContext({
+        token: session.token,
+        userLevel: session.userLevel,
+        expectedAccount: session.account.userNo,
+        selector: { levelNo: session.context.levelNo, unitNo: session.context.unit.unitNo },
+      });
+      return createVerifiedOrganizationClient({ baseUrl, session, fetch: fetchImpl, timeoutMs });
     },
   };
   return sdk;

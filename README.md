@@ -1,6 +1,6 @@
 # friends-cli
 
-重庆大学第二课堂平台的本地 CLI 与可复用 SDK。当前交付 Issue #2–#3 的最小只读课程链、Issue #4 的 CQU Auth OAuth/DPoP 登录与恢复，以及 Issue #5 的志愿认证本地草稿：Ego 浏览器本地登录、学校 API 身份/上下文核验、课程查询、可管理志愿活动/报名名单只读查询、草稿编辑与恢复。不包含报名、审批或学校认证提交。
+重庆大学第二课堂平台的本地 CLI 与可复用 SDK。当前交付 Issue #2–#3 的最小只读课程链、Issue #4 的 CQU Auth OAuth/DPoP 登录与恢复、Issue #5 的志愿认证本地草稿，以及 Issue #21 的学生组织查询、成员查询与组织资料受控维护：Ego 浏览器本地登录、学校 API 身份/上下文核验、课程查询、可管理志愿活动/报名名单只读查询、草稿编辑与恢复、组织/资料/成员查询。不包含组织活动报名、审批、成员写入、部门维护或学校认证提交。
 
 ## 安装与命令
 
@@ -28,6 +28,11 @@ friends auth login --method cqu-auth --no-open --storage file --json
 friends courses list --page 1 --page-size 10 --keyword 周周艺 --json
 friends courses show <courseUuid> --json
 friends courses list --via ego --ego-task-space 12 --ego-page p1 --json
+friends organizations list --json
+friends organizations profile show <organizationUuid> --json
+friends organizations members <organizationUuid> --page 1 --page-size 10 --json
+friends organizations profile prepare <organizationUuid> \
+  --via ego --ego-task-space 12 --ego-page p1 --blurb "新的组织简介" --json
 friends drafts activities --via ego --ego-task-space 16 --ego-page p1 --json
 friends drafts create --activity-id <activityUuid> --json
 friends drafts edit <draftId> --expected-revision 0 --input patch.json --json
@@ -59,6 +64,14 @@ const sdk = createFriendsSdk();
 const session = await readVerifiedEgoSession({ taskSpaceId: 12, page: "p1" });
 const courses = await sdk.createCourseClient(session);
 await courses.list({ keyword: "周周艺" });
+
+const organizationClient = await sdk.createOrganizationClient(session);
+const organizations = await organizationClient.listManaged();
+const profile = await organizationClient.get(organizationId(organizations[0].id));
+const members = await organizationClient.listMembers(organizationId(organizations[0].id), {
+  page: 1,
+  pageSize: 10,
+});
 ```
 
 `@cqu-moe/friends-cli/auth` 是纯 SDK OAuth/DPoP 客户端，正式依赖 `oauth4webapi@3.8.8`：`None()` public client、S256 PKCE、`DPoP` proof/nonce 管理、同 key refresh 与 protected resource 请求均由该库实现；本仓库不手写密码学或协议签名。`@cqu-moe/friends-cli/auth-node` 只增加本机回调监听、浏览器打开和凭据存储。Better Auth 仍是 CQU Auth 授权服务器；不能声称 Better Auth 客户端自带这些 DPoP proof 能力。
@@ -97,3 +110,28 @@ await courses.list({ keyword: "周周艺" });
 新增人员先通过当前学校会话只读核对姓名和草稿账号/组织/活动绑定，再保存在本地。`includedStudentNos` 始终是本次指定名单，不隐含全部认证。普通编辑和材料检查可以离线使用；新增学号需要可用学校会话。没有报名 UUID 的手动人员保留这一事实，不伪造报名记录。
 
 课程与草稿的学校查询共用 `--via api|ego`：Ego 模式直接核验现有页面会话后调用查询 API，不导航或读取本地会话。新增学号的草稿编辑也支持同样的来源选项。
+
+## 志愿认证 API 提交
+
+志愿认证 API 提交必须独立明确选择，Ego 交接不产生提交授权：
+
+```sh
+friends certification submit <draftId> --via api --dry-run
+friends certification submit <draftId> --via api --confirm
+friends certification submit --input draft.json --via api --confirm
+friends certification status <activityId> --via ego --ego-task-space 16
+```
+
+`--input -` 读取 stdin 导出的草稿。当前认证表单没有附件入口，带材料的草稿会在写入前拒绝。`UNKNOWN_OUTCOME`（退出码 7）时保留草稿，先用 `certification status` 回查，不自动重交。业务确认与回查结果分别返回；已有认证不会被这个新建命令覆盖。
+
+## 学生组织
+
+组织查询先通过生产前端已核实的 `POST /student-organization-info/my` 获取当前账号上下文返回的组织，再按返回对象推导 `principal`、`manager` 或 `member`。成员列表只调用已核实的 `organizational-members-list`，请求固定绑定 `organizationId` 和在岗状态，输出仅投影学号、姓名、职务与负责人/管理员标志，不透传学校返回的其他字段。
+
+组织资料只接受 `logo`、`backgroundGroupUuid` 和 `blurb` 三个源码核实字段。API 保存必须显式 `--yes`：先重新读取学校完整详情，克隆后仅覆盖这三个字段，执行一次 PUT，再用只读 GET 回查；PUT 响应丢失时只做只读回查，不能证明结果则返回 `UNKNOWN_OUTCOME`，不会重试写入。
+
+```json
+{"blurb":"新的组织简介","logo":"logo-reference","backgroundGroupUuid":"background-reference"}
+```
+
+Ego 资料修改只执行可见 prepare：先经现有页面会话核验权限，再导航到对应组织编辑页，打开“组织简介及Logo”维护弹窗并填写简介，随后把页面交接给用户。Logo 和背景图上传控件保留在页面上由用户人工处理；命令不点击最终保存、不调用 PUT，也不会把 `--yes` 用于 Ego prepare。
