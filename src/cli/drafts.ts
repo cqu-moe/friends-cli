@@ -15,7 +15,11 @@ import {
   type CertificationDraftMaterial,
   type VolunteerCertificationDraftPatch,
 } from "../index.js";
-import { createCertificationDraftStore } from "../node.js";
+import {
+  createCertificationDraftStore,
+  prepareVolunteerCertificationInEgo,
+  rejectVolunteerCertificationEgoSubmitInEgo,
+} from "../node.js";
 
 export const draftSchemas = {
   "drafts.activities": {
@@ -64,6 +68,34 @@ export const draftSchemas = {
     operation: "drafts.list", permission: "local draft access", phases: ["local-read"], input: {},
     output: "draft ID, revision, activity, and selected roster count", readonly: true, remoteReadonly: true,
     supportedVia: ["local-store"], verifiedWith: "controlled-node",
+  },
+  "drafts.prepare": {
+    operation: "drafts.prepare", permission: "verified Ego session and manageable volunteer activity",
+    phases: ["query", "visible-prepare", "awaiting-user"], input: {
+      draftId: { type: "draft ID", required: true },
+      via: { type: "ego", required: true },
+      egoTaskSpace: { type: "integer", required: true },
+      egoPage: { type: "p1 by default", required: false },
+      egoSessionPage: { type: "p1 by default", required: false, purpose: "read the existing school session without navigation; egoPage remains the certification target" },
+      timeout: { type: "positive integer milliseconds", required: false },
+      dryRun: { type: "boolean", effect: "inspect only, zero controls or handoff" },
+    }, output: "awaiting-user preparation, completed visible actions and preserved human changes; never invokes final submit",
+    readonly: false, remoteReadonly: true, visiblePageWrite: true, finalSubmission: "human-only",
+    sideEffect: "fills the matching existing page, or navigates an explicitly selected blank page; hands the editable page to the user",
+    supportedVia: ["ego"], verifiedWith: "public-source; controlled-sdk; controlled-node; controlled-cli",
+  },
+  "drafts.submit": {
+    operation: "drafts.submit", permission: "none; Ego submission is intentionally unsupported",
+    phases: ["reject"], input: {
+      draftId: { type: "draft ID", required: true },
+      via: { type: "ego", required: true },
+      yes: { type: "rejected flag" },
+      retry: { type: "rejected flag" },
+      apiFallback: { type: "rejected flag" },
+    }, output: "INVALID_INPUT before browser or API side effects",
+    readonly: false, remoteReadonly: true, finalSubmission: "human-only",
+    sideEffect: "none; always rejected before launch or network write",
+    supportedVia: [], verifiedWith: "public-source; controlled-sdk; controlled-cli",
   },
 } as const;
 
@@ -167,6 +199,7 @@ function patch(value: unknown): DraftCliPatch {
 export function registerDraftCommands(program: Command, options: { baseUrl: string }): void {
   const store = createCertificationDraftStore();
   const sdk = createFriendsSdk({ baseUrl: options.baseUrl });
+  const runtimeBaseUrl = options.baseUrl;
 
   async function volunteerSession(queryOptions: Record<string, string | undefined> = {}) {
     const {session, entry} = await resolveQuerySession(queryOptions, options.baseUrl);
@@ -296,5 +329,58 @@ export function registerDraftCommands(program: Command, options: { baseUrl: stri
     .option("--json", "print stable JSON", true)
     .action(async () => {
       output(await store.list(), { operation: "drafts.list", via: "local-store" });
+    });
+
+  queryOptions(drafts.command("prepare")).description("Fill a visible Ego certification page and hand it to the user")
+    .argument("<draftId>", "draft ID")
+    .option("--ego-session-page <label>", "existing school session page (default: the certification target page)")
+    .option("--timeout <milliseconds>", "Ego interaction timeout", "300000")
+    .option("--dry-run", "validate and inspect without filling or handoff")
+    .option("--json", "print stable JSON", true)
+    .action(async (draftId: string, options: Record<string, string | boolean>) => {
+      if (options.via !== "ego") invalid("drafts prepare requires --via ego");
+      const timeoutMs = Number(options.timeout);
+      if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) invalid("--timeout must be a positive integer");
+      const draft = await store.load(draftId);
+      const sessionPage = typeof options.egoSessionPage === "string" ? options.egoSessionPage : undefined;
+      const context = await volunteerSession({
+        ...(options as Record<string, string | undefined>),
+        egoPage: sessionPage ?? (typeof options.egoPage === "string" ? options.egoPage : undefined),
+      });
+      const result = await prepareVolunteerCertificationInEgo({
+        draft,
+        session: context.session,
+        taskSpaceId: Number(options.egoTaskSpace),
+        page: typeof options.egoPage === "string" ? options.egoPage : undefined,
+        baseUrl: runtimeBaseUrl,
+        timeoutMs,
+        dryRun: options.dryRun === true,
+      });
+      output(result, {
+        operation: "drafts.prepare",
+        via: "ego-selected+visible-prepare",
+        selectedEntry: context.entry,
+        requestMode: "direct-api-recheck+visible-ego-prepare",
+        verification: { activityAndRoster: "school-api-rechecked", finalSubmission: "human-only" },
+      });
+    });
+
+  drafts.command("submit").description("Reject Ego certification submission before any side effect")
+    .argument("<draftId>", "draft ID")
+    .requiredOption("--via <ego>", "submission source; only the rejection path is implemented")
+    .requiredOption("--ego-task-space <number>", "existing Ego task space")
+    .option("--ego-page <label>", "existing school page (default p1)")
+    .option("--yes", "rejected confirmation flag")
+    .option("--retry", "rejected retry flag")
+    .option("--api-fallback", "rejected API fallback flag")
+    .option("--json", "print stable JSON", true)
+    .action(async (draftId: string, options: Record<string, string | boolean>) => {
+      await store.load(draftId);
+      rejectVolunteerCertificationEgoSubmitInEgo({
+        via: String(options.via),
+        yes: options.yes === true,
+        retry: options.retry === true,
+        apiFallback: options.apiFallback === true,
+      });
     });
 }
