@@ -1,3 +1,5 @@
+import {createOrganizationActivityClient} from "./organization-activities.js";
+export * from "./organization-activities.js";
 import { FriendsError, FriendsErrorCode } from "./errors.js";
 import {
   createCourseParticipationClient,
@@ -6,6 +8,8 @@ import {
   createVerifiedOrganizationClient,
   type OrganizationSession,
 } from "./organizations.js";
+import { createVolunteerClient } from "./volunteer.js";
+
 import {
   createCourseOfferingClient,
   type CourseOfferingSession,
@@ -80,6 +84,40 @@ export type {
 export * from "./certification-api.js";
 export * from "./course-offering.js";
 export * from "./volunteer-reviews.js";
+
+export {
+  validateVolunteerRegisterInput,
+  validateVolunteerListInput,
+  volunteerActivityId,
+  volunteerRegistrationId,
+} from "./volunteer.js";
+export type {
+  VolunteerActivityDetail,
+  VolunteerActivityId,
+  VolunteerActivityPage,
+  VolunteerActivityPost,
+  VolunteerActivitySummary,
+  VolunteerClient,
+  VolunteerIdentity,
+  VolunteerListInput,
+  VolunteerManageableActivity,
+  VolunteerQuestionnaire,
+  VolunteerQuestionnaireAnswer,
+  VolunteerQuestionnaireOption,
+  VolunteerRegisterInput,
+  VolunteerRegisterWriteInput,
+  VolunteerRegisterPayload,
+  VolunteerRegistration,
+  VolunteerRegistrationId,
+  VolunteerRegistrationPage,
+  VolunteerRegistrationRecord,
+  VolunteerRegistrationRequirements,
+  VolunteerWithdrawalPreparation,
+  VolunteerWriteReceipt,
+  VolunteerWriteReadback,
+  VolunteerWriteResult,
+  VolunteerRegistrationPreparation,
+} from "./volunteer.js";
 
 
 export * from "./volunteer-offering.js";
@@ -645,6 +683,9 @@ export function createFriendsSdk(options: {
         },
       };
     },
+    async createOrganizationActivityClient(input: VerifiedCourseSession) {
+      return createOrganizationActivityClient({baseUrl,fetch:fetchImpl,timeoutMs,session:snapshotSession(input)});
+    },
     async createCourseParticipationClient(input: VerifiedCourseSession) {
       const session = snapshotSession(input);
       await sdk.activateLocalContext({
@@ -712,6 +753,14 @@ export function createFriendsSdk(options: {
             },
           });
         },
+      });
+    },
+    async createVolunteerClient(input: VerifiedCourseSession) {
+      return createVolunteerClient({
+        session: input,
+        baseUrl,
+        fetch: fetchImpl,
+        timeoutMs,
       });
     },
     async createCourseOfferingClient(input: CourseOfferingSession) {

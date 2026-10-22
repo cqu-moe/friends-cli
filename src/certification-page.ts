@@ -29,14 +29,18 @@ async function inspectCertificationPage(task:Task,input:Input){
  }
  await page.waitForSelector('loc=css:.name-list',{timeout:15000});
  await page.snapshot();
- const facts=await page.evaluate(({origin,token,userLevel})=>{
+ const facts=await page.evaluate(({origin,token,userLevel,accountUserNo})=>{
   const frame=document.querySelector('iframe')?.contentDocument;
   const d=frame?.querySelector('.name-list')?frame:document;
   const w=d.defaultView!;
   const raw=w.localStorage.getItem('token_str');
   let current=raw;try {if(raw?.startsWith('{')){const parsed=JSON.parse(raw);current=parsed.token??parsed.data?.token??parsed.data;}}catch{return {matches:false,url:w.location.href};}
-  return {matches:w.location.origin===origin && current===token && w.localStorage.getItem('userLevel_str')===userLevel,url:w.location.href};
- },{origin:target.origin,token:input.session.token,userLevel:input.session.userLevel});
+  const accountMatches=['userInfo_obj','userInfo_str','account_str','account_obj'].some(key=>{
+   const value=w.localStorage.getItem(key);if(value===accountUserNo)return true;
+   try{const item=JSON.parse(value??'null');return item?.userNo===accountUserNo||item?.account===accountUserNo;}catch{return false;}
+  });
+  return {matches:w.location.origin===origin && current===token && w.localStorage.getItem('userLevel_str')===userLevel && accountMatches,url:w.location.href};
+ },{origin:target.origin,token:input.session.token,userLevel:input.session.userLevel,accountUserNo:input.session.account.userNo});
  const current=new URL(facts.url);
  if(!facts.matches || current.pathname!==target.pathname || current.searchParams.get('uuid')!==input.draft.activity.id || current.searchParams.get('type')!=='attestApply') throw new FriendsError({code:FriendsErrorCode.PermissionDenied,message:'The visible certification page, account or role does not match the draft'});
  await page.waitForFunction(({name,count})=>{
@@ -72,14 +76,16 @@ export async function prepareCertificationPage(task:Task,input:Input){
  if(input.dryRun) return {...preparation,status:'ready',dryRun:true,submitted:false,page:initial,completedActions:[]};
  const completedActions:VolunteerCertificationPreparationAction[]=[];
  let executionError: {code:string;message:string}|null=null;
+ let inProgress:string|undefined;
  try {
   if(preparation.canPopulateWithoutOverwrite) for(const action of preparation.actions){
+   inProgress=action.kind+':'+action.studentNo;
    const now=await capture();
    const index=now.rows.findIndex(row=>row.studentNo===action.studentNo);
    if(action.kind==='select-person'){
     if(index<0) throw new Error('The selected student is no longer visible');
     if(!now.rows[index].selected) await page.click(`loc=css:.name-list .list-group:nth-child(${index+1}) [role="checkbox"]`);
-    completedActions.push(action);continue;
+    completedActions.push(action);inProgress=undefined;continue;
    }
    let panel:string;
    if(action.kind==='add-person'){
@@ -105,33 +111,33 @@ export async function prepareCertificationPage(task:Task,input:Input){
    }
    await page.waitForSelector(`loc=css:${panel} input[name="requiredCourseCount"]`,{state:'visible'});
    await page.snapshot();
-   const fields=await page.evaluate(({panel})=>{const d=document.querySelector('iframe')?.contentDocument??document;const p=d.querySelector(panel)!;const post=p.querySelector<HTMLInputElement>('.field-select input')!;const hours=p.querySelector<HTMLInputElement>('input[name="requiredCourseCount"]')!;return {post:post?.value??'',hours:hours.value,disabled:hours.disabled};},{panel});
+   const fields=await page.evaluate(({panel})=>{const d=document.querySelector('iframe')?.contentDocument??document;const p=d.querySelector(panel)!;const post=p.querySelector<HTMLInputElement>('input[name="postId"],input[name="date"]')!;const hours=p.querySelector<HTMLInputElement>('input[name="requiredCourseCount"]')!;return {post:post?.value??'',hours:hours.value,disabled:hours.disabled,readOnly:hours.readOnly};},{panel});
    const baseline=input.source.registrations.find(row=>row.studentNo===action.studentNo);
    const baselineHours=input.source.activity.positionSetMethod==='TIME'?baseline?.postDurationHours:baseline?.signDurationHours;
    if(action.kind==='set-person' && fields.hours!=='' && Number(fields.hours)!==action.durationHours && Number(fields.hours)!==baselineHours) throw new Error('A human changed the duration after inspection; preserve it for review');
    if(action.kind==='set-person' && fields.post!==action.postName && fields.post && fields.post!==baseline?.postName) throw new Error('A human changed the post; preserve it for review');
    if(fields.post!==action.postName){
-    await page.click(`loc=css:${panel} .field-select`);
+    await page.click(`loc=css:${panel} input[name="${action.kind==='add-person'?'postId':'date'}"]`);
     await page.waitForSelector('loc=css:.van-picker',{state:'visible'});
     await page.snapshot();
     await page.click(`loc=css:.van-picker-column__item .van-ellipsis:text-is(${JSON.stringify(action.postName)})`);
     await page.click('loc=css:.van-picker__confirm');
     await page.waitForSelector('loc=css:.van-picker',{state:'hidden'});
    }
-   const hours=await page.evaluate(({panel})=>{const d=document.querySelector('iframe')?.contentDocument??document;const e=d.querySelector<HTMLInputElement>(`${panel} input[name="requiredCourseCount"]`)!;return {value:e.value,disabled:e.disabled};},{panel});
-   if(hours.disabled && Number(hours.value)!==action.durationHours) throw new Error('The school fixes the selected post duration; review the differing draft hours');
-   if(!hours.disabled) await page.fill(`loc=css:${panel} input[name="requiredCourseCount"]`,String(action.durationHours));
+   const hours=await page.evaluate(({panel})=>{const d=document.querySelector('iframe')?.contentDocument??document;const e=d.querySelector<HTMLInputElement>(`${panel} input[name="requiredCourseCount"]`)!;return {value:e.value,disabled:e.disabled,readOnly:e.readOnly};},{panel});
+   if((hours.disabled||hours.readOnly) && Number(hours.value)!==action.durationHours) throw new Error('The school fixes the selected post duration; review the differing draft hours');
+   if(!hours.disabled&&!hours.readOnly&&Number(hours.value)!==action.durationHours) await page.fill(`loc=css:${panel} input[name="requiredCourseCount"]`,String(action.durationHours));
    // Only these two source-verified local buttons are allowed; global Save can write remotely.
    await page.click(`loc=css:${panel} ${action.kind==='add-person'?'.footer':'.save'} button`);
    await page.waitForSelector(`loc=css:${panel} input[name="requiredCourseCount"]`,{state:'hidden'});
-   completedActions.push(action);
+   completedActions.push(action);inProgress=undefined;
   }
  }catch(error){executionError={code:'UNKNOWN_OUTCOME',message:error instanceof Error?error.message:'Visible preparation interrupted'};}
- const finalPage=await capture();
- await page.snapshot();
- const result={...preparation,status:'awaiting-user' as const,submitted:false as const,handoff:'completed' as const,completedActions,page:finalPage,executionError};
- await task.handOff();
- return result;
+ let finalPage=initial;
+ try{finalPage=await capture();await page.snapshot();}catch(error){executionError??={code:'UNKNOWN_OUTCOME',message:error instanceof Error?error.message:'Could not inspect the partial preparation'};}
+ let handoff:'completed'|undefined;
+ try{await task.handOff();handoff='completed';}catch{executionError??={code:'UNKNOWN_OUTCOME',message:'Could not hand off the partial preparation'};}
+ return {...preparation,status:'awaiting-user' as const,submitted:false as const,handoff,completedActions,inProgress,page:finalPage,executionError};
 }
 
 /** Opens each local editor for its visible identity and post, then closes without saving. */
@@ -153,7 +159,7 @@ export async function captureCertificationPage(task:Task,input:Input){
    const panel=d.querySelector('.van-popup--center')!;
    const cell=(label:string)=>[...panel.querySelectorAll('.van-cell')].find(e=>e.querySelector('.van-cell__title')?.textContent===label)?.querySelector('.van-cell__value')?.textContent?.trim()??null;
    const hours=panel.querySelector<HTMLInputElement>('input[name="requiredCourseCount"]')?.value??'';
-   return {studentNo:cell('学号'),studentName:cell('姓名'),postName:panel.querySelector<HTMLInputElement>('.field-select input')?.value??null,durationHours:hours===''?null:Number(hours)};
+   return {studentNo:cell('学号'),studentName:cell('姓名'),postName:panel.querySelector<HTMLInputElement>('input[name="date"]')?.value??null,durationHours:hours===''?null:Number(hours)};
   },null);
   if(!fields.studentNo || fields.studentName!==initial.rows[index].studentName) throw new FriendsError({code:FriendsErrorCode.UpstreamBusiness,message:'The visible roster changed during capture; nothing was saved'});
   const posts=input.source.activity.posts.filter(post=>post.name===fields.postName);
