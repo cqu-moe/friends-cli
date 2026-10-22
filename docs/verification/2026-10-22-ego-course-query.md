@@ -21,9 +21,9 @@
 - `courses list --via ego --ego-task-space 7 --ego-page p2 --page 2 --page-size 1`；
 - `courses show course-2 --via ego --ego-task-space 7 --ego-page p2`；
 - 权限拒绝退出码 4 / `PERMISSION_DENIED`；
-- `--via invalid`、缺少 task space、local 混用 Ego 参数等输入错误退出码 2。
+- `--via invalid`、缺少 task space、api 混用 Ego 参数、未发布的 `--via local` 等输入错误退出码 2。
 
-执行目录没有本地会话文件。Ego 脚本复用 `taskSpace(7)` / `p2` 且不调用 `task.finish`；课程 token 不出现在 JSON 输出。成功输出的 `meta.selectedEntry` 为 `ego`，`meta.requestMode` 为 `direct-api`，`meta.verification` 含 `school-api-verified`、学校核对的账号和已核对身份单位。
+执行目录没有本地会话文件。Ego 脚本复用 `taskSpace(7)` / `p2` 且不调用 `task.finish`；课程 token 不出现在 JSON 输出。成功输出的 `meta.selectedEntry` 为 `ego`，`meta.requestMode` 为 `direct-api`，`meta.verification` 含 `school-api-verified`、学校核对的账号和已核对身份单位。默认和不显式传 `--via` 的旧课程查询仍走保存会话 + API，`meta.selectedEntry` 为 `api`。
 
 ## 自动化
 

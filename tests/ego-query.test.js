@@ -223,7 +223,8 @@ test("real CLI uses an Ego-selected query without reading local credentials", as
   for (const args of [
     ["--via", "invalid"],
     ["--via", "ego"],
-    ["--via", "local", "--ego-task-space", "7"],
+    ["--via", "api", "--ego-task-space", "7"],
+    ["--via", "local"],
   ]) {
     await assert.rejects(
       () => run(process.execPath, [cli, "courses", "list", ...args, "--json"], { env }),

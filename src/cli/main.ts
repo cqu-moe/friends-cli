@@ -53,7 +53,7 @@ const schemas = {
     operation: "courses.list",
     permission: "school-verified identity; upstream enforces course access", phases: ["query"],
     input: {
-      via: { type: "local or ego", default: "local", egoTaskSpace: "required integer; reuses an existing Ego task space" },
+      via: { type: "api or ego", default: "api", egoTaskSpace: "required integer; reuses an existing Ego task space" },
       egoPage: { type: "string", default: "p1" },
       levelNo: { type: "string", required: "only when multiple Ego contexts match" },
       unitNo: { type: "string", required: "only when multiple Ego contexts match" },
@@ -67,15 +67,15 @@ const schemas = {
     },
     output: "one page of necessary course projections",
     readonly: true,
-    supportedVia: ["local", "ego"],
+    supportedVia: ["api", "ego"],
     requestMode: "direct-api",
-    verifiedWith: "controlled-local; controlled-ego; live-read-only-evidence",
+    verifiedWith: "controlled-api; controlled-ego; live-read-only-evidence",
   },
   "courses.get": {
     operation: "courses.get",
     permission: "school-verified identity; upstream enforces course access", phases: ["query"],
     input: {
-      via: { type: "local or ego", default: "local", egoTaskSpace: "required integer; reuses an existing Ego task space" },
+      via: { type: "api or ego", default: "api", egoTaskSpace: "required integer; reuses an existing Ego task space" },
       egoPage: { type: "string", default: "p1" },
       levelNo: { type: "string", required: "only when multiple Ego contexts match" },
       unitNo: { type: "string", required: "only when multiple Ego contexts match" },
@@ -83,9 +83,9 @@ const schemas = {
     },
     output: "necessary public course detail projection",
     readonly: true,
-    supportedVia: ["local", "ego"],
+    supportedVia: ["api", "ego"],
     requestMode: "direct-api",
-    verifiedWith: "controlled-local; controlled-ego; live-read-only-evidence",
+    verifiedWith: "controlled-api; controlled-ego; live-read-only-evidence",
   },
 } as const;
 
@@ -102,7 +102,7 @@ function sdk() {
 }
 
 function queryMeta(source: {
-  entry: "local" | "ego";
+  entry: "api" | "ego";
   session: { account: unknown; context: unknown };
 }) {
   return {
@@ -119,8 +119,8 @@ function queryMeta(source: {
 }
 
 async function courseQuerySession(options: Record<string, string | undefined>) {
-  const via = options.via ?? "local";
-  if (via === "local") {
+  const via = options.via ?? "api";
+  if (via === "api") {
     const mixedEgoOptions = ["egoTaskSpace", "egoPage", "levelNo", "unitNo"].filter((key) => options[key] != null);
     if (mixedEgoOptions.length > 0) {
       throw new FriendsError({
@@ -128,12 +128,12 @@ async function courseQuerySession(options: Record<string, string | undefined>) {
         message: `Ego options require --via ego: ${mixedEgoOptions.join(", ")}`,
       });
     }
-    return { session: await loadSession(), entry: "local" as const };
+    return { session: await loadSession(), entry: "api" as const };
   }
   if (via !== "ego") {
     throw new FriendsError({
       code: FriendsErrorCode.InvalidInput,
-      message: "--via must be local or ego",
+      message: "--via must be api or ego",
     });
   }
   if (options.egoTaskSpace === undefined) {
@@ -292,7 +292,7 @@ courses
   .option("--page <number>", "result page", "1")
   .option("--page-size <number>", "results per page", "10")
   .option("--keyword <value>", "course name or organizer keyword")
-  .option("--via <source>", "query session source", "local")
+  .option("--via <source>", "query execution path", "api")
   .option("--ego-task-space <number>", "existing Ego task space required by --via ego")
   .option("--ego-page <label>", "existing Ego page label (default p1)")
   .option("--level-no <value>", "select an Ego level when multiple contexts match")
@@ -313,7 +313,7 @@ courses
   .command("show")
   .description("Show one course by course UUID")
   .argument("<courseId>", "course UUID, not an application or certification UUID")
-  .option("--via <source>", "query session source", "local")
+  .option("--via <source>", "query execution path", "api")
   .option("--ego-task-space <number>", "existing Ego task space required by --via ego")
   .option("--ego-page <label>", "existing Ego page label (default p1)")
   .option("--level-no <value>", "select an Ego level when multiple contexts match")
