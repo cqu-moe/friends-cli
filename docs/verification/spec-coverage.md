@@ -47,14 +47,14 @@ SDK 名称指 npm 根入口；页面/存储适配器从 `/node` 导入，原生�
 | #8 | [认证 API、空 DTO](2026-10-22-certification-api.md) | SDK/CLI 提交、拒绝、UNKNOWN_OUTCOME、不重试、只读回查 | 10-22 学校既有会话只读确认无申请的全 null DTO；真实最终 POST 与认证后结果未验收 |
 | #9 | [志愿查询与参与](2026-10-22-volunteer-operations.md)、[集成修复](2026-10-23-volunteer-fixes.md) | SDK/真实 CLI 全部查询与报名/退出；同源 iframe 实际控件、人工值和中断回执 | 10-23 主任务实际调用公开 SDK `listActivities({pageSize:1})` 成功 1 项；`getIdentity` 的 can-apply 返回 HTTP 400/code=10000，已核实为“已有待审申请”的业务拒绝；错误分类与部分身份结果修复待合入。此前 CLI 500 非持续故障，统一搜索现已调用志愿 SDK 成功；**独立志愿 CLI 尚未完成真实验收**，无参与写入 |
 | #10 | [志愿开办及学校页面](2026-10-22-volunteer-offering.md) | SDK/CLI 分阶段 API、材料、丢失响应；真实 DOM 人工值保护 | 10-22 SDK 字典/组织/学期成功，实际 iframe 文本/选择器/日期准备，随后 reload；handoff 被包装。无真实上传、下一步或最终提交 |
-| #11 | [两类志愿审批](2026-10-22-volunteer-activity-reviews.md) | SDK/CLI 两领域、严格 URL/ID/权限、真实 DOM 决定准备 | 10-22 真实 CLI Ego 报名待办为空、hasMore=false；无真实决定弹窗或写入 |
+| #11 | [两类志愿审批](2026-10-22-volunteer-activity-reviews.md) | SDK/CLI 两领域、严格 URL/ID/权限、真实 DOM 决定准备 | 10-23 真实 CLI `volunteer activity-reviews list --type registration --via ego --page-size 1` 成功、0 项；此前记录 hasMore=false。无真实决定弹窗或写入 |
 | #12 | [个人时长与认证审批](2026-10-22-volunteer-reviews.md) | SDK/CLI 时长、审批与错误；实际 DOM radio/textarea | 真实 CLI Ego 时长空列表；审批因当前角色权限不足拒绝。无真实审批准备/保存/最终提交 |
 | #13 | [课程参与源码与测试](2026-10-22-course-participation.md) | SDK/CLI 参与写入、问卷/材料、状态；iframe 实际事件 | 10-23 真实 CLI `courses registrations list --via ego` 返回 1 项。无真实报名、撤销或退出；角色控件等需用户处理 |
 | #14 | [CourseInfo/ReportSet、材料边界](2026-10-23-course-offering.md) | SDK/CLI 六阶段、丢失响应、严格 iframe DOM | 10-23 实际 SDK prepare 组织/字典查询成功；最新可见文本、类型、级别已填，组织原值匹配并保留。**开始时间仍有差异，修复及最终复测待补**，不宣称完整准备通过；无上传/下一步/最终提交 |
 | #15 | [课程两类审批源码](2026-10-23-course-reviews.md)、[角色核验修复](2026-10-23-review-context-fix.md) | SDK/CLI、权限/节点/状态、真实 DOM 与零最终请求 | 10-23 主任务在功能提交 `dff1dd1` 的真实 CLI Ego 报名待办查询成功、0 项；此前 AUTH_REQUIRED 修复已进入 integration。无真实准备/决定；受控回查不证明整体获批 |
 | #18 | [组织活动查询、两步开办与材料](2026-10-23-organization-activities.md) | SDK/真实 CLI 全部命令、严格路径/材料、多步停止、iframe 实际文本与事件 | 10-23 主任务真实 CLI list/show/requirements 成功；错误历史端点修正后，`e53aea7` 公开 SDK status 成功，nodeList=3、evaluationRecords=2，已随 `42f7d28` 合入。无开办准备/上传/申请写入。材料资源回查只核对 ID/文件名，不证明字节哈希 |
 | #19 | [组织活动参与源码](2026-10-23-organization-participation.md) | SDK/CLI 参与、材料组、丢失响应；实际 DOM | 10-23 真实 CLI list/show 同一项成功，但报名窗口关闭。无实际报名/撤销/退出 |
-| #20 | [组织开办/报名审批源码](2026-10-23-organization-activity-reviews.md) | SDK/CLI 两领域、严格来源/权限、多步停止、实际 DOM | 未记录真实学校待办、准备或写入；verify 只证明当前角色待办范围内的观察 |
+| #20 | [组织开办/报名审批源码](2026-10-23-organization-activity-reviews.md) | SDK/CLI 两领域、严格来源/权限、多步停止、实际 DOM | 10-23 真实 CLI 开办待办查询因当前 XS 身份不能审批而正确 PERMISSION_DENIED / exit 4；**无真实待办查询成功、准备或写入证据**。verify 只证明当前角色待办范围内的观察 |
 | #21 | [组织查询/维护公开说明](../../README.md#学生组织)、组织管理公开 JS | SDK/CLI 组织/成员/允许字段、API 保存及页面保护 | 10-23 真实 CLI Ego `organizations list` 成功 5 项。成员/资料编辑及写入无新增真实证据 |
 | #22 | [加入/退出审批与实际 DIV](2026-10-23-organization-approvals.md) | SDK/CLI API、公开 prepare 自行重验；实际 DIV 无 ref、textarea、人工值、外层冲突与丢失回执 | 10-23 真实 CLI 加入申请列表 page-size=1 返回 1 项；手动打开空“通过”意见弹窗后取消。所选申请已通过、关系 state=1，公开 SDK 正确 BUSINESS_REJECTED；另有未处理申请但当前角色无审批权，正确 PERMISSION_DENIED。两者均未进入 UI，未填意见。**当前无“待处理且有权”的实测目标，完整 public prepare 仅受控；真实预检保护已验证** |
 | #23 | [responsiblePersonChangeInfo 来源](2026-10-23-organization-leader-change.md) | SDK/CLI 候选人/资格/申请/状态、DOM 与不确定响应 | 10-23 真实 CLI Ego status 返回当前负责人、申请及岗位。无负责人变更申请写入或真实可见准备验收 |
@@ -79,6 +79,6 @@ SDK 名称指 npm 根入口；页面/存储适配器从 `/node` 导入，原生�
 
 实际执行 `npm pack`（含 prepack 构建），在源码仓库外临时 fixture home 正常 `npm install` 生成的 tarball，未跳过 lifecycle scripts；依赖版本、manifest、integrity、内容扫描及命令结果保存在 `delivery-installed-1cc70eb4f3f3/`。扫描未见凭据或私有个人数据；README 唯一手机号形状字面量与虚构负责人测试数据逐字核对，未将其当成真实联系方式。离线缓存元数据不足的一次安装没有计为通过；正常 registry 安装成功。未发现需修复的打包缺陷。
 
-本分支合入当前 integration 后的完整测试结果，在交接记录与后续提交中单独标识，不把上述中间包套用到新功能头。
+本分支合入 integration `b292ccf91b44ddd8c51db4b8fab8e0644cf7a4cc` 后，在 `d079594c307fc6665d031edded437918b19335cb` 运行完整 `npm test`（含 TypeScript 构建）：**238 项通过，0 失败、0 跳过**。之后仅更新验收文档。此结果是本地受控测试，不是 CI；最终合并头的安装包复验由主任务运行保存的脚本，不把上述中间包套用到新功能头。
 
 当前仍未验收：CI、真实 API 业务写入、用户最终提交及其生产回查。安装/受控测试不解除原生 Auth 的 WAF 阻塞；主任务负责 PR #25 和真实运行时验收，本 worker 不推送或发布。
