@@ -8,7 +8,7 @@ if(!configuration.executeSession&&script.includes('FRIENDS_CLI_EGO_SESSION:')) {
   console.log('FRIENDS_CLI_EGO_SESSION:'+JSON.stringify({token:'ego-fixture-token',userLevel:'XS'}));
   process.exit(0);
 }
-const stats={clicks:[],fills:[],handoffs:0,newPages:0,navigations:0,loadStates:0,submits:0,remoteWrites:0,finalRequests:0,snapshots:0};
+const stats={clicks:[],fills:[],handoffs:0,newPages:0,navigations:0,loadStates:0,submits:0,remoteWrites:0,finalRequests:0,snapshots:0,captures:0};
 const html=await readFile(configuration.html,'utf8');
 function initialize(w){
   w.fetch=async(url,init)=>{
@@ -33,6 +33,10 @@ if(configuration.iframe){
  d.open();d.write(html);d.close();
 }
 
+if(!script.includes('FRIENDS_CLI_EGO_SESSION:')){
+ if(configuration.preparationToken)content.localStorage.setItem('token_str',configuration.preparationToken);
+ if(configuration.preparationRole)content.localStorage.setItem('userLevel_str',configuration.preparationRole);
+}
 let saved=configuration.state?JSON.parse(await readFile(configuration.state,'utf8').catch(()=>'{"ownership":"agent"}')):{ownership:'agent'};
 if(configuration.partialEditor){d.querySelector('#edit').classList.add('open');}
 if(saved.rows){
@@ -73,6 +77,7 @@ const page={
   async snapshot(){
     active();
     stats.snapshots++;
+    if(configuration.failSnapshotAt===stats.snapshots)throw new Error("Final snapshot connection lost");
     if(configuration.changeOnSecondSnapshot&&stats.snapshots===2){
       d.querySelector('#edit input[name=requiredCourseCount]').value='9';
       d.querySelector('.hours span:last-child').textContent='9';
@@ -83,7 +88,12 @@ const page={
     active();
     if(arguments.length>1&&arg===undefined)throw new Error('page.evaluate argument must be JSON-serializable');
     w.__argument=structuredClone(arg);
-    return JSON.parse(JSON.stringify(await w.eval(`(${fn.toString()})(__argument)`)));
+    const result=JSON.parse(JSON.stringify(await w.eval(`(${fn.toString()})(__argument)`)));
+    if(result?.fields && typeof result.publicity==='number'){
+      stats.captures++;
+      if(configuration.failCaptureAt===stats.captures)throw new Error('Final capture connection lost');
+    }
+    return result;
   },
   async waitForFunction(fn,arg){
     active();
@@ -134,13 +144,20 @@ const page={
 const task={
   page(){return page;},
   async newPage(){active();stats.newPages++;return {...page,async goto(){active();stats.navigations++;}};},
-  async handOff(){active();stats.handoffs++;saved.ownership='user';},
+  async handOff(){active();stats.handoffs++;saved.ownership='user';if(configuration.failHandoff)throw new Error('Handoff acknowledgement lost');},
 };
 try {
-  await new Function('taskSpace','takeOverTaskSpace',`return (async()=>{${script}})()`)(async()=>task,async()=>{
+  const bridgeConsole={log(value){
+    const match=typeof value==='string'&&value.match(/^(FRIENDS_[A-Z_]*(?:PREPARE|REVIEW):)/);
+    if(match&&configuration.receipt){
+      const modes={empty:'{}',malformed:'{',invalidHandoff:JSON.stringify({...JSON.parse(value.slice(match[1].length)),handoff:{malformed:true}}),noHandoff:JSON.stringify({...JSON.parse(value.slice(match[1].length)),handoff:undefined})};
+      console.log(match[1]+modes[configuration.receipt]);
+    }else console.log(value);
+  }};
+  await new Function('taskSpace','takeOverTaskSpace','console',`return (async()=>{${script}})()`)(async()=>task,async()=>{
     saved.ownership='agent';
     return task;
-  });
+  },bridgeConsole);
 } finally {
   if(configuration.state){
     let rows=null;

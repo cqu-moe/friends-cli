@@ -184,6 +184,11 @@ function positiveInteger(value: unknown, field: string, maximum: number): number
   return value as number;
 }
 
+function optionalBoolean(value: unknown, field: string, fallback: boolean): boolean {
+  if (value !== undefined && typeof value !== "boolean") invalid(`${field} must be a boolean`);
+  return value === undefined ? fallback : value;
+}
+
 function duration(value: unknown, field: string, maximum: number, step: number): number {
   const parsed = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
   if (typeof parsed !== "number" || !Number.isFinite(parsed) || parsed <= 0 || parsed > maximum) {
@@ -209,10 +214,12 @@ function localDateTime(value: unknown, field: string): string {
 }
 
 function file(value: File | VolunteerOfferingUploadFile): VolunteerOfferingUploadFile {
+  if (value === null || typeof value !== "object") invalid("Offering material must be a File or Blob wrapper");
   const raw = value as { name?: unknown; size?: unknown; type?: unknown; file?: unknown };
   const actual = raw.file instanceof Blob ? raw.file : value;
   const name = typeof raw.name === "string" ? raw.name : (actual as File).name;
-  const size = typeof raw.size === "number" ? raw.size : actual.size;
+  const size = actual instanceof Blob ? actual.size : NaN;
+  if (raw.size !== undefined && raw.size !== size) invalid("Declared material size must match the actual Blob size");
   const type = typeof raw.type === "string" ? raw.type : (actual as File).type;
   if (!(actual instanceof Blob) || typeof name !== "string" || name === "" || !Number.isSafeInteger(size) || size < 0) {
     invalid("Offering materials must be File or Blob objects with a name and size");
@@ -368,15 +375,18 @@ export function normalizeVolunteerOfferingInput(
     if (posts.reduce((sum, post) => sum + post.recruitNumber, 0) > volunteerNumber) {
       invalid("Post recruitment total exceeds volunteerNumber");
     }
+    if (raw.volunteerStar !== undefined && !Array.isArray(raw.volunteerStar)) invalid("volunteerStar must be an array");
     const volunteerStar = Array.isArray(raw.volunteerStar) ? raw.volunteerStar : [];
     if (volunteerStar.some((star) => !stars.has(star as string))) invalid("volunteerStar contains an unsupported level");
     if (raw.isLimitVolunteer === true && volunteerStar.length === 0) invalid("isLimitVolunteer requires volunteerStar");
+    if (raw.questionnaires !== undefined && !Array.isArray(raw.questionnaires)) invalid("questionnaires must be an array");
     const questionnaires = Array.isArray(raw.questionnaires) ? raw.questionnaires : [];
     const normalizedQuestionnaires = questionnaires.map((questionValue) => {
       const question = object(questionValue);
       if (question === null) invalid("Each questionnaire item must be an object");
       rejectUnknown(question, questionnaireKeys, "Questionnaire item");
       if (!questionnaireItemTypes.has(String(question.itemType))) invalid("Unsupported questionnaire itemType");
+      if (question.options !== undefined && !Array.isArray(question.options)) invalid("Questionnaire options must be an array");
       const options = Array.isArray(question.options) ? question.options.map((optionValue) => {
         const option = object(optionValue);
         if (option === null) invalid("Each questionnaire option must be an object");
@@ -392,20 +402,20 @@ export function normalizeVolunteerOfferingInput(
       return {
         title: requiredString(question.title, "questionnaire title", 32),
         itemType: question.itemType as VolunteerOfferingQuestionnaireInput["itemType"],
-        isMandatory: question.isMandatory === true,
+        isMandatory: optionalBoolean(question.isMandatory, "isMandatory", false),
         sort: positiveInteger(question.sort, "questionnaire sort", 999999),
         options,
       };
     });
     registration = {
       openType: raw.openType, openTime, finishType: raw.finishType, deadline, applyNumber,
-      isOpenEnrollment: raw.isOpenEnrollment === undefined ? true : raw.isOpenEnrollment === true,
-      isEnrollExamine: raw.isEnrollExamine === undefined ? false : raw.isEnrollExamine === true,
-      isHideList: raw.isHideList === undefined ? false : raw.isHideList === true,
-      isLimitVolunteer: raw.isLimitVolunteer === undefined ? false : raw.isLimitVolunteer === true,
+      isOpenEnrollment: optionalBoolean(raw.isOpenEnrollment, "isOpenEnrollment", true),
+      isEnrollExamine: optionalBoolean(raw.isEnrollExamine, "isEnrollExamine", false),
+      isHideList: optionalBoolean(raw.isHideList, "isHideList", false),
+      isLimitVolunteer: optionalBoolean(raw.isLimitVolunteer, "isLimitVolunteer", false),
       volunteerStar,
-      isPrivateCollection: raw.isPrivateCollection === undefined ? false : raw.isPrivateCollection === true,
-      currentOrganization: raw.currentOrganization === undefined ? false : raw.currentOrganization === true,
+      isPrivateCollection: optionalBoolean(raw.isPrivateCollection, "isPrivateCollection", false),
+      currentOrganization: optionalBoolean(raw.currentOrganization, "currentOrganization", false),
       positionSetMethod: raw.positionSetMethod,
       posts,
       questionnaires: normalizedQuestionnaires,

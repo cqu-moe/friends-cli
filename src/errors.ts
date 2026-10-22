@@ -23,7 +23,7 @@ export interface WriteRecovery {
   resourceIds?: string[];
   input?: unknown;
   completed?: string[];
-  handoff?: "completed";
+  handoff?: "completed" | "unknown" | "not-attempted";
   page?: Record<string, string | null>;
   missing?: string[];
   executionError?: { code: string; message: string };

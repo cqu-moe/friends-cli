@@ -257,7 +257,7 @@ export async function courseOfferingCliSetup(t, upstream) {
 }
 
 export async function installCourseOfferingEgoFixture(home, token = "course-fixture-token", url = "https://friends.cqu.edu.cn/mobile/course/courseInfo?type=add", options = {}) {
-  const initial = { curriculumName: options.humanName ?? "", curriculumPlace: "", curriculumContent: "", curriculumType: "", curriculumLevel: "", organizationName: "", beginTime: options.humanBeginTime ?? "", endTime: "" };
+  const initial = { curriculumName: options.humanName ?? "", curriculumPlace: "", curriculumContent: "", curriculumType: "", curriculumLevel: "", organizationName: "", beginTime: options.humanBeginTime ?? "", endTime: "", ...(options.matchingChoices ? {curriculumType:"通识课",curriculumLevel:"校级",organizationName:"示例课程组织",beginTime:"2026-10-01 08:00:00",endTime:"2026-10-31 18:00:00"} : {}) };
   const field = (key, label, select = false) => {
     const multiline = key === "curriculumName" || key === "curriculumContent";
     const name = options.sourceSlots ? "" : ` name="${label}"`;
@@ -311,7 +311,7 @@ export async function installCourseOfferingEgoFixture(home, token = "course-fixt
   const bin = join(home, "bin");
   const command = join(bin, "ego-browser");
   await writeFile(htmlPath, html);
-  await writeFile(config, JSON.stringify({ html: htmlPath, result, token, url, outerUrl: `${new URL(url).origin}/mobile/stuhall`, frame: true, executeSession: true, unreliablePickerWait: options.unreliablePickerWait === true }));
+  await writeFile(config, JSON.stringify({ html: htmlPath, result, token, url, outerUrl: `${new URL(url).origin}/mobile/stuhall`, frame: true, executeSession: true, unreliablePickerWait: options.unreliablePickerWait === true,failCaptureAt:options.failCaptureAt,failSnapshotAt:options.failSnapshotAt,failHandoff:options.failHandoff }));
   await mkdir(bin, { recursive: true });
   const runner = pathToFileURL(resolve("tests/fixtures/strict-ego.mjs")).href;
   await writeFile(command, `#!/usr/bin/env node\nawait import(${JSON.stringify(runner)});\n`, { mode: 0o700 });

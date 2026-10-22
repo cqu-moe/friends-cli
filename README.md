@@ -94,11 +94,13 @@ friends offerings status <offeringApplicationUuid> --via ego --ego-task-space 16
 
 默认使用系统凭据库：macOS Keychain；Linux 固定要求 Secret Service，不在失败时静默退到重启即丢失的 keyutils。会话元数据保存在仓库外 `~/.local/state/friends-cli/session.json`，目录 `0700`、文件 `0600`；Keychain 模式的元数据不含 token。
 
-CQU Auth 登录使用 native public client（`token_endpoint_auth_method: none`）、授权码 + S256 PKCE、固定回环 `http://127.0.0.1:<port>/callback`、`state` 关联和 DPoP。最小 scope 是 `cqu:ticket:friends offline_access`；`offline_access` 用于刷新，不申请其他取票权限。授权码、state、verifier、DPoP key、Auth access/refresh token、一次性 CAS ST 和二课 token 都不进入 argv、日志、schema、`auth status` 或命令结果 JSON。`--no-open` 输出的唯一授权 URL 是例外，它不包含 code/state/verifier/key/token。
+CQU Auth 登录使用 native public client（`token_endpoint_auth_method: none`）、授权码 + S256 PKCE、固定回环 `http://127.0.0.1:<port>/callback`、`state` 关联和 DPoP。最小 scope 是 `cqu:ticket:friends`；需要刷新时额外申请 `offline_access`，CLI 默认请求刷新权限。SDK 的 `offlineAccess:false` 支持仅 access token 的授权；过期后须显式重新授权，不申请其他取票权限。授权码、state、verifier、DPoP key、Auth access/refresh token、一次性 CAS ST 和二课 token 都不进入 argv、日志、schema、`auth status` 或命令结果 JSON。`--no-open` 将授权 URL 进度写到 stderr；该 URL 包含 OAuth 所需的 state，不包含 code/verifier/key/token。stdout 只包含终态结果。
 
 Auth OAuth 凭据与 DPoP key 保存在 `cqu-auth-state.json` 对应的安全边界中；文件模式同样是目录 `0700`、文件 `0600`，Keyring 模式元数据只保存 issuer/client/JKT 标识。二课 token 仍独立保存在 `session.json`/会话凭据库。刷新轮换使用同一 DPoP key、跨进程文件锁串行保存；旧 refresh 重放、错误 DPoP key、密钥缺失和非 DPoP token 都失败关闭，要求重新授权，不生成替代 key，也不回退 Bearer 或本地登录。
 
 `--storage file` 是显式后备，仅支持可执行 POSIX 目录/文件权限检查的平台（macOS/Linux）；Windows 文件后备不受支持。它同样要求仓库外专用目录和权限，可配合 `FRIENDS_HOME` 指定独立目录。
+
+同一进程内，SDK 的所有 `enterHall` 入口（包括 course 与 volunteer）共享按学校 origin/token 固定的账号、角色和单位绑定；冲突在激活前拒绝，同一上下文可复用。该检查不提供跨进程或外部客户端的服务器会话隔离。
 
 ## SDK
 
@@ -191,12 +193,12 @@ friends drafts capture <draftId> --via ego --ego-task-space 16 \
 
 ## 输出与错误
 
-业务命令与 schema 输出为版本化 JSON；`auth login --method cqu-auth --no-open` 会先输出一行只含授权 URL 的 JSON 事件，完成后输出最终 JSON。`--help`/`--version` 使用普通文本，错误诊断写 stderr。退出码：0 成功，2 输入错误，3 认证失效，4 权限不足，5 业务拒绝/状态冲突，6 网络或协议错误，7 写入结果不确定且禁止自动重试。HTTP 200 但 `code !== "0"` 不是成功；HTTP 非 2xx 即使业务码为 0 也不是成功。
+业务命令与 schema 的 stdout 为一个版本化终态 JSON；`auth login --method cqu-auth --no-open` 将只含授权 URL 的进度 JSON 写到 stderr，成功或失败时均只向 stdout 输出一个最终 JSON。`--help`/`--version` 使用普通文本，错误诊断写 stderr。退出码：0 成功，2 输入错误，3 认证失效，4 权限不足，5 业务拒绝/状态冲突，6 网络或协议错误，7 写入结果不确定且禁止自动重试。HTTP 200 但 `code !== "0"` 不是成功；HTTP 非 2xx 即使业务码为 0 也不是成功。
 
 ## 验证边界
 
 - `npm test`：TypeScript 构建、SDK 公开方法测试、真实 CLI 子进程测试、Node/Ego 桥安全测试、受控 OAuth/DPoP/学校 API 场景、macOS Keyring 与跨进程刷新锁测试。
-- CQU Auth 生产 native/public client 尚未注册，线上真实 Auth 登录、同意、ST 核销和学校 API 验收由后续配置与主线程验收完成；仓库内受控 HTTP 服务通过不能替代这些生产验收。
+- CQU Auth 生产 native/public client 已注册；Node discovery 仍被 `403 cf-mitigated: challenge` 阻挡，线上真实 Auth 登录、同意、ST 核销和学校 API 验收由主线程继续完成；仓库内受控 HTTP 服务通过不能替代这些生产验收。
 - 课程接口和身份形状已按 2026-10-22 只读实测固化；接口资料中的历史 `verified` 不被当作当前生产验收。
 - 本仓库测试使用虚构 HTTP/Ego 场景。学校登录与只读查询单独记录于 [验收记录](docs/verification/2026-10-22-local-courses.md)，CI 通过不代表生产写入能力。
 - 课程开办的 SDK、真实 CLI 子进程和 strict Ego 脚本已用受控 HTTP/jsdom 场景验证；主任务另实测学校真实 helper 的恢复、完整可见录入和清理。该实测未执行真实 handoff、上传、下一步或最终提交，不能扩大为生产 SDK/CLI 整条链路或开办获批验收。

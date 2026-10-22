@@ -251,6 +251,13 @@ test("SDK and CLI reject changed visible accounts and retain unknown partial for
  let ego=await executingEgo(root,{browserToken:"different-token"});
  await assert.rejects(()=>prepareVolunteerCertificationReviewInEgo({...options,command:ego.command}),e=>e.code==="PERMISSION_DENIED");
  assert.deepEqual((await ego.actions()).at(-1).stats.clicks,[]);
+ for(const mismatch of [{iframeToken:'other-token'},{iframeRole:'XS'},{iframeUrl:'https://friends.cqu.edu.cn/mobile/volunteerManage/campusCerApprovalDetail?uuid=other-review'}]){
+  ego=await executingEgo(root,mismatch);
+  await assert.rejects(()=>prepareVolunteerCertificationReviewInEgo({...options,command:ego.command}),{code:'PERMISSION_DENIED'});
+  const env={...process.env,FRIENDS_BASE_URL:upstream.baseUrl,PATH:root+':'+process.env.PATH};
+  await assert.rejects(()=>run(resolve('dist/cli/main.js'),['volunteer-certification-reviews','prepare','review-1','--via','ego','--ego-task-space','16','--decision','pass','--message','待人工审核'],env),e=>e.code===4&&e.json.error.code==='PERMISSION_DENIED');
+  const observed=(await ego.actions()).at(-1).stats;assert.deepEqual(observed.clicks,[]);assert.deepEqual(observed.fills,[]);assert.equal(observed.handoffs,0);assert.equal(observed.remoteWrites,0);
+ }
  ego=await executingEgo(root,{failAfterFill:true});
  await assert.rejects(()=>prepareVolunteerCertificationReviewInEgo({...options,command:ego.command}),e=>e.code==="UNKNOWN_OUTCOME"&&e.recovery.applicationId==="review-1");
  let stats=(await ego.actions()).at(-1).stats;assert.equal(stats.handoffs,1);assert.equal(stats.finalConfirms,0);assert.equal(stats.remoteWrites,0);

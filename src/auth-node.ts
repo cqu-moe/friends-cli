@@ -186,7 +186,7 @@ function validateSecret(value: unknown): CquAuthSecret {
   if (
     secret.credentials?.tokenType !== "DPoP" ||
     typeof secret.credentials.accessToken !== "string" || secret.credentials.accessToken === "" ||
-    typeof secret.credentials.refreshToken !== "string" || secret.credentials.refreshToken === "" ||
+    (secret.credentials.refreshToken !== undefined && (typeof secret.credentials.refreshToken !== "string" || secret.credentials.refreshToken === "")) ||
     typeof secret.keyPair?.privateJwk !== "object" || secret.keyPair.privateJwk === null ||
     typeof secret.keyPair?.publicJwk !== "object" || secret.keyPair.publicJwk === null
   ) {

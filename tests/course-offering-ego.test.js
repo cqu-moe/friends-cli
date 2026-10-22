@@ -1,7 +1,9 @@
+import {execFile} from "node:child_process";
+import {promisify} from "node:util";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import {
   application,
@@ -24,7 +26,7 @@ async function setup(t, { token = "course-fixture-token", courseId = null, ...pa
     else process.env.FRIENDS_EGO_FIXTURE_CONFIG = previousConfig;
   });
   return {
-    upstream,
+    upstream,home,
     options: {
       application: { ...application, uuid: courseId },
       session,
@@ -165,4 +167,21 @@ test("course offering Ego resumes zero-second date values and preserves nonzero-
     assert.equal(observed.submits, 0);
     assert.equal(observed.remoteWrites, 0);
   });
+});
+
+
+for(const [failure,options] of [['capture',{failCaptureAt:12}],['snapshot',{failSnapshotAt:1}],['handoff',{failHandoff:true}],['capture-and-handoff',{failCaptureAt:12,failHandoff:true}]])test(`course offering public SDK and real CLI preserve partial recovery after final ${failure} failure`,async t=>{
+ const f=await setup(t,{courseId:'course-fixture',matchingChoices:true,...options});
+ function verify(error){
+  assert.equal(error.code,'UNKNOWN_OUTCOME');assert.equal(error.retryable,false);
+  assert.equal(error.recovery.courseId,'course-fixture');
+  assert.deepEqual(error.recovery.completed.slice(0,3),['curriculumName','curriculumPlace','curriculumContent']);
+  assert.equal(error.recovery.page.curriculumContent,'受控课程介绍');
+  assert.equal(error.recovery.handoff,options.failHandoff?'unknown':'completed');
+  assert.match(error.recovery.executionError.message,new RegExp(failure.split('-')[0],'i'));return true;
+ }
+ await assert.rejects(()=>prepareCourseOfferingInEgo(f.options),verify);
+ const path=join(f.home,'input.json');await writeFile(path,JSON.stringify(f.options.application));
+ await assert.rejects(()=>promisify(execFile)(process.execPath,['dist/cli/main.js','course-offering','prepare-ego','--input',path,'--ego-task-space','7','--ego-page','p2'],{env:{...process.env,FRIENDS_HOME:f.home,FRIENDS_BASE_URL:f.upstream.baseUrl,PATH:dirname(f.options.command)+':'+process.env.PATH},timeout:20000}),error=>{assert.equal(error.code,7);return verify(JSON.parse(error.stdout).error);});
+ const observed=await f.observed();assert.equal(observed.fills.length,3);assert.equal(observed.handoffs,1);assert.equal(observed.remoteWrites,0);assert.equal(observed.submits,0);assert.equal(observed.navigations,0);
 });

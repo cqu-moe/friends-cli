@@ -38,6 +38,7 @@
   "dependencies": {
     "@napi-rs/keyring": "^2.1.2",
     "commander": "^14.0.2",
+    "fs-native-extensions": "1.5.2",
     "oauth4webapi": "3.8.8"
   },
   "devDependencies": {

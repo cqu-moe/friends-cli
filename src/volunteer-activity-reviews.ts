@@ -91,6 +91,7 @@ export function createVolunteerActivityReviewClient(options: VolunteerActivityRe
     const sdk = createFriendsSdk({ baseUrl, fetch: fetchImpl, timeoutMs });
     const headers = { 'content-type': 'application/json', 'h-zove-token': session.token, 'h-zove-userlevel': session.userLevel, 'h-zove-source': '30100', 'h-zove-clienttype': '1', 'h-zove-tenantid': 'EK', 'h-zove-appkey': service };
     const prepared = new WeakMap<PreparedVolunteerActivityReview, {
+        used?: boolean;
         input: VolunteerActivityReviewInput;
         raw: string;
         plan: string;
@@ -232,8 +233,12 @@ export function createVolunteerActivityReviewClient(options: VolunteerActivityRe
             if (intent?.via !== 'api' || intent.intent !== 'decide-volunteer-activity-review' || intent.confirm !== true)
                 fail('Review submission requires explicit API intent and confirmation');
             const saved = prepared.get(plan);
+            if (saved?.used)
+                fail("This prepared volunteer review has already been consumed", FriendsErrorCode.UpstreamBusiness);
             if (!saved || saved.plan !== JSON.stringify(plan))
                 fail('Use an unchanged review prepared by this client');
+            saved.used = true;
+            plan = JSON.parse(saved.plan) as PreparedVolunteerActivityReview;
             const latest = await current(plan.type, plan.id);
             if (JSON.stringify(latest.raw) !== saved.raw)
                 fail('The review changed after preparation', FriendsErrorCode.UpstreamBusiness);

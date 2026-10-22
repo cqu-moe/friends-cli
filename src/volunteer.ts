@@ -1,3 +1,4 @@
+import { reserveSchoolContext } from "./school-context.js";
 import { FriendsError, FriendsErrorCode, type WriteRecovery } from "./errors.js";
 import type { VolunteerActivityPost } from "./drafts.js";
 import type { VerifiedCourseSession } from "./index.js";
@@ -660,6 +661,7 @@ async function activateSession(options: {
     ? "STUDENT"
     : userLoginType === "TEACHER" || userLoginType === "OTHER" ? "TEACHER" : undefined;
   if (userType === undefined) protocol("Unsupported friends userLoginType");
+  await reserveSchoolContext(options.baseUrl, input.token, input.account.userNo, input.context.levelNo, input.context.unit.unitNo);
   const entered = await readApi({
     ...options,
     path: "/ek-agg-mob/user/enterHall",

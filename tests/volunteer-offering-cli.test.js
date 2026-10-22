@@ -55,6 +55,7 @@ test("real CLI validates file/stdin input, uploads, submits, and queries status 
   assert.equal(preparedStdin.data.payload.organizationId, "org-1");
   assert.equal(preparedStdin.data.payload.applyReason, undefined);
 
+  await assert.rejects(() => run(cli, env, ['offerings','prepare','--input','-','--via','api','--json'], JSON.stringify({...raw,registration:{...raw.registration,isEnrollExamine:'true'}})), error => error.code===2 && JSON.parse(error.stdout).error.code==='INVALID_INPUT');
   const beforeUploads = upstream.state.uploads.length;
   await assert.rejects(() => run(cli, env, ["offerings", "materials", "--input", inputPath, "--via", "api", "--json"]), (error) => {
     assert.equal(error.code, 2); assert.equal(JSON.parse(error.stdout).error.code, "INVALID_INPUT"); return true;

@@ -525,6 +525,7 @@ test("SDK rejects unknown login types and verifies the entered level and unit", 
 test("SDK full query chain preserves unknown pagination and rejects expired, denied and conflicting contexts", async (t) => {
   let mode = "normal";
   let entered = 0;
+  const activeUnits = new Map();
   const server = createServer((req,res) => {
     let body="";req.on("data",chunk=>body+=chunk);
     req.on("end",()=>{
@@ -534,15 +535,16 @@ test("SDK full query chain preserves unknown pagination and rejects expired, den
       }
       if (req.url.endsWith("/user/info")) {json(res,200,{code:"0",data:{userNo:"fixture-account",userName:"示例"}});return;}
       if (req.url.endsWith("/enterHall")) {
-        entered++;const input=JSON.parse(body);json(res,200,{code:"0",data:{account:"fixture-account",name:"示例",userLoginStateLevel:input.userStateLevel,departmentNo:input.departNo}});return;
+        entered++;const input=JSON.parse(body);activeUnits.set(req.headers["h-zove-token"],input.departNo);json(res,200,{code:"0",data:{account:"fixture-account",name:"示例",userLoginStateLevel:input.userStateLevel,departmentNo:input.departNo}});return;
       }
-      if (req.url.endsWith("student-apply-page-list")) {json(res,200,{code:"0",data:{data:[{uuid:"fixture-course",curriculumName:"示例课程"}]}});return;}
+      if (req.url.endsWith("student-apply-page-list")) {json(res,200,{code:"0",data:{data:[{uuid:"fixture-course",curriculumName:activeUnits.get(req.headers["h-zove-token"]),activityName:activeUnits.get(req.headers["h-zove-token"])}]}});return;}
       json(res,200,{code:"0",data:{uuid:"fixture-course",curriculumName:"示例课程",roles:[],questionnaires:[]}});
     });
   });
   t.after(()=>{server.closeAllConnections();server.close();});
   await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
-  const sdk=createFriendsSdk({baseUrl:`http://127.0.0.1:${server.address().port}/gateway`});
+  const baseUrl=`http://127.0.0.1:${server.address().port}/gateway`;
+  const sdk=createFriendsSdk({baseUrl});
   const browser={token:"fixture-token",userLevel:"XS"};
   const identity=await sdk.inspectLocalSession(browser);
   const activated=await sdk.activateLocalContext({...browser,selector:{unitNo:"unit-a"}});
@@ -553,6 +555,31 @@ test("SDK full query chain preserves unknown pagination and rejects expired, den
   const before=entered;
   await assert.rejects(()=>sdk.createCourseClient({...browser,account:identity.account,context:identity.contexts[1]}),e=>e.code===FriendsErrorCode.UpstreamBusiness);
   assert.equal(entered,before);
+  const anotherSdk=createFriendsSdk({baseUrl});
+  await assert.rejects(()=>anotherSdk.createCourseClient({...browser,account:identity.account,context:identity.contexts[1]}),{code:FriendsErrorCode.UpstreamBusiness});
+  assert.equal(entered,before,'another SDK must not change this token at enterHall');
+  const conflictingVolunteer=await anotherSdk.createVolunteerClient({...browser,account:identity.account,context:identity.contexts[1]});
+  await assert.rejects(()=>conflictingVolunteer.listActivities(),{code:FriendsErrorCode.UpstreamBusiness});
+  assert.equal(entered,before,'a volunteer factory must share the course token binding');
+  const reused=await anotherSdk.createCourseClient({...browser,...activated});
+  assert.equal((await reused.list()).items[0].name,'unit-a');
+  assert.equal((await client.list()).items[0].name,'unit-a');
+  const sameVolunteer=await anotherSdk.createVolunteerClient({...browser,...activated});
+  assert.equal((await sameVolunteer.listActivities()).items[0].name,'unit-a');
+  const volunteerFirst={...browser,token:'volunteer-first',account:identity.account,context:identity.contexts[0]};
+  const firstVolunteer=await sdk.createVolunteerClient(volunteerFirst);
+  assert.equal((await firstVolunteer.listActivities()).items[0].name,'unit-a');
+  const beforeReverse=entered;
+  await assert.rejects(()=>anotherSdk.createCourseClient({...volunteerFirst,context:identity.contexts[1]}),{code:FriendsErrorCode.UpstreamBusiness});
+  assert.equal(entered,beforeReverse);
+  const beforeRace=entered;
+  const raced=await Promise.allSettled(identity.contexts.map(context=>createFriendsSdk({baseUrl}).createCourseClient({...browser,token:'racing-token',account:identity.account,context})));
+  assert.equal(raced.filter(result=>result.status==='fulfilled').length,1);
+  assert.equal(raced.find(result=>result.status==='rejected').reason.code,FriendsErrorCode.UpstreamBusiness);
+  assert.equal(entered,beforeRace+1,'conflicting concurrent activation must not reach enterHall');
+  const winner=raced.findIndex(result=>result.status==='fulfilled');
+  assert.equal((await raced[winner].value.list()).items[0].name,identity.contexts[winner].unit.unitNo);
+
   for (const [scenario,code] of [["expired",FriendsErrorCode.AuthRequired],["denied",FriendsErrorCode.PermissionDenied]]) {
     mode=scenario;await assert.rejects(()=>client.list(),e=>e.code===code);
   }

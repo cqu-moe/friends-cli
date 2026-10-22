@@ -581,8 +581,9 @@ try {
   const storage = await page.evaluate(() => ({token:localStorage.getItem("token_str"),userLevel:localStorage.getItem("userLevel_str")}));
   if ((${parseToken.toString()})(storage.token) !== ${JSON.stringify(options.session.token)} || storage.userLevel !== ${JSON.stringify(options.session.userLevel)}) throw new FriendsError({code:FriendsErrorCode.PermissionDenied,message:"The visible Ego account changed"});
   started=true;
-  const result = await (${prepareVolunteerActivityReviewPage.toString()})(page,{url:target.href,decision:${JSON.stringify(options.decision)},message:${JSON.stringify(options.message)},time:""});
+  const result = await (${prepareVolunteerActivityReviewPage.toString()})(page,{url:target.href,session:${JSON.stringify({token:options.session.token,userLevel:options.session.userLevel})},decision:${JSON.stringify(options.decision)},message:${JSON.stringify(options.message)},time:""});
   completed=result.completed;
+  if(result.denied)throw new FriendsError({code:FriendsErrorCode.PermissionDenied,message:result.error});
   if (result.executionError) {await task.handOff();throw new Error("Visible certification review preparation stopped partway; inspect the form");}
   if (result.status !== "awaiting-user") throw new FriendsError({code:FriendsErrorCode.PermissionDenied,message:result.manualFields.join(", ")});
   await task.handOff();

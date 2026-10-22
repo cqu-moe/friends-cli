@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import {record,strings,pageActions,executionFailure,knownPrecondition} from "./ego-receipt.js";
+import {runEgoJson} from "./ego-process.js";
 import { createVolunteerOfferingClient } from "./volunteer-offering-api.js";
 import { readVerifiedEgoSession } from "./node.js";
 import { FriendsError, FriendsErrorCode } from "./errors.js";
@@ -29,32 +30,6 @@ function validate(options: EgoOptions): void {
   if (!/^p[1-9][0-9]*$/.test(page)) throw error("Invalid Ego page label", FriendsErrorCode.InvalidInput);
 }
 
-async function runEgoJson<T>(script: string, command: string, timeoutMs: number, marker: string): Promise<T> {
-  const child = spawn(command, ["nodejs"], { stdio: ["pipe", "pipe", "pipe"] });
-  let stdout = ""; let stderr = "";
-  const collect = (stream: "stdout" | "stderr", chunk: Buffer) => {
-    if (stream === "stdout") stdout += chunk.toString(); else stderr += chunk.toString();
-    if (stdout.length + stderr.length > 1024 * 1024) child.kill("SIGTERM");
-  };
-  child.stdout.on("data", (chunk: Buffer) => collect("stdout", chunk));
-  child.stderr.on("data", (chunk: Buffer) => collect("stderr", chunk));
-  child.stdin.on("error", () => child.kill("SIGTERM"));
-  const timer = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
-  const closed = new Promise<number>((resolve, reject) => {
-    child.once("error", reject); child.once("close", (code) => resolve(code ?? -1));
-  });
-  child.stdin.end(script);
-  let exitCode: number;
-  try { exitCode = await closed; } catch { child.kill("SIGTERM"); throw error("Could not start the configured Ego browser command", FriendsErrorCode.UnknownOutcome); } finally { clearTimeout(timer); }
-  if (exitCode !== 0) throw error("Could not prepare the visible offering page; inspect it before retrying", FriendsErrorCode.UnknownOutcome);
-  const lines = `${stdout}\n${stderr}`.split("\n").filter((line) => line.startsWith(marker));
-  if (lines.length !== 1) throw error("Could not prepare the visible offering page; inspect it before retrying", FriendsErrorCode.UnknownOutcome);
-  try {
-    return JSON.parse(lines[0].slice(marker.length)) as T;
-  } catch {
-    throw error("The Ego offering bridge returned an invalid result", FriendsErrorCode.NetworkProtocol);
-  }
-}
 
 export async function prepareVolunteerOfferingInEgo(options: EgoOptions): Promise<VolunteerOfferingVisiblePreparation> {
   validate(options);
@@ -94,17 +69,23 @@ try {
  const result = await prepareVolunteerOfferingPage(task, ${JSON.stringify(input)});
  console.log("FRIENDS_CLI_OFFERING_PREPARE:" + JSON.stringify(result));
 } catch (error) {
- console.log("FRIENDS_CLI_OFFERING_PREPARE:" + JSON.stringify({executionError:{code:error.code ?? "UNKNOWN_OUTCOME",message:error.message},status:"awaiting-user",submitted:false,actions:[],missing:["human-review:page"]}));
+ console.log("FRIENDS_CLI_OFFERING_PREPARE:" + JSON.stringify({error:error.message,errorCode:error.code}));
 }
 `;
-  const result = await runEgoJson<VolunteerOfferingVisiblePreparation>(
-    script, options.command ?? "ego-browser", (options.timeoutMs ?? 300_000) + 30_000, "FRIENDS_CLI_OFFERING_PREPARE:",
-  );
-  if (result.executionError) {
-    throw new FriendsError({
-      code: FriendsErrorCode.UnknownOutcome, message: result.executionError.message,
-      recovery: { operation: "offerings.prepare", completed: result.actions.map((action) => `${action.field}:${action.action}`) },
-    });
+  let result:VolunteerOfferingVisiblePreparation|undefined;
+  try {
+    const raw=await runEgoJson<unknown>({script,command:options.command??"ego-browser",timeoutMs:(options.timeoutMs??300_000)+30_000,marker:"FRIENDS_CLI_OFFERING_PREPARE:",failure:"Visible offering preparation returned no reliable receipt"});
+    if(!record(raw)||(raw.handoff!==undefined&&raw.handoff!=='completed')||raw.submitted!==false||!pageActions(raw.actions,['filled','selected','already-matching','human-value-preserved'])||
+       !strings(raw.missing)||!executionFailure(raw.executionError)||!record(raw.page)||typeof raw.page.url!=='string'||
+       !Array.isArray(raw.page.fields)||!raw.page.fields.every(f=>record(f)&&typeof f.name==='string'&&typeof f.value==='string')||
+       typeof raw.page.publicityUploadCount!=='number'||typeof raw.page.attachmentUploadCount!=='number'||
+       (options.dryRun?raw.status!=='ready'||raw.dryRun!==true:raw.status!=='awaiting-user')) throw new Error('Incomplete Ego offering receipt');
+    result=raw as unknown as VolunteerOfferingVisiblePreparation;
+    if(result.executionError || !options.dryRun&&result.handoff!=='completed')throw new Error(result.executionError?.message??'Ego handoff was not confirmed');
+    return result;
+  } catch(cause) {
+    if(knownPrecondition(cause))throw cause;
+    throw new FriendsError({code:FriendsErrorCode.UnknownOutcome,message:cause instanceof Error?cause.message:'Visible offering preparation is uncertain',
+      recovery:{operation:'offerings.prepare',pageLabel:options.page??'p1',completed:result?.actions.map(action=>`${action.field}:${action.action}`)??[],handoff:result?.handoff??'unknown',serverAcknowledged:false}});
   }
-  return result;
 }

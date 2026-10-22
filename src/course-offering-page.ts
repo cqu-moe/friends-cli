@@ -139,7 +139,9 @@ export async function prepareCourseOfferingPage(task: Task, input: Input) {
     return true;
   }, labels);
 
-  const capture = () => page.evaluate((fields) => {
+  let last = {fields:Object.fromEntries(Object.keys(labels).map(field=>[field,null])) as Record<Field,string|null>,publicity:0,attachments:0};
+  const capture = async () => {
+    const current = await page.evaluate((fields) => {
     const d = document.querySelector("iframe")?.contentDocument ?? document;
     return {
       fields: Object.fromEntries(fields.map(field => {
@@ -151,7 +153,10 @@ export async function prepareCourseOfferingPage(task: Task, input: Input) {
       publicity: d.querySelectorAll(".van-uploader")[0]?.querySelectorAll(".van-uploader__preview").length ?? 0,
       attachments: d.querySelectorAll(".van-uploader")[1]?.querySelectorAll(".van-uploader__preview").length ?? 0,
     };
-  }, Object.keys(labels) as Field[]);
+    }, Object.keys(labels) as Field[]);
+    last=current;
+    return current;
+  };
   const actions: Array<{ field: string; action: "filled" | "already-matching" | "human-value-preserved" | "missing" }> = [];
   let executionError: { code: string; message: string } | null = null;
   const requested: Partial<Record<Field, string>> = {
@@ -189,14 +194,22 @@ export async function prepareCourseOfferingPage(task: Task, input: Input) {
   } catch (error) {
     executionError = { code: error instanceof FriendsError ? error.code : FriendsErrorCode.UnknownOutcome, message: error instanceof Error ? error.message : "Visible course preparation failed" };
   }
-  const final = await capture();
+  let final=last;
+  try {
+    final=await capture();
+    await page.snapshot();
+  } catch(error) {
+    executionError ??= {code:FriendsErrorCode.UnknownOutcome,message:error instanceof Error?error.message:'Final course inspection failed'};
+  }
   for (const field of ["role", "attestationType"] as const) actions.push({ field, action: final.fields[field] === null ? "missing" : "human-value-preserved" });
   const missing = Object.entries(final.fields).filter(([, v]) => v === null).map(([field]) => field);
   if (final.publicity === 0) missing.push("materials:publicity");
   if (final.attachments === 0) missing.push("materials:attachment");
   missing.push("human-review:report-settings-and-final-submit");
-  await page.snapshot();
-  await task.handOff();
-  return { status: "awaiting-user" as const, submitted: false as const, handoff: "completed" as const,
+  // A lost handoff response does not prove ownership was retained. Never retry it or act afterward.
+  let handoff:"completed"|"unknown"="unknown";
+  try {await task.handOff();handoff="completed";}
+  catch(error) {executionError ??= {code:FriendsErrorCode.UnknownOutcome,message:error instanceof Error?error.message:'Course handoff was not confirmed'};}
+  return { status: "awaiting-user" as const, submitted: false as const, handoff,
     actions, missing, executionError, page: final.fields };
 }

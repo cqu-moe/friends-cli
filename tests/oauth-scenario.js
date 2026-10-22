@@ -147,7 +147,7 @@ export async function controlledCquAuthScenario(options = {}) {
       }
 
       if (url.pathname === "/api/v1/auth/oauth2/authorize") {
-        const expectedScope = ["cqu:ticket:friends", "offline_access"];
+        const expectedScope = options.expectedOfflineAccess === false ? ["cqu:ticket:friends"] : ["cqu:ticket:friends", "offline_access"];
         if (
           url.searchParams.get("client_id") !== clientId ||
           url.searchParams.get("redirect_uri")?.startsWith(`http://127.0.0.1:`) !== true || new URL(url.searchParams.get("redirect_uri")).pathname !== redirectPath ||
@@ -200,10 +200,10 @@ export async function controlledCquAuthScenario(options = {}) {
           }, () => {
             const accessToken = `access-${state.accessSerial++}`;
             const refreshToken = `refresh-${state.refreshSerial++}`;
-            const scopes = new Set(["cqu:ticket:friends", "offline_access"]);
-            grants.set(refreshToken, { jkt: codeRecord.dpopJkt, current: true, scopes });
+            const scopes = new Set(options.accessOnly ? ["cqu:ticket:friends"] : ["cqu:ticket:friends", "offline_access"]);
+            if (!options.accessOnly) grants.set(refreshToken, { jkt: codeRecord.dpopJkt, current: true, scopes });
             accessTokens.set(accessToken, { jkt: codeRecord.dpopJkt, scopes });
-            return { accessToken, refreshToken };
+            return { accessToken, refreshToken: options.accessOnly ? undefined : refreshToken };
           }, "authorization_code");
         }
 
@@ -348,7 +348,7 @@ export async function controlledCquAuthScenario(options = {}) {
         refresh_token: refreshToken,
         token_type: "DPoP",
         expires_in: 900,
-        scope: "cqu:ticket:friends offline_access",
+        scope: options.accessOnly ? "cqu:ticket:friends" : "cqu:ticket:friends offline_access",
       });
     }
   });

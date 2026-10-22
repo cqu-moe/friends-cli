@@ -1,3 +1,4 @@
+import {record,strings} from "./ego-receipt.js";
 import { createVolunteerActivityReviewClient, validateVolunteerActivityReviewInput, type VolunteerActivityReviewInput } from './volunteer-activity-reviews.js';
 import { prepareVolunteerActivityReviewPage } from './volunteer-activity-review-page.js';
 import { readVerifiedEgoSession } from './node.js';
@@ -17,14 +18,15 @@ export async function prepareVolunteerActivityReviewInEgo(options: {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1)
         throw new FriendsError({ code: FriendsErrorCode.InvalidInput, message: 'Invalid Ego timeout' });
     validateVolunteerActivityReviewInput(options.input);
+    options={...options,input:structuredClone(options.input)};
     const baseUrl = options.baseUrl ?? 'https://friends.cqu.edu.cn/gateway';
     const session = await readVerifiedEgoSession({ ...options, baseUrl });
     const client = createVolunteerActivityReviewClient({ baseUrl, session, timeoutMs });
     const plan = await client.prepare(options.input);
-    const input = { url: new URL(plan.route, baseUrl).href, ...options.input, callbackActivityId: plan.payload.callbackActivityId };
+    const input = { session:{token:session.token,userLevel:session.userLevel}, url: new URL(plan.route, baseUrl).href, ...options.input, callbackActivityId: plan.payload.callbackActivityId };
     const script = `const task=await taskSpace(${options.taskSpaceId});const page=task.page(${JSON.stringify(options.page ?? 'p1')});
 const result=await (${prepareVolunteerActivityReviewPage.toString()})(page,${JSON.stringify(input)});
-await task.handOff();console.log('FRIENDS_ACTIVITY_REVIEW:'+JSON.stringify({...result,handoff:'completed'}));`;
+if(!result.denied)await task.handOff();console.log('FRIENDS_ACTIVITY_REVIEW:'+JSON.stringify({...result,handoff:result.denied?'not-attempted':'completed'}));`;
     try {
         const result = await runEgoJson<{
             status: string;
@@ -34,13 +36,15 @@ await task.handOff();console.log('FRIENDS_ACTIVITY_REVIEW:'+JSON.stringify({...r
             handoff: 'completed';
             executionError?: boolean;
         }>({ script, command: options.command ?? 'ego-browser', timeoutMs, marker: 'FRIENDS_ACTIVITY_REVIEW:', failure: 'Ego review preparation was interrupted; inspect the page before continuing' });
+        if(!record(result)||result.submitted!==false||result.handoff!=='completed'||!['needs-user','awaiting-user'].includes(result.status)||!strings(result.completed)||!strings(result.manualFields)||result.executionError!==undefined&&typeof result.executionError!=='boolean')throw new Error('Incomplete Ego review receipt');
         if (result.executionError)
             throw new FriendsError({ code: FriendsErrorCode.UnknownOutcome, message: 'Visible review preparation stopped partway; inspect the handed-off page before continuing', recovery: { operation: 'volunteer.activity-reviews.prepare', activityId: plan.activityId, applicationId: plan.id, completed: result.completed } });
         return { ...result, type: plan.type, id: plan.id, activityId: plan.activityId };
     }
     catch (error) {
-        if (error instanceof FriendsError && error.code === FriendsErrorCode.UnknownOutcome)
+        if (error instanceof FriendsError && [FriendsErrorCode.PermissionDenied,FriendsErrorCode.AuthRequired,FriendsErrorCode.InvalidInput].some(code=>code===error.code)) throw error;
+        if (error instanceof FriendsError && error.code === FriendsErrorCode.UnknownOutcome && error.recovery)
             throw error;
-        throw new FriendsError({ code: FriendsErrorCode.UnknownOutcome, message: 'Ego review preparation may be partial; inspect the existing page before retrying; final submission was not requested', recovery: { operation: 'volunteer.activity-reviews.prepare', activityId: plan.activityId, applicationId: plan.id, completed: ['visible-preparation-started'] } });
+        throw new FriendsError({ code: FriendsErrorCode.UnknownOutcome, message: 'Ego review preparation may be partial; inspect the existing page before retrying; final submission was not requested', recovery: { operation: 'volunteer.activity-reviews.prepare', activityId: plan.activityId, applicationId: plan.id, completed: ['visible-preparation-started'],handoff:'unknown',pageLabel:options.page??'p1' } });
     }
 }

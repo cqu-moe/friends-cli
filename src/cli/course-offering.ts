@@ -112,7 +112,7 @@ export const courseOfferingSchemas = {
     phases: ["validate", "source-read", "visible-prepare", "human-handoff"],
     input: { input: "course application JSON file or -", application: applicationFields, via: "ego", egoTaskSpace: "existing task space" },
     output: "open editable first-step page with missing fields and preserved human values; submitted is always false",
-    unknownOutcome: "partial visible failure exits 7 with completed fields, known course UUID, page values and handoff in error.recovery; no retry or automatic popup resume",
+    unknownOutcome: "partial visible failure exits 7 with completed fields, known course UUID, page values and confirmed/unknown handoff in error.recovery; no retry or automatic popup resume",
     finalSubmission: "user-only; --yes and --confirm are rejected",
     dryRun: "source checks and verified session only; no navigation, fill, picker or handoff",
     sideEffect: "visible local fills only; no final click or hidden API",
