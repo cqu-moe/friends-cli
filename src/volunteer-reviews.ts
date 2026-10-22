@@ -72,6 +72,12 @@ export interface VolunteerCertificationReviewDetail {
   state: { raw: unknown; known: false; currentNode: unknown; message: string | null };
 }
 
+export interface VolunteerCertificationReviewPendingCheck {
+  id: string;
+  activityId: string;
+  detail: VolunteerCertificationReviewDetail;
+}
+
 export interface VolunteerCertificationReviewPage {
   items: VolunteerCertificationReviewSummary[];
   page: number;
@@ -233,6 +239,10 @@ function reviewDetail(raw: JsonObject, schoolRole: string, handleType: string): 
   };
 }
 
+function reviewActivityId(raw: JsonObject): string | null {
+  return text(raw.activityId) ?? text(object(raw.activityInfo)?.uuid);
+}
+
 function createClient(options: {
   baseUrl: string;
   session: VerifiedVolunteerSession;
@@ -304,7 +314,14 @@ function createClient(options: {
   async function realRole() {
     await verify();
     const envelope = await request("/ek-agg-mob/user/info", { method: "POST", headers: headers(session), body: "{}" });
-    const role = text(object(envelope.data)?.userLoginStateLevel);
+    const user = object(envelope.data);
+    const role = text(user?.userLoginStateLevel);
+    if (text(user?.userNo) !== session.accountUserNo) {
+      throw new FriendsError({
+        code: FriendsErrorCode.PermissionDenied,
+        message: "The school account changed during the volunteer review operation",
+      });
+    }
     const handleType = role === null ? undefined : roleToHandleType[role as keyof typeof roleToHandleType];
     if (role === null || handleType === undefined) {
       throw new FriendsError({
@@ -406,9 +423,11 @@ export function createVolunteerCertificationReviewClient(options: {
       body: JSON.stringify({ businessTypeCode: "校内活动认证申请", handleType }),
     });
     const states = Array.isArray(envelope.data) ? envelope.data : invalid("Unexpected certification flow states");
-    const match = states.map((value) => object(value)).find((value) => value?.code === "0");
-    if (match === undefined) invalid("The school did not expose a pending certification review state");
-    return "0";
+    const match = states.map((value) => object(value)).find((value) => value?.code === "0") ??
+      invalid("The school did not expose a pending certification review state");
+    const state = text(match.code);
+    if (state === null) invalid("The school returned an invalid pending certification review state");
+    return state;
   }
 
   async function callbackNodes(handleType: string) {
@@ -424,6 +443,55 @@ export function createVolunteerCertificationReviewClient(options: {
         name: nullableText(node?.name),
       };
     });
+  }
+
+  async function pendingReview(id: string): Promise<VolunteerCertificationReviewPendingCheck> {
+    const { handleType } = await client.realRole();
+    const state = await flowState(handleType);
+    let page = 1;
+    let match: VolunteerCertificationReviewSummary | undefined;
+    do {
+      const query = pageInput({ page, pageSize: 50 });
+      const envelope = await client.request(`${prefix}/school-activity-attestation-apply/page-list`, {
+        method: "POST",
+        headers: headers(client.session),
+        body: JSON.stringify({
+          currentPage: query.page,
+          pageSize: query.pageSize,
+          classNo: "",
+          collegeNo: "",
+          key: query.keyword,
+          specialtyNo: "",
+          specialtyType: "",
+          activityType: "",
+          activityCategory: "",
+          handleType,
+          state,
+        }),
+      });
+      const result = parsePageEnvelope(envelope.data, query, summary);
+      match = result.items.find((item) => item.id === id);
+      if (match !== undefined) break;
+      if (result.hasMore !== true) break;
+      page += 1;
+      if (page > 10_000) invalid("The school returned too many certification review pages");
+    } while (true);
+
+    if (match === undefined || match.activityId === null) {
+      throw new FriendsError({
+        code: FriendsErrorCode.UpstreamBusiness,
+        message: "The certification review is not in the school-returned pending set",
+      });
+    }
+    const current = await currentState(id);
+    const activityId = reviewActivityId(current.raw);
+    if (current.raw.uuid !== id || activityId === null || activityId !== match.activityId) {
+      throw new FriendsError({
+        code: FriendsErrorCode.NetworkProtocol,
+        message: "The pending certification review does not match its detail activity binding",
+      });
+    }
+    return { id, activityId, detail: current.projected };
   }
 
   function validateIntent(intent: VolunteerCertificationReviewIntent) {
@@ -473,10 +541,25 @@ export function createVolunteerCertificationReviewClient(options: {
     async get(idInput: string): Promise<VolunteerCertificationReviewDetail> {
       return (await currentState(parseId(idInput, "certification review ID"))).projected;
     },
+    async getPending(idInput: string): Promise<VolunteerCertificationReviewDetail> {
+      return (await pendingReview(parseId(idInput, "certification review ID"))).detail;
+    },
     async decide(idInput: string, intent: VolunteerCertificationReviewIntent) {
       validateIntent(intent);
       const id = parseId(idInput, "certification review ID");
+      const pending = await pendingReview(id);
       const before = await currentState(id);
+      const beforeActivityId = reviewActivityId(before.raw);
+      if (
+        before.raw.uuid !== id ||
+        beforeActivityId === null ||
+        beforeActivityId !== pending.activityId
+      ) {
+        throw new FriendsError({
+          code: FriendsErrorCode.NetworkProtocol,
+          message: "The certification review detail changed before its decision",
+        });
+      }
       let callbackActivityId: string | null = null;
       if (intent.decision === "back") {
         const nodes = await callbackNodes(before.handleType);

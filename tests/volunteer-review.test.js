@@ -74,6 +74,7 @@ test("SDK reviews real roles and decides through explicit non-retryable API inte
   upstream.state.mode = "processed";
   await assert.rejects(() => client.decide("review-1", intent), (error) =>
     error.code === FriendsErrorCode.UpstreamBusiness);
+  assert.equal(upstream.state.writeAttempts, 1);
   assert.equal(upstream.writes.length, 0);
   upstream.state.mode = "ok";
 
@@ -93,7 +94,7 @@ test("SDK reviews real roles and decides through explicit non-retryable API inte
 });
 
 test("SDK keeps lost review writes unknown and separates acknowledgement from failed readback", async (t) => {
-  for (const mode of ["lost", "malformed", "lost-readback-failure"]) await t.test(mode, async (t) => {
+  for (const mode of ["lost", "malformed"]) await t.test(mode, async (t) => {
     const upstream = await school(t);
     upstream.state.mode = mode;
     const client = createVolunteerCertificationReviewClient({ ...upstream, session });
@@ -115,6 +116,27 @@ test("SDK keeps lost review writes unknown and separates acknowledgement from fa
     assert.equal(upstream.writes.length, 1);
   });
 
+  await t.test("lost-readback-failure", async (t) => {
+    const upstream = await school(t);
+    upstream.state.mode = "lost-readback-failure";
+    const client = createVolunteerCertificationReviewClient({ ...upstream, session });
+    await assert.rejects(() => client.decide("review-1", {
+      via: "api",
+      intent: "submit-volunteer-certification-review",
+      decision: "pass",
+      confirm: true,
+      message: "同意认证",
+      time: "2026-10-22",
+    }), (error) => {
+      assert.equal(error.code, FriendsErrorCode.UnknownOutcome);
+      assert.equal(error.retryable, false);
+      assert.ok(error.recovery.completed.includes("readback:unavailable"));
+      return true;
+    });
+    assert.equal(upstream.writes.length, 1);
+    assert.equal(upstream.state.writeAttempts, 1);
+  });
+
   const upstream = await school(t);
   upstream.state.mode = "ack-readback-failure";
   const client = createVolunteerCertificationReviewClient({ ...upstream, session });
@@ -129,6 +151,47 @@ test("SDK keeps lost review writes unknown and separates acknowledgement from fa
   assert.equal(result.serverAcknowledged, true);
   assert.equal(result.readback.state, "unavailable");
   assert.equal(upstream.writes.length, 1);
+});
+
+test("SDK verifies current account, pending membership, and activity binding before a decision", async (t) => {
+  const intent = {
+    via: "api",
+    intent: "submit-volunteer-certification-review",
+    decision: "pass",
+    confirm: true,
+    message: "同意认证",
+    time: "2026-10-22",
+  };
+
+  await t.test("rejects a changed school account", async (t) => {
+    const upstream = await school(t);
+    upstream.state.account = "20219999";
+    const client = createVolunteerCertificationReviewClient({ ...upstream, session });
+    await assert.rejects(() => client.decide("review-1", intent), (error) =>
+      error.code === FriendsErrorCode.AuthRequired);
+    assert.equal(upstream.state.writeAttempts ?? 0, 0);
+    assert.equal(upstream.writes.length, 0);
+  });
+
+  await t.test("rejects an application outside the pending set", async (t) => {
+    const upstream = await school(t);
+    upstream.state.pendingMissing = true;
+    const client = createVolunteerCertificationReviewClient({ ...upstream, session });
+    await assert.rejects(() => client.decide("review-1", intent), (error) =>
+      error.code === FriendsErrorCode.UpstreamBusiness);
+    assert.equal(upstream.state.writeAttempts ?? 0, 0);
+    assert.equal(upstream.writes.length, 0);
+  });
+
+  await t.test("rejects a list/detail activity mismatch", async (t) => {
+    const upstream = await school(t);
+    upstream.state.activityMismatch = true;
+    const client = createVolunteerCertificationReviewClient({ ...upstream, session });
+    await assert.rejects(() => client.decide("review-1", intent), (error) =>
+      error.code === FriendsErrorCode.NetworkProtocol);
+    assert.equal(upstream.state.writeAttempts ?? 0, 0);
+    assert.equal(upstream.writes.length, 0);
+  });
 });
 
 test("SDK uses real callback nodes for BACK and rejects missing real review roles", async (t) => {

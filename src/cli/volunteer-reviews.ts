@@ -115,6 +115,7 @@ export const volunteerReviewSchemas = {
       egoPage: { type: "string", default: "p1" },
       decision: { type: "pass or back", required: true },
       message: { type: "string", maximumLength: 100, required: true },
+      allowBlankNavigation: { type: "boolean; only an explicitly selected about:blank page may navigate" },
     },
     output: "an open review dialog handed to the user; submitted is always false",
     readonly: false,
@@ -312,36 +313,45 @@ export function registerVolunteerReviewCommands(program: Command, options: { bas
     .option("--unit-no <value>", "select an available identity unit")
     .requiredOption("--decision <decision>", "pass or back")
     .requiredOption("--message <text>", "review message shown by the school")
+    .option("--allow-blank-navigation", "allow navigation only when the selected Ego page is about:blank")
     .option("--json", "print stable JSON", true)
-    .action(async (reviewId: string, commandOptions: Record<string, string | undefined>) => {
+    .action(async (reviewId: string, commandOptions: Record<string, string | boolean | undefined>) => {
       if (commandOptions.via !== "ego") invalid("Certification review preparation requires --via ego");
-      const taskSpaceId = positiveInteger(commandOptions.egoTaskSpace, "ego-task-space");
+      const egoTaskSpace = typeof commandOptions.egoTaskSpace === "string"
+        ? commandOptions.egoTaskSpace
+        : undefined;
+      const egoPage = typeof commandOptions.egoPage === "string" ? commandOptions.egoPage : undefined;
+      const taskSpaceId = positiveInteger(egoTaskSpace, "ego-task-space");
       const decision = decisionValue(commandOptions.decision);
       const message = requiredText(commandOptions.message, "message");
-      const source = await resolveQuerySession(commandOptions, options.baseUrl);
-      const client = createVolunteerCertificationReviewClient({
-        baseUrl: options.baseUrl,
-        session: volunteerSession(source),
-      });
-      const detail = await client.get(reviewId);
-      if (detail.activity.id === null) invalid("The certification review does not expose its activity ID");
+      const source = await resolveQuerySession(
+        {
+          via: typeof commandOptions.via === "string" ? commandOptions.via : undefined,
+          egoTaskSpace,
+          egoPage,
+          levelNo: typeof commandOptions.levelNo === "string" ? commandOptions.levelNo : undefined,
+          unitNo: typeof commandOptions.unitNo === "string" ? commandOptions.unitNo : undefined,
+        },
+        options.baseUrl,
+      );
       const prepared = await prepareVolunteerCertificationReviewInEgo({
         taskSpaceId,
-        page: commandOptions.egoPage,
-        reviewId: detail.id,
-        activityId: detail.activity.id,
-        schoolRole: detail.schoolRole,
+        page: egoPage,
+        reviewId,
+        session: volunteerSession(source),
+        baseUrl: options.baseUrl,
         decision,
         message,
+        allowBlankNavigation: commandOptions.allowBlankNavigation === true,
       });
       output({
         status: "awaiting-user",
         submitted: false,
-        reviewId: detail.id,
-        activityId: detail.activity.id,
+        reviewId: prepared.review.id,
+        activityId: prepared.review.activityId,
         decision: prepared.decision,
-        schoolRole: detail.schoolRole,
-        handleType: detail.handleType,
+        schoolRole: prepared.review.schoolRole,
+        handleType: prepared.review.handleType,
         manualSteps: prepared.decision === "pass"
           ? ["review message", "final confirmation"]
           : ["review message", "callback node", "final confirmation"],
@@ -351,7 +361,7 @@ export function registerVolunteerReviewCommands(program: Command, options: { bas
         via: "ego",
         selectedEntry: "ego",
         requestMode: "visible-ego-prepare",
-        verification: { finalSubmission: "user-only", remoteWrites: 0 },
+        verification: { finalSubmission: "user-only", pendingReview: "school-api-rechecked" },
       });
     });
 }
