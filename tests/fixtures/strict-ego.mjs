@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import {JSDOM} from 'jsdom';
-import {readFile,writeFile} from 'node:fs/promises';
+import {readFile,writeFile,rm} from 'node:fs/promises';
 let script='';for await(const chunk of process.stdin)script+=chunk;
 const configuration=JSON.parse(await readFile(process.env.FRIENDS_EGO_FIXTURE_CONFIG,'utf8'));
 configuration.iframe ||= configuration.frame;
@@ -172,3 +172,4 @@ try {
   }));
   dom.window.close();
 }
+if(configuration.removeCommandAfterSession&&script.includes('FRIENDS_CLI_EGO_SESSION:'))await rm(configuration.removeCommandAfterSession);

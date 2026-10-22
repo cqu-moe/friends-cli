@@ -185,3 +185,10 @@ for(const [failure,options] of [['capture',{failCaptureAt:12}],['snapshot',{fail
  await assert.rejects(()=>promisify(execFile)(process.execPath,['dist/cli/main.js','course-offering','prepare-ego','--input',path,'--ego-task-space','7','--ego-page','p2'],{env:{...process.env,FRIENDS_HOME:f.home,FRIENDS_BASE_URL:f.upstream.baseUrl,PATH:dirname(f.options.command)+':'+process.env.PATH},timeout:20000}),error=>{assert.equal(error.code,7);return verify(JSON.parse(error.stdout).error);});
  const observed=await f.observed();assert.equal(observed.fills.length,3);assert.equal(observed.handoffs,1);assert.equal(observed.remoteWrites,0);assert.equal(observed.submits,0);assert.equal(observed.navigations,0);
 });
+
+
+test('public course offering SDK preserves its existing Ego startup error contract',async t=>{
+ const f=await setup(t);
+ await assert.rejects(()=>prepareCourseOfferingInEgo({...f.options,command:join(f.home,'missing-ego')}),error=>{assert.equal(error.code,'AUTH_REQUIRED');assert.match(error.message,/Could not start the configured Ego browser command/);return true;});
+ await assert.rejects(f.observed,{code:'ENOENT'});
+});

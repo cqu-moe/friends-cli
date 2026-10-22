@@ -74,7 +74,7 @@ try {
 `;
   let result:VolunteerOfferingVisiblePreparation|undefined;
   try {
-    const raw=await runEgoJson<unknown>({script,command:options.command??"ego-browser",timeoutMs:(options.timeoutMs??300_000)+30_000,marker:"FRIENDS_CLI_OFFERING_PREPARE:",failure:"Visible offering preparation returned no reliable receipt"});
+    const raw=await runEgoJson<unknown>({startupErrorCode:FriendsErrorCode.UnknownOutcome,script,command:options.command??"ego-browser",timeoutMs:(options.timeoutMs??300_000)+30_000,marker:"FRIENDS_CLI_OFFERING_PREPARE:",failure:"Visible offering preparation returned no reliable receipt"});
     if(!record(raw)||(raw.handoff!==undefined&&raw.handoff!=='completed')||raw.submitted!==false||!pageActions(raw.actions,['filled','selected','already-matching','human-value-preserved'])||
        !strings(raw.missing)||!executionFailure(raw.executionError)||!record(raw.page)||typeof raw.page.url!=='string'||
        !Array.isArray(raw.page.fields)||!raw.page.fields.every(f=>record(f)&&typeof f.name==='string'&&typeof f.value==='string')||
