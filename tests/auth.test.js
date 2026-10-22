@@ -215,3 +215,24 @@ test("CQU Auth one-time service tickets and multi-account identity require expli
     error => error.code === FriendsErrorCode.AuthRequired,
   );
 });
+
+
+test("CQU Auth SDK distinguishes blocked discovery from issuer mismatch", async (t) => {
+  for (const response of [
+    { status: 403, headers: { "content-type": "text/html", "cf-mitigated": "challenge" }, body: "<html>private challenge details</html>", message: /Cloudflare.*challenge/i },
+    { status: 503, headers: { "content-type": "application/json" }, body: "{}", message: /HTTP 503/ },
+    { status: 200, headers: { "content-type": "text/html" }, body: "<html>private response</html>", message: /JSON/ },
+  ]) {
+    const scenario = await controlledCquAuthScenario({ discoveryFailure: response });
+    t.after(() => scenario.close());
+    const auth = createCquAuthClient({ issuer: scenario.issuer, clientId, redirectUri: `http://127.0.0.1:9${redirectPath}` });
+    const keyPair = await generateCquDpopKeyPair();
+    await assert.rejects(() => auth.beginAuthorization({ keyPair }), error => {
+      assert.equal(error.code, FriendsErrorCode.NetworkProtocol);
+      assert.match(error.message, response.message);
+      assert.equal(error.message.includes("private"), false);
+      return true;
+    });
+    assert.equal(scenario.requests.length, 1);
+  }
+});
