@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {writeFile} from 'node:fs/promises';
-import {join} from 'node:path';
+import {writeFile,readFile} from 'node:fs/promises';
+import {join,resolve} from 'node:path';
 import {courseReviewScenario,reviewInput} from './fixtures/course-reviews.mjs';
 import {courseCli,cliJson} from './fixtures/course-review-cli.mjs';
 const command=(type,decision='pass')=>['courses','reviews','decide',reviewInput(type).id,'--type',type,'--via','api','--decision',decision,'--input','-'];
@@ -53,4 +53,16 @@ test('course review CLI maps denial, business refusal and ambiguous responses to
     if(code===7){assert.equal(json.error.code,'UNKNOWN_OUTCOME');assert.equal(json.error.retryable,false);assert.equal(json.error.recovery.readback,['lost-readback','ack-readback-unavailable'].includes(mode)?'unavailable':mode==='ack-no-change'?'unmatched':'matched');assert.equal(json.error.recovery.serverAcknowledged,mode.startsWith('ack-')?true:'unknown');}
     assert.deepEqual(api.violations,[]);
   }
+});
+
+test('real course CLI lists registration reviews through a verified student Ego session without a dashboard role field',async t=>{
+  const api=await courseReviewScenario({levelNo:'XS'});t.after(api.close);const cli=await courseCli(t,api);
+  const html=join(cli.home,'student.html'),config=join(cli.home,'student-ego.json'),result=join(cli.home,'observed.json');
+  await writeFile(html,'<div class="app-container">学生课程审批列表</div>');
+  await writeFile(config,JSON.stringify({html,url:new URL('/mobile/course/reportApprovalList',api.baseUrl).href,result,frame:true,executeSession:true,token:'fixture-token',userLevel:'XS'}));
+  await writeFile(join(cli.home,'ego-browser'),`#!/bin/sh\nexec '${process.execPath}' '${resolve('tests/fixtures/strict-ego.mjs')}' "$@"\n`,{mode:0o755});
+  const execution=await cli.run(['courses','reviews','list','--type','registration','--via','ego','--ego-task-space','7','--ego-page','p2'],undefined,{FRIENDS_EGO_FIXTURE_CONFIG:config,FRIENDS_HOME:join(cli.home,'must-not-read'),PATH:cli.home+':'+process.env.PATH});
+  const response=cliJson(execution);assert.equal(response.data.items[0].id,'course-reg-1');assert.equal(response.meta.selectedEntry,'ego');assert.equal(execution.stderr,'');
+  const observed=JSON.parse(await readFile(result,'utf8'));assert.deepEqual(observed.clicks,[]);assert.deepEqual(observed.fills,[]);assert.equal(observed.submits,0);assert.equal(observed.navigations,0);assert.equal(observed.handoffs,0);
+  assert.equal(api.writes().length,0);assert.deepEqual(api.violations,[]);
 });

@@ -314,17 +314,15 @@ function createClient(options: {
 
   async function realRole() {
     await verify();
-    const envelope = await request("/ek-agg-mob/user/info", { method: "POST", headers: headers(session), body: "{}" });
-    const user = object(envelope.data);
-    const role = text(user?.userLoginStateLevel);
-    if (text(user?.userNo) !== session.accountUserNo) {
-      throw new FriendsError({
-        code: FriendsErrorCode.PermissionDenied,
-        message: "The school account changed during the volunteer review operation",
-      });
-    }
-    const handleType = role === null ? undefined : roleToHandleType[role as keyof typeof roleToHandleType];
-    if (role === null || handleType === undefined) {
+    const active = await sdk.activateLocalContext({
+      token: session.token,
+      userLevel: session.userLevel,
+      expectedAccount: session.accountUserNo,
+      selector: { levelNo: session.levelNo, unitNo: session.unitNo },
+    });
+    const role = active.context.levelNo;
+    const handleType = roleToHandleType[role as keyof typeof roleToHandleType];
+    if (handleType === undefined) {
       throw new FriendsError({
         code: FriendsErrorCode.PermissionDenied,
         message: "The current school identity does not expose a real certification review role",

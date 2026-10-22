@@ -39,7 +39,7 @@ test('course review SDK rejects wrong domains, bindings, roles and changed or pr
     await assert.rejects(()=>client.prepare(input),{code:'BUSINESS_REJECTED'});api.state.pending[type]=true;
     api.state.denied=true;await assert.rejects(()=>client.prepare(input),{code:'PERMISSION_DENIED'});api.state.denied=false;
     if(type==='offering'){
-      api.state.role='XS';await assert.rejects(()=>client.prepare(input),{code:'AUTH_REQUIRED'});api.state.role='XY';
+      api.state.role='XS';await assert.rejects(()=>client.prepare(input),{code:'NETWORK_PROTOCOL_ERROR'});api.state.role='XY';
       api.state.detailOverride={...api.rows.offering,organizationId:'unrelated-org'};
     }else{
       api.state.managed=false;await assert.rejects(()=>client.prepare(input),{code:'PERMISSION_DENIED'});api.state.managed=true;
@@ -53,7 +53,7 @@ test('course review SDK rejects wrong domains, bindings, roles and changed or pr
     api.rows[type].flowCurrMsg='另一审批者更新了申请';
     await assert.rejects(()=>client.decide(plan,intent),{code:'BUSINESS_REJECTED'});
     const roleBound=await client.prepare(input);api.state.role='XSC';
-    await assert.rejects(()=>client.decide(roleBound,intent),{code:'AUTH_REQUIRED'});api.state.role='XY';
+    await assert.rejects(()=>client.decide(roleBound,intent),{code:'NETWORK_PROTOCOL_ERROR'});api.state.role='XY';
     const changed=await client.prepare(input);changed.payload.uuid='spoof';
     await assert.rejects(()=>client.decide(changed,intent),{code:'INVALID_INPUT'});
     assert.equal(api.writes().length,0);
@@ -112,4 +112,14 @@ test('course SDK snapshots caller input and the approved plan across asynchronou
   const deciding=client.decide(plan,intent);plan.payload.uuid='spoof';plan.decision='refuse';
   assert.equal((await deciding).readback,'matched');assert.equal(api.writes()[0].path,'/gateway/zovecenter-saip-ek-app-curriculum/mob/apply/pass');
   assert.deepEqual(api.violations,[]);
+});
+
+test('course registration review accepts a freshly verified student context without a dashboard role field',async t=>{
+  const api=await courseReviewScenario({levelNo:'XS'});t.after(api.close);
+  const session={...courseReviewSession,userLevel:'XS',context:{...courseReviewSession.context,levelNo:'XS'}};
+  const client=sdk.createCourseReviewClient({baseUrl:api.baseUrl,session});
+  assert.equal((await client.list('registration')).items[0].id,'course-reg-1');
+  assert.equal(api.requests.find(r=>r.path.endsWith('/student-apply/page-list')).body.handleType,'XS02');
+  await assert.rejects(()=>client.list('offering'),{code:'PERMISSION_DENIED'});
+  assert.equal(api.writes().length,0);assert.deepEqual(api.violations,[]);
 });
