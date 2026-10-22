@@ -237,6 +237,7 @@ test("real CLI exposes volunteer schemas and runs the complete API flow", async 
 
   const identityOutput = JSON.parse((await run(process.execPath, [cli, "volunteers", "identity", "--json"], { env })).stdout);
   assert.equal(identityOutput.data.membershipApplicationAllowed, true);
+  assert.deepEqual(identityOutput.data.membershipApplication, { status: "checked", rejection: null });
   const list = JSON.parse((await run(process.execPath, [
     cli, "volunteers", "activities", "list", "--kind", "participable", "--page", "1", "--page-size", "2", "--keyword", "示例", "--json",
   ], { env })).stdout);

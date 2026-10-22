@@ -275,6 +275,8 @@ Ego 审批准备只执行可见步骤：先检查当前路由和可见非空人�
 
 志愿查询和写入使用 #5 已实测的 `zovecenter-saip-ek-app-young-volunteers` 网关服务。活动 UUID、报名记录 UUID、岗位 UUID 是不同领域 ID；CLI 和 SDK 均按对应方法校验，不能用报名 UUID 查活动，也不能把其他活动的岗位提交给当前活动。
 
+`volunteers identity` 保留学校成员查询证据，并单独报告申请资格。`membershipApplicationAllowed` 仅在学校明确返回布尔值时为 true/false；合法业务拒绝时为 null，`membershipApplication.status` 为 `business-rejected`，`rejection` 保留 BUSINESS_REJECTED、学校业务码、消息和请求标识。成员查询成功且资格被拒绝仍返回成功的只读结果（退出码 0），不推断已经加入或一定可以申请。资格数据畸形、普通 HTTP 400 仍报协议错误（退出码 6）；401/403 保持身份/权限错误（3/4）。SDK 与 API/Ego 查询使用同一契约。
+
 `volunteers activities requirements` 会返回活动详情、岗位、学校 `can-apply` 结果和未支持问卷类型。API 写入当前支持 `CHOICE`、`MULTIPLE_CHOICE`、`TEXT`、`NUMBER`、`DATE`；`PICTURE`、`MULTIPLE_PICTURE`、`FILE`、`MULTIPLE_FILE` 会显式拒绝，不会用空附件组伪造成功。Ego 可见准备不自动填写 DATE；必填或已提供 DATE 答案时拒绝自动化准备，可选未答日期留给用户在交接后的可见页面处理。
 
 SDK 写入方法本身要求精确确认值：报名为 `confirmation: "volunteers.register"`，退出为 `confirmation: "volunteers.withdraw"`。CLI 的 `--confirm` 只负责构造对应 SDK 确认；缺少确认、`--dry-run` 或 Ego 路径带 `--confirm` 都不会写入。写入成功返回分离的 `receipt` 与 `readback`；`receipt` 仅表示学校网关确认收到请求，`readback` 是第一页个人报名列表证据，两者都不把审批状态说成通过。

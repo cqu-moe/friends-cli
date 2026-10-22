@@ -1,11 +1,11 @@
 import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-export async function setupOrganizationActivityEgo(t,baseUrl,{humanName='人工草稿标题',readonlyPlace=false,browserAccount='20210001'}={}){
+export async function setupOrganizationActivityEgo(t,baseUrl,{humanName='人工草稿标题',readonlyPlace=false,browserAccount='20210001',organizationName='示例组织'}={}){
  const home=await mkdtemp(join(tmpdir(),'friends-org-activity-ego-'));t.after(()=>rm(home,{recursive:true,force:true}));
  const html=join(home,'page.html'),result=join(home,'observed.json'),config=join(home,'ego.json'),command=join(home,'ego-browser');
  await writeFile(html,`<!doctype html><meta charset="utf-8"><div class="main"><form>
- <div class="van-field"><div class="van-field__label">发起组织</div><input readonly value="示例组织"></div>
+ <div class="van-cell van-field"><div class="van-field__label"><label>发起组织</label></div><div class="van-cell__value van-field__value"><div class="van-field__body"><div class="van-field__control van-field__control--custom"><div id="selected-organization">${organizationName}</div></div></div></div></div>
  <div>活动名称</div><textarea>${humanName}</textarea>
  <div class="van-field"><div class="van-field__label">活动开始时间</div><input readonly></div>
  <div class="van-field"><div class="van-field__label">活动结束时间</div><input readonly></div>

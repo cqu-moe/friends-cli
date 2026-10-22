@@ -33,6 +33,14 @@ test('SDK prepares organization fields and school term without uploading or savi
  assert.equal(prepared.firstStep.organizationType,3);assert.equal(prepared.firstStep.termNo,'1');assert.equal(prepared.firstStep.uuid,'');
  assert.equal(prepared.settings.addOrUpdate,2);assert.equal(prepared.settings.push,true);assert.equal(prepared.settings.draft,false);
  assert.ok(f.requests.some(r=>r.path===commonRoot+'/term-list'&&r.headers['h-zove-appkey']==='zovecenter-saip-ek-agg-mob'));
+ assert.deepEqual(f.requests.find(r=>r.path===teamRoot+'/apply-info/drop-down-list'&&r.method==='POST').body,{isTeacher:false});
+ assert.equal(f.requests.some(r=>r.path===teamRoot+'/apply-info/chose-type'),false);
+ const terms=f.state.terms;
+ for(const unavailable of [[],[{...terms[0],isCurrentTerm:'0'}],[{beginYear:'2099',endYear:'2100',termNo:'1',isCurrent:1}],[terms[1],{...terms[1],termNo:'2'}]]){
+  f.state.terms=unavailable;await assert.rejects(()=>client.prepare(input),e=>e.code==='INVALID_INPUT');
+ }
+ f.state.terms=terms;
+
  const noPoster=offeringInput();noPoster.materials.publicityPictures=[];
  await assert.rejects(()=>client.prepare(noPoster),e=>e.code==='INVALID_INPUT');
  f.state.permission=false;await assert.rejects(()=>client.prepare(input),e=>e.code==='PERMISSION_DENIED');
@@ -40,19 +48,21 @@ test('SDK prepares organization fields and school term without uploading or savi
  assert.equal(f.state.uploads+f.state.firstWrites+f.state.finalWrites,0);
 });
 test('SDK explicitly uploads materials, saves the first step once, submits settings once and reads progress',async t=>{
- const f=await setupOrganizationActivities(t);const client=await sdk.createFriendsSdk({baseUrl:f.baseUrl}).createOrganizationActivityClient(session);const input=offeringInput();
+ const f=await setupOrganizationActivities(t);const client=await sdk.createFriendsSdk({baseUrl:f.baseUrl}).createOrganizationActivityClient(session);const input=offeringInput();input.materials.attachments=[new File(['attachment-bytes'],'details.pdf',{type:'application/pdf'})];
  await assert.rejects(()=>client.uploadMaterials(input,{}),e=>e.code==='INVALID_INPUT');
  const materials=await client.uploadMaterials(input,{confirmation:'organization-activities.materials'});
  assert.equal(materials.status,'materials-ready');assert.equal(materials.submitted,false);assert.deepEqual(materials.publicity.resourceUuids,['resource-1']);
- assert.equal(f.state.uploads,1);assert.equal(f.state.firstWrites+f.state.finalWrites,0);
+ assert.equal(f.state.uploads,2);assert.deepEqual(materials.attachments.resourceUuids,['resource-2']);assert.equal(f.state.firstWrites+f.state.finalWrites,0);
  const upload=f.requests.find(r=>r.path===commonRoot+'/protected-file-upload');assert.match(upload.headers['content-type'],/^multipart\/form-data; boundary=/);assert.match(upload.raw.toString(),/poster-bytes/);
  await assert.rejects(()=>client.submit(input,{materials}),e=>e.code==='INVALID_INPUT');
  const result=await client.submit(input,{confirmation:'organization-activities.submit',materials});
  assert.equal(result.applicationId,'activity-1');assert.equal(result.submitted,true);assert.equal(result.serverAcknowledged,true);assert.equal(result.approved,null);assert.equal(result.readback.state,'matched');
  assert.equal(f.state.firstWrites,1);assert.equal(f.state.finalWrites,1);
  const first=f.requests.find(r=>r.path===teamRoot+'/apply-info/next-update');
- assert.deepEqual(first.body,{beginYear:'2099',endYear:'2100',termNo:'1',activityName:'示例组织活动',activityContent:'活动简介',activityPlace:'示例活动室',beginTime:'2099-11-02 10:00',endTime:'2099-11-02 12:00',organizationId:'organization-1',organizationName:'示例组织',organizationType:3,attachmentGroupUuid:'',publicityPicturesGroupUuid:materials.publicity.groupUuid,uuid:''});
- const final=f.requests.find(r=>r.path===teamRoot+'/apply-info/set-update');assert.equal(final.body.uuid,'activity-1');assert.equal(final.body.addOrUpdate,2);assert.equal(final.body.push,true);assert.equal(final.body.draft,false);
+ assert.deepEqual(first.body,{beginYear:'2099',endYear:'2100',termNo:'1',activityName:'示例组织活动',activityContent:'活动简介',activityPlace:'示例活动室',beginTime:'2099-11-02 10:00',endTime:'2099-11-02 12:00',organizationId:'organization-1',organizationName:'示例组织',organizationType:3,attachmentGroupUuid:materials.attachments.groupUuid,publicityPicturesGroupUuid:materials.publicity.groupUuid,uuid:''});
+ const final=f.requests.find(r=>r.path===teamRoot+'/apply-info/set-update');
+ assert.deepEqual(final.body,{isOpenEnrollment:true,isHideList:false,isEnrollExamine:true,isEnrollPower:false,signinNum:1,openTime:'2099-10-01 10:00',deadline:'2099-11-01 18:00',organizationId:'organization-1',activityName:'示例组织活动',beginTime:'2099-11-02 10:00',isEnrollPowerStr:'1',beginEndFlagStr:'1',openType:'TIMING_ON',finishType:'TIMING_ON',applyNumber:0,draft:false,push:true,addOrUpdate:2,questionnaireInfoRespDtoList:[],uuid:'activity-1'});
+ assert.ok(f.requests.some(r=>r.path===commonRoot+'/list-group-resource'&&r.method==='POST'&&r.headers['content-type']==='application/x-www-form-urlencoded'&&r.body===null&&r.query==='?groupUuid='+materials.attachments.groupUuid));
  assert.deepEqual((await client.status(sdk.organizationActivityId('activity-1'))).state,{raw:'SCHOOL_PENDING',flowOverallState:'NEW_SERVER_VALUE',known:false});
 });
 

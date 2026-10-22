@@ -4,7 +4,7 @@ export const commonRoot='/gateway/ek-agg-mob/biz-common';
 export const session={token:'organization-fixture-token',userLevel:'XS',account:{userNo:'20210001'},context:{levelNo:'XS',unit:{unitNo:'unit-1'}}};
 export function offeringInput(){return {organizationId:'organization-1',activityName:'示例组织活动',activityContent:'活动简介',activityPlace:'示例活动室',beginTime:'2099-11-02 10:00',endTime:'2099-11-02 12:00',registration:{isOpenEnrollment:true,isHideList:false,isEnrollExamine:true,isEnrollPower:false,signinNum:1,openTime:'2099-10-01 10:00',deadline:'2099-11-01 18:00'},materials:{publicityPictures:[new File(['poster-bytes'],'poster.png',{type:'image/png'})],attachments:[]}};}
 export async function setupOrganizationActivities(t){
- const requests=[],resources=new Map();const state={mode:'normal',account:'20210001',permission:true,detail:null,workflow:{nodeList:[{activityname:'组织审核',state:'UNKNOWN_NODE_STATE'}],evaluationRecords:[{msg:'等待学校处理',state:'UNKNOWN_RECORD_STATE'}]},uploads:0,firstWrites:0,finalWrites:0};
+ const requests=[],resources=new Map();const state={mode:'normal',account:'20210001',permission:true,terms:[{beginYear:'2098',endYear:'2099',termNo:'2',schoolTermName:'2098-2099学年第2学期',isCurrentTerm:'0'},{beginYear:'2099',endYear:'2100',termNo:'1',schoolTermName:'2099-2100学年第1学期',isCurrentTerm:'1'}],detail:null,workflow:{nodeList:[{activityname:'组织审核',state:'UNKNOWN_NODE_STATE'}],evaluationRecords:[{msg:'等待学校处理',state:'UNKNOWN_RECORD_STATE'}]},uploads:0,firstWrites:0,finalWrites:0};
  const activity=()=>state.detail??{uuid:'activity-1',activityName:'示例组织活动',organizationId:'organization-1',organizationName:'示例组织',activityPlace:'示例活动室',beginTime:'2099-11-02 10:00',endTime:'2099-11-02 12:00',approvalState:'FUTURE_STATE',flowOverallState:'SCHOOL_PENDING',isOpenEnrollment:true,isEnrollPower:false,openTime:'2099-10-01 10:00',deadline:'2099-11-01 18:00',questionnaireInfoRespDtoList:[]};
  const server=createServer(async(req,res)=>{
   const chunks=[];for await(const chunk of req)chunks.push(chunk);const raw=Buffer.concat(chunks);const url=new URL(req.url,'http://localhost');
@@ -19,11 +19,32 @@ export async function setupOrganizationActivities(t){
   if(url.pathname.startsWith(teamRoot)&&req.headers['h-zove-appkey']!=='zovecenter-saip-ek-app-team-organization-manage')return fail(400);
   if(url.pathname.startsWith(commonRoot)&&req.headers['h-zove-appkey']!=='zovecenter-saip-ek-agg-mob')return fail(400);
   if(state.mode==='denied'&&url.pathname.startsWith(teamRoot))return fail(403);
-  if(url.pathname===teamRoot+'/apply-info/chose-type')return reply(state.permission?[{uuid:'organization-1',organizationName:'示例组织',organizationType:'STUDENT_CLUB'}]:[]);
+  // Literal wire contracts resolved from the public exports; see the bounded source audit.
+  const methods = new Map([
+   [teamRoot+'/apply-info/chose-type','GET'],
+   [teamRoot+'/apply-info/drop-down-list','POST'],
+   [teamRoot+'/apply-info/activity-page-list','POST'],
+   [teamRoot+'/apply-info/my-page-list','POST'],
+   [teamRoot+'/apply-info/next-update','PUT'],
+   [teamRoot+'/apply-info/set-update','PUT'],
+   [commonRoot+'/flow/approve-list','POST'],
+   [commonRoot+'/flow/node-list-no-state','POST'],
+   [commonRoot+'/term-list','POST'],
+   [commonRoot+'/protected-file-upload','POST'],
+   [commonRoot+'/list-group-resource','POST'],
+  ]);
+  const method = methods.get(url.pathname) ?? (url.pathname.startsWith(teamRoot+'/apply-info/') ? 'GET' : null);
+  if(method && req.method !== method)return fail(400);
+
+  if(url.pathname===teamRoot+'/apply-info/chose-type')return reply(Array.from({length:9},(_,i)=>({code:'FIXTURE_TYPE_'+i,name:'类型'+i})));
+  if(url.pathname===teamRoot+'/apply-info/drop-down-list'){
+   if(JSON.stringify(body)!==JSON.stringify({isTeacher:false}))return fail(400);
+   return reply(state.permission?[{uuid:'organization-1',organizationName:'示例组织',organizationType:'STUDENT_CLUB'}]:[]);
+  }
   // Live evidence establishes only a three-item array here; synthetic entries contain no personal data.
   if(url.pathname===commonRoot+'/flow/node-list-no-state')return reply([{},{},{}]);
   if(url.pathname===commonRoot+'/flow/approve-list')return reply(state.workflow);
-  if(url.pathname===commonRoot+'/term-list')return reply([{beginYear:'2099',endYear:'2100',termNo:'1',schoolTermName:'2099-2100学年第1学期',isCurrentTerm:1}]);
+  if(url.pathname===commonRoot+'/term-list'){if(body!==null)return fail(400);return reply(state.terms);}
   if([teamRoot+'/apply-info/activity-page-list',teamRoot+'/apply-info/my-page-list'].includes(url.pathname))return reply({data:[activity()],currentPage:body.currentPage,pageSize:body.pageSize,totalCount:3,...(state.mode==='unknown-pages'?{}:{pages:2})});
   if(url.pathname===teamRoot+'/apply-info/activity-1'){
    if(state.mode==='lost-readback')return res.destroy();
@@ -39,7 +60,10 @@ export async function setupOrganizationActivities(t){
    if(state.mode==='lost-upload'||state.mode==='lost-second-upload'&&state.uploads===2)return res.destroy();
    return reply([resource.uuid]);
   }
-  if(url.pathname===commonRoot+'/list-group-resource'){if(state.mode==='lost-resource-readback')return res.destroy();return reply(resources.get(url.searchParams.get('groupUuid'))??[]);}
+  if(url.pathname===commonRoot+'/list-group-resource'){
+   if(req.headers['content-type']!=='application/x-www-form-urlencoded'||body!==null||!url.searchParams.get('groupUuid'))return fail(400);
+   if(state.mode==='lost-resource-readback')return res.destroy();return reply(resources.get(url.searchParams.get('groupUuid'))??[]);
+  }
   if(url.pathname===teamRoot+'/apply-info/next-update'){
    state.firstWrites++;state.detail={...activity(),...body,uuid:'activity-1'};
    if(state.mode==='lost-first')return res.destroy();
