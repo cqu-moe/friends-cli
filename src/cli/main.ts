@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {organizationActivitySchemas,registerOrganizationActivityCommands} from "./organization-activities.js";
 import {volunteerActivityReviewSchemas,registerVolunteerActivityReviewCommands} from "./volunteer-activity-reviews.js";
 import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
 import { Command } from "commander";
@@ -33,6 +34,7 @@ import { offeringSchemas, registerOfferingCommands } from "./offerings.js";
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
+  ...organizationActivitySchemas,
   ...offeringSchemas,
   ...volunteerActivityReviewSchemas,
   ...certificationApiSchemas,
@@ -428,6 +430,8 @@ registerVolunteerCommands(program, {
 registerVolunteerReviewCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
 });
+
+registerOrganizationActivityCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 
 program.parseAsync(process.argv).catch(async (error: unknown) => {
   const code = (error as { code?: string }).code;

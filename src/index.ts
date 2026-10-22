@@ -1,3 +1,5 @@
+import {createOrganizationActivityClient} from "./organization-activities.js";
+export * from "./organization-activities.js";
 import { FriendsError, FriendsErrorCode } from "./errors.js";
 import {
   createVerifiedOrganizationClient,
@@ -626,6 +628,9 @@ export function createFriendsSdk(options: {
           }};
         },
       };
+    },
+    async createOrganizationActivityClient(input: VerifiedCourseSession) {
+      return createOrganizationActivityClient({baseUrl,fetch:fetchImpl,timeoutMs,session:snapshotSession(input)});
     },
     async createOrganizationClient(input: OrganizationSession) {
       const session = snapshotSession(input);

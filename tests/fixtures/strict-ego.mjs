@@ -109,6 +109,7 @@ const page={
     element.value=value;
     element.dispatchEvent(new content.Event('input',{bubbles:true}));
     element.dispatchEvent(new content.Event('change',{bubbles:true}));
+    if(configuration.failAfterFill===stats.fills.length)throw new Error('Lost visible fill acknowledgement');
   },
   async waitForSelector(selector,{state='visible'}={}){
     active();

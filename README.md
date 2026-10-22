@@ -226,3 +226,50 @@ friends volunteer activity-reviews decide <申请UUID> --type offering --decisio
 ```
 
 `review.json` 含 `message`、`time`（YYYY-MM-DD）；开办审批还需 `isSafeEducation: 0|1`，打回多个节点时需 `callbackActivityId`。API 实际决定须显式 `--yes`；Ego 仅准备并交接，用户亲自点最终确定。响应不确定返回 exit 7，不会自动重试。见 [#11 验收记录](docs/verification/2026-10-22-volunteer-activity-reviews.md)。
+
+## 组织活动查询与开办（#18）
+
+组织活动是独立领域，通过 `organization-activities` 操作；志愿服务活动仍使用 `volunteers`。`list --kind public` 查询公开活动，`--kind manageable` 查询当前账号开办记录；支持分页和学校 `key` 关键词。`show`、`requirements`、`status` 分别读取详情、参与要求和开办状态/流程记录，学校未知状态原样保留。
+
+```sh
+friends organization-activities list --kind public --keyword 示例 --page 1
+friends organization-activities show <organizationActivityUuid> --via ego --ego-task-space 7
+friends organization-activities requirements <organizationActivityUuid>
+friends organization-activities status <organizationActivityUuid>
+friends organization-activities prepare --input application.json
+friends organization-activities materials --input application.json --dry-run
+friends organization-activities materials --input application.json --confirm > materials.json
+friends organization-activities submit --input application.json --materials materials.json --confirm
+friends organization-activities prepare --input application.json --via ego --ego-task-space 7 --ego-page p2
+```
+
+最小开办输入如下；`--input -` 可从 stdin 读取。`term` 可省略并采用学校唯一当前学期，有歧义时需明确选择学校返回的学期。
+
+```json
+{
+  "organizationId": "organization-example",
+  "activityName": "示例组织活动",
+  "activityContent": "活动简介",
+  "activityPlace": "示例活动室",
+  "beginTime": "2099-11-02 10:00",
+  "endTime": "2099-11-02 12:00",
+  "registration": {
+    "isOpenEnrollment": true,
+    "isHideList": false,
+    "isEnrollExamine": true,
+    "isEnrollPower": false,
+    "signinNum": 1,
+    "openTime": "2099-10-01 10:00",
+    "deadline": "2099-11-01 18:00"
+  },
+  "materials": {"publicityPictures": [{"path": "/path/to/poster.png"}], "attachments": []}
+}
+```
+
+SDK 使用 `createFriendsSdk().createOrganizationActivityClient(session)`，材料为标准 `File` 数组。`prepare` 仅验证/读取；`uploadMaterials` 要求 `confirmation:"organization-activities.materials"`，`submit` 要求 `confirmation:"organization-activities.submit"` 和材料回执。海报需 1–5 张，附件可选；上传后查询资源组核对资源 ID 和文件名，提交前再次核对。此核对不证明服务器文件字节散列。当前最小设置支持定时开启/截止、1–8 次签到、可见名单/报名审核/成员限制开关；不接受任意问卷或未知字段透传。
+
+API 提交先执行 `next-update` 保存第一步，再重新核验组织权限后执行 `set-update`。任一写响应不明确都停止，不重试、不切换路径；即使只读回查匹配仍为 `UNKNOWN_OUTCOME`/退出码 7，保留资源组、已发生步骤和已知申请 ID。成功回执仅表示学校确认收到，`approved:null`，进度需独立查询。
+
+Ego 查询复用现有会话并直接 API。Node SDK `prepareOrganizationActivityOfferingInEgo` 每次重新核验账号和组织权限，再验证同源 iframe 内的创建路由和账号。当前阶段填写空白且可编辑的标题、简介和地址，保留人工与只读值；组织、时间、海报/附件及第二步设置以 `manualFields` 和 `requested` 交给用户处理。**“下一步”已经写入学校，必须由用户亲自操作；最终提交同样由用户亲自完成。** Ego 不上传、不点击下一步或最终按钮，也不接受 `--yes`、API 确认或自动重试绕过。`--dry-run` 无填写和交接。
+
+实现证据仅为公开源码、受控 SDK 与真实 CLI 子进程测试；本工作线程未访问真实 Ego 或生产服务，见[验收与限制](docs/verification/2026-10-23-organization-activities.md)。
