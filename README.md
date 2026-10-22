@@ -156,11 +156,11 @@ Ego 资料修改只执行可见 prepare：先经现有页面会话核验权限�
 
 SDK 写入方法本身要求精确确认值：报名为 `confirmation: "volunteers.register"`，退出为 `confirmation: "volunteers.withdraw"`。CLI 的 `--confirm` 只负责构造对应 SDK 确认；缺少确认、`--dry-run` 或 Ego 路径带 `--confirm` 都不会写入。写入成功返回分离的 `receipt` 与 `readback`；`receipt` 仅表示学校网关确认收到请求，`readback` 是第一页个人报名列表证据，两者都不把审批状态说成通过。
 
-`--via ego` 的查询只复用现有 Ego 页面会话并直接调用 API，不导航当前页面。Ego 写入会新开一个专用页面，按可见岗位和问卷控件准备，然后 `handOff()`；适配器不隐藏调用提交 API，不点击最终提交/确认，也不自动重试。受控页面验收入口：
+`--via ego` 的查询只复用现有 Ego 页面会话并直接调用 API，不导航当前页面。Ego 写入从 `@cqu-moe/friends-cli/node` 公开入口进入：每次重新核验学校会话、账号和上下文，重新读取活动、岗位、问卷和 `can-apply` 要求，再新开一个专用页面并校验该页面 token、账号、角色、路由和活动 UUID。适配器点击 Vant FieldSelect 的可见包装层和嵌套 `.van-ellipsis` picker 文本；已有非空文本、岗位或选择会被保留，不覆盖、不盲切换。填写中断返回不可重试的 `UNKNOWN_OUTCOME`，并保留已发生步骤与专用页面 label。准备完成后 `handOff()`；适配器不隐藏调用提交 API，不点击最终提交/确认，也不自动重试。受控页面验收入口：
 
 ```sh
-FRIENDS_EGO_TASK_SPACE=<id> npm run verify:volunteer-ego -- register
-FRIENDS_EGO_TASK_SPACE=<id> npm run verify:volunteer-ego -- withdraw
+npm run verify:volunteer-ego -- register
+npm run verify:volunteer-ego -- withdraw
 ```
 
-仓库内的 jsdom strict fixture 会执行当前生成的 Ego 脚本并检查可见 DOM 输入；runner 的 HTTP fixture 会统计真实到达 `/write` 或 `/quit` 的请求数，并要求准备阶段为 0。设置 `FRIENDS_EGO_VERIFY_WAIT_MS` 时，页面会保留一段时间供用户亲自点击受控 fixture 的最终按钮；这只验收可见控件到受控服务器的链路，绝不是生产写入。真实 Ego 与学校生产验收另行记录。
+仓库内的 jsdom strict fixture 会执行当前生成的 Ego 脚本并检查可见 DOM 输入；runner 的 HTTP fixture 会统计真实到达 `/write` 或 `/quit` 的请求数，并要求准备阶段为 0。该入口只验收可见控件、会话绑定和受控服务器链路，不代表生产写入。真实 Ego 与学校生产验收另行记录。

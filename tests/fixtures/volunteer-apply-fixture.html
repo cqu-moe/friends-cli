@@ -5,47 +5,85 @@
 <style>
 body{font:16px/1.5 system-ui;margin:0;background:#f6f8fb;color:#18212f}
 .form-outside,.form-picker,.van-cell{background:#fff}
-.form-outside{padding:12px 16px;border-bottom:1px solid #e5eaf2}
+.form-outside,.van-cell{display:block;padding:12px 16px;border-bottom:1px solid #e5eaf2}
+.van-field__label{display:block;width:110px}
+.van-cell__value{display:block;margin-left:120px}
+.form-outside{padding:12px 16px}
 .item-title{font-weight:600}
-.van-field{display:block;padding:10px 0}
 .van-picker{padding:12px;background:#fff}
-.van-picker.hidden{display:none}
+.van-picker.hidden,.van-popup.hidden,.van-toast.hidden{display:none}
 .van-picker-column__item,.van-radio__icon,.van-checkbox__icon{cursor:pointer;padding:8px}
-.van-radio__icon[data-selected=true],.van-checkbox__icon[data-selected=true]{outline:3px solid #2c92fe}
-button{padding:8px 14px}
+.van-radio__icon[aria-checked=true],.van-checkbox__icon[data-selected=true]{outline:3px solid #2c92fe}
+.final-save{padding:8px 14px}
 </style>
-<div class="van-cell">示例志愿活动</div>
+<div class="van-cell activity">
+  <div class="van-cell__title van-field__label"><span>活动名称</span></div>
+  <div class="van-cell__value"><span class="van-ellipsis">示例志愿活动</span></div>
+</div>
 <div class="form-picker">
-  <label class="van-field">申请岗位<input id="post" readonly value=""></label>
+  <div class="van-cell van-field">
+    <div class="van-cell__title van-field__label"><span>申请岗位</span></div>
+    <div class="van-cell__value"><input id="post" readonly value=""></div>
+  </div>
   <div class="van-picker hidden" id="post-picker">
-    <div class="van-picker-column__item" data-value="post-1" onclick="this.dataset.selected='true'">签到岗</div>
-    <button class="van-picker__confirm" type="button" onclick="document.getElementById('post').value=document.querySelector('.van-picker-column__item[data-selected=true]').dataset.value;this.parentElement.classList.add('hidden')">确认</button>
+    <div class="van-picker-column__item" data-value="post-1">
+      <div class="van-ellipsis">签到岗</div>
+    </div>
+    <div class="van-picker-column__item" data-value="post-human">
+      <div class="van-ellipsis">人工保留岗</div>
+    </div>
+    <button class="van-picker__confirm" type="button">确认</button>
   </div>
 </div>
 <div class="form-outside">
   <div class="item-title">为什么参加</div>
-  <div class="form-content"><label class="van-field"><textarea aria-label="为什么参加"></textarea></label></div>
+  <div class="form-content"><label class="van-field"><textarea aria-label="为什么参加">人工已经填写</textarea></label></div>
 </div>
 <div class="form-outside">
   <div class="item-title">是否同意服务安排</div>
   <div class="form-content">
-    <div class="van-cell"><span>选项A</span><div class="van-radio__icon" data-selected="false" onclick="this.dataset.selected=this.dataset.selected==='true'?'false':'true'"></div></div>
+    <div class="van-cell"><span class="van-ellipsis">选项A</span><div class="van-radio__icon" role="radio" aria-checked="true"></div></div>
+    <div class="van-cell"><span class="van-ellipsis">选项C</span><div class="van-radio__icon" role="radio" aria-checked="false"></div></div>
   </div>
 </div>
 <div class="form-outside">
   <div class="item-title">可携带物品</div>
   <div class="form-content">
-    <div class="van-cell"><span>选项B</span><div class="van-checkbox__icon" data-selected="false" onclick="this.dataset.selected=this.dataset.selected==='true'?'false':'true'"></div></div>
-    <div class="van-cell"><span>选项C</span><div class="van-checkbox__icon" data-selected="false" onclick="this.dataset.selected=this.dataset.selected==='true'?'false':'true'"></div></div>
+    <div class="van-cell"><span class="van-ellipsis">选项B</span><div class="van-checkbox__icon" data-selected="false"></div></div>
+    <div class="van-cell"><span class="van-ellipsis">选项C</span><div class="van-checkbox__icon" data-selected="false"></div></div>
   </div>
 </div>
 <div class="form-outside">
   <div class="item-title">服务人数</div>
   <div class="form-content"><label class="van-field"><input aria-label="服务人数" inputmode="numeric"></label></div>
 </div>
+<div class="van-popup hidden" aria-hidden="true"><button type="button">不应点击的弹出按钮</button></div>
+<div class="van-toast hidden" aria-hidden="true">隐藏加载提示</div>
 <script>
-document.querySelector(".form-picker .van-field").addEventListener("click", () => {
-  document.getElementById("post-picker").classList.remove("hidden");
+const field = document.querySelector(".form-picker .van-field");
+field.addEventListener("click", () => document.getElementById("post-picker").classList.remove("hidden"));
+document.getElementById("post").addEventListener("click", () => {
+  throw new Error("Vant FieldSelect input is not clickable; click its visible wrapper");
 });
+document.querySelector("#post-picker .van-picker-column__item").addEventListener("click", () => {
+  document.querySelectorAll("#post-picker .van-picker-column__item").forEach((item) => item.dataset.selected = "false");
+  document.querySelector("#post-picker .van-picker-column__item").dataset.selected = "true";
+});
+document.querySelector(".van-picker__confirm").addEventListener("click", () => {
+  const selected = document.querySelector("#post-picker .van-picker-column__item[data-selected=true]");
+  document.getElementById("post").value = selected.dataset.value;
+  document.getElementById("post-picker").classList.add("hidden");
+});
+for (const icon of document.querySelectorAll(".van-radio__icon")) {
+  icon.addEventListener("click", () => {
+    document.querySelectorAll(icon.closest(".form-content")?.querySelectorAll(".van-radio__icon") ?? []).forEach((item) => item.setAttribute("aria-checked", "false"));
+    icon.setAttribute("aria-checked", "true");
+  });
+}
+for (const icon of document.querySelectorAll(".van-checkbox__icon")) {
+  icon.addEventListener("click", () => {
+    icon.dataset.selected = icon.dataset.selected === "true" ? "false" : "true";
+  });
+}
 </script>
-<button class="submit" type="button" onclick="fetch('/write',{method:'POST'}).catch(()=>{})">申请加入</button>
+<button class="submit final-save" type="button" onclick="fetch('/write',{method:'POST'}).catch(()=>{})">申请加入</button>

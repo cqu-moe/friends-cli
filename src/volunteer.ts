@@ -242,6 +242,38 @@ export function validateVolunteerListInput(input: VolunteerListInput = {}) {
   return { page, pageSize, keyword: input.keyword ?? "" };
 }
 
+const answerTypes = new Set(["CHOICE", "MULTIPLE_CHOICE", "TEXT", "NUMBER", "DATE"]);
+
+export function validateVolunteerRegisterInput(input: VolunteerRegisterInput): void {
+  if (!object(input) || typeof input.postId !== "string" || input.postId === "") {
+    invalid("postId is required");
+  }
+  if (input.questionnaireAnswers !== undefined && !Array.isArray(input.questionnaireAnswers)) {
+    invalid("questionnaireAnswers must be an array");
+  }
+  for (const value of input.questionnaireAnswers ?? []) {
+    const answer = object(value);
+    if (answer === null || typeof answer.itemUuid !== "string" || answer.itemUuid === "") {
+      invalid("Questionnaire answer requires itemUuid");
+    }
+    if (typeof answer.type !== "string" || !answerTypes.has(answer.type)) {
+      invalid(`Unsupported volunteer questionnaire answer type: ${String(answer?.type)}`);
+    }
+    if (answer.type === "CHOICE" && (typeof answer.optionUuid !== "string" || answer.optionUuid === "")) {
+      invalid("CHOICE questionnaire answer requires optionUuid");
+    }
+    if (answer.type === "MULTIPLE_CHOICE" &&
+        (!Array.isArray(answer.optionUuids) ||
+          answer.optionUuids.some((option) => typeof option !== "string" || option === ""))) {
+      invalid("MULTIPLE_CHOICE questionnaire answer requires optionUuids");
+    }
+    if ((answer.type === "TEXT" || answer.type === "NUMBER" || answer.type === "DATE") &&
+        (typeof answer.inputContent !== "string" || answer.inputContent === "")) {
+      invalid(`${answer.type} questionnaire answer requires inputContent`);
+    }
+  }
+}
+
 function headers(token: string, userLevel: string, appKey: string): Record<string, string> {
   return {
     "content-type": "application/json",
@@ -458,6 +490,22 @@ function checkRegistrationWindow(activity: VolunteerActivitySummary) {
   const now = Date.now();
   const open = parseTime(activity.openTime);
   const deadline = parseTime(activity.deadline);
+  const begin = parseTime(activity.beginTime);
+  const end = parseTime(activity.endTime);
+  for (const [name, value, parsed] of [
+    ["openTime", activity.openTime, open],
+    ["deadline", activity.deadline, deadline],
+    ["beginTime", activity.beginTime, begin],
+    ["endTime", activity.endTime, end],
+  ] as const) {
+    if (value !== null && parsed === null) invalid(`Volunteer activity ${name} is invalid`);
+  }
+  if (begin !== null && end !== null && begin >= end) {
+    invalid("Volunteer activity end time must be after begin time");
+  }
+  if (open !== null && deadline !== null && open >= deadline) {
+    invalid("Volunteer registration deadline must be after open time");
+  }
   if ((open !== null && now < open) || (deadline !== null && now > deadline)) {
     invalid("Volunteer registration window is closed");
   }
@@ -684,10 +732,7 @@ export function createVolunteerClient(options: {
 
   async function prepareRegistration(id: VolunteerActivityId, input: VolunteerRegisterInput) {
     volunteerActivityId(id);
-    if (!object(input) || typeof input.postId !== "string" || input.postId === "") invalid("postId is required");
-    if (input.questionnaireAnswers !== undefined && !Array.isArray(input.questionnaireAnswers)) {
-      invalid("questionnaireAnswers must be an array");
-    }
+    validateVolunteerRegisterInput(input);
     const [rawDetail, activityPosts, canApply] = await Promise.all([
       detail(id),
       posts(id),

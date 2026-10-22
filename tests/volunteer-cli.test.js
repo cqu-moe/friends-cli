@@ -91,12 +91,18 @@ test("real CLI exposes volunteer schemas and runs the complete API flow", async 
   };
   let registered = false;
   let hideOptionName = false;
+  const applyHtml = await readFile(resolve("tests/fixtures/volunteer-apply-fixture.html"), "utf8");
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
       const payload = body ? JSON.parse(body) : null;
       requests.push({ method: req.method, url: req.url, body: payload });
+      if (req.url.startsWith("/mobile/")) {
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.end(applyHtml);
+        return;
+      }
       if (req.url.endsWith("/checkUserAndGetUserLevel")) return identity(res);
       if (req.url.endsWith("/user/info")) return json(res, 200, { code: "0", data: { userNo: "20210001", userName: "张三" } });
       if (req.url.endsWith("/enterHall")) {
@@ -150,15 +156,22 @@ test("real CLI exposes volunteer schemas and runs the complete API flow", async 
 
   const root = await mkdtemp(join(tmpdir(), "friends-volunteer-cli-"));
   const egoBrowser = join(root, "ego-browser");
+  const egoConfig = join(root, "ego.json");
+  const egoObserved = join(root, "ego-observed.json");
+  await writeFile(egoConfig, JSON.stringify({
+    html: resolve("tests/fixtures/volunteer-apply-fixture.html"),
+    result: egoObserved,
+    url: `http://127.0.0.1:${server.address().port}/mobile/volunteerManage/campusActivityApplyDetail?uuid=activity-1`,
+    token: "ego-fixture-token",
+    accountUserNo: "20210001",
+  }));
   await writeFile(egoBrowser, [
     "#!/bin/sh",
     "cat > \"$EGO_SCRIPT_LOG\"",
     "if grep -q FRIENDS_CLI_VOLUNTEER_PREPARE \"$EGO_SCRIPT_LOG\"; then",
     "printf x >> \"$EGO_PREPARE_CALLS\"",
-    "printf '%s\\n' 'FRIENDS_CLI_VOLUNTEER_PREPARE:{\"activityId\":\"activity-1\",\"pageLabel\":\"p9\",\"submitted\":false,\"handoff\":true}'",
-    "else",
-    "printf '%s\\n' 'FRIENDS_CLI_EGO_SESSION:{\"token\":\"ego-token\",\"userLevel\":\"XS\"}'",
     "fi",
+    `exec ${JSON.stringify(process.execPath)} -e 'await import(${JSON.stringify(new URL("fixtures/strict-ego.mjs", import.meta.url).href)})' < \"$EGO_SCRIPT_LOG\"`,
     "",
   ].join("\n"));
   await chmod(egoBrowser, 0o700);
@@ -169,6 +182,7 @@ test("real CLI exposes volunteer schemas and runs the complete API flow", async 
     FRIENDS_HOME: home,
     EGO_SCRIPT_LOG: join(root, "ego-script.js"),
     EGO_PREPARE_CALLS: join(root, "ego-prepare-calls"),
+    FRIENDS_EGO_FIXTURE_CONFIG: egoConfig,
     FRIENDS_BASE_URL: `http://127.0.0.1:${server.address().port}/gateway`,
   };
   const cli = process.env.FRIENDS_TEST_CLI ?? resolve("dist/cli/main.js");
@@ -288,15 +302,32 @@ test("real CLI exposes volunteer schemas and runs the complete API flow", async 
   ], { env })).stdout);
   assert.equal(egoPrepare.data.submitted, false);
   assert.equal(egoPrepare.data.handoff, true);
-  assert.equal(egoPrepare.data.pageLabel, "p9");
+  assert.equal(egoPrepare.data.pageLabel, "p1");
+  assert.deepEqual(egoPrepare.data.preservedFields, ["question:为什么参加", "question:是否同意服务安排"]);
+  assert.equal(egoPrepare.data.verification.account.userNo, "20210001");
   assert.equal(egoPrepare.meta.via, "ego-visible-form+human-submit");
   const script = await readFile(join(root, "ego-script.js"), "utf8");
   assert.match(script, /campusActivityApplyDetail\?uuid=activity-1/);
   assert.match(script, /task\.newPage\(\)/);
   assert.match(script, /task\.handOff\(\)/);
   assert.match(script, /page\.snapshot\(\)/);
+  assert.match(script, /van-field__label/);
+  assert.match(script, /van-ellipsis/);
   assert.doesNotMatch(script, /page\.on\(/);
   assert.doesNotMatch(script, /fetch\(/);
+  assert.doesNotMatch(script, /page\.locator\(/);
+  assert.doesNotMatch(script, /getByText\(/);
+  assert.doesNotMatch(script, /\.first\(\)/);
+  assert.doesNotMatch(script, /\.last\(\)/);
+  const egoObservedJson = JSON.parse(await readFile(egoObserved, "utf8"));
+  assert.equal(egoObservedJson.newPages, 1);
+  assert.equal(egoObservedJson.navigations, 1);
+  assert.equal(egoObservedJson.handoffs, 1);
+  assert.equal(egoObservedJson.clicks.length, 3);
+  assert.equal(egoObservedJson.fills.length, 0);
+  assert.equal(egoObservedJson.finalRequests, 0);
+  assert.equal(egoObservedJson.fieldValues.find((field) => field.id === "post").value, "post-1");
+  assert.equal(egoObservedJson.fieldValues.find((field) => field.ariaLabel === "为什么参加").value, "人工已经填写");
 
   const callsBeforeMissingVisibleText = (await readFile(env.EGO_PREPARE_CALLS, "utf8")).length;
   hideOptionName = true;
@@ -307,7 +338,7 @@ test("real CLI exposes volunteer schemas and runs the complete API flow", async 
     ], { env }),
     (error) => error.code === 2 &&
       JSON.parse(error.stdout).error.code === "INVALID_INPUT" &&
-      JSON.parse(error.stdout).error.message === "Ego preparation requires a visible questionnaire option label for option-a",
+      JSON.parse(error.stdout).error.message === "Ego preparation requires a visible questionnaire option label",
   );
   assert.equal((await readFile(env.EGO_PREPARE_CALLS, "utf8")).length, callsBeforeMissingVisibleText);
 

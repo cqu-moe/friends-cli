@@ -30,6 +30,7 @@ export type {
 export * from "./certification-api.js";
 
 export {
+  validateVolunteerRegisterInput,
   validateVolunteerListInput,
   volunteerActivityId,
   volunteerRegistrationId,

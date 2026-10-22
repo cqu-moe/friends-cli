@@ -8,6 +8,7 @@ const stats={clicks:[],fills:[],handoffs:0,newPages:0,navigations:0,loadStates:0
 const dom=new JSDOM(await readFile(configuration.html,'utf8'),{url:configuration.url,runScripts:'dangerously',beforeParse(w){
  w.fetch=async(url,init)=>{const method=init?.method??'GET';if(method==='POST')stats.submits++;if(['/write','/quit'].includes(new URL(url,configuration.url).pathname)&&method!=='GET')stats.finalRequests++;return fetch(new URL(url,configuration.url),init);};
  w.localStorage.setItem('token_str',configuration.token??'ego-fixture-token');w.localStorage.setItem('userLevel_str','XS');
+ w.localStorage.setItem('userInfo_obj',JSON.stringify({userNo:configuration.accountUserNo??'20210001'}));
 }});
 const w=dom.window;
 function visible(element){for(let current=element;current;current=current.parentElement)if(w.getComputedStyle(current).display==='none')return false;return true;}

@@ -10,10 +10,9 @@ import {
   type VolunteerRegisterInput,
 } from "../index.js";
 import {
-  prepareVolunteerRegistrationEgo,
-  prepareVolunteerWithdrawalEgo,
-  type VisibleVolunteerAnswer,
-} from "../volunteer-ego.js";
+  prepareVolunteerRegistrationInEgo,
+  prepareVolunteerWithdrawalInEgo,
+} from "../node.js";
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 
@@ -103,6 +102,7 @@ export const volunteerSchemas = {
       confirm: { type: "flag", required: "API writes only; never valid with ego", sdkConfirmation: "volunteers.register" },
       dryRun: { type: "flag", performsReadsAndValidationOnly: true },
       egoTaskSpace: { type: "integer", required: "ego writes only; preparation opens a dedicated page" },
+      egoPage: { type: "string", default: "p1", description: "existing school session page used only to verify the Ego session" },
       levelNo: { type: "string", required: "only when multiple Ego contexts match" },
       unitNo: { type: "string", required: "only when multiple Ego contexts match" },
     },
@@ -123,6 +123,7 @@ export const volunteerSchemas = {
       confirm: { type: "flag", required: "API writes only; never valid with ego", sdkConfirmation: "volunteers.withdraw" },
       dryRun: { type: "flag", performsReadsAndValidationOnly: true },
       egoTaskSpace: { type: "integer", required: "ego writes only; preparation opens a dedicated page" },
+      egoPage: { type: "string", default: "p1", description: "existing school session page used only to verify the Ego session" },
       levelNo: { type: "string", required: "only when multiple Ego contexts match" },
       unitNo: { type: "string", required: "only when multiple Ego contexts match" },
     },
@@ -164,13 +165,6 @@ function validateWriteFlags(options: Record<string, string | boolean | undefined
 
 function invalid(message: string): never {
   throw new FriendsError({ code: FriendsErrorCode.InvalidInput, message });
-}
-
-function requireVisibleText(value: string | null | undefined, kind: string, id: string): string {
-  if (typeof value !== "string" || value.trim() === "") {
-    invalid(`Ego preparation requires a visible ${kind} for ${id}`);
-  }
-  return value;
 }
 
 function sessionOptions(options: Record<string, string | boolean | undefined>): Record<string, string | undefined> {
@@ -295,6 +289,7 @@ export function registerVolunteerCommands(
     .option("--confirm", "confirm one API write; never submits through Ego")
     .option("--dry-run", "validate and build payload without writing")
     .option("--ego-task-space <number>", "existing Ego task space required by --via ego")
+    .option("--ego-page <label>", "existing school session page (default p1)")
     .option("--level-no <value>", "select an Ego level when multiple contexts match")
     .option("--unit-no <value>", "select an Ego identity unit when multiple contexts match")
     .option("--json", "print stable JSON", true)
@@ -302,51 +297,32 @@ export function registerVolunteerCommands(
       validateWriteFlags(commandOptions);
       const id = volunteerActivityId(activityIdValue);
       const input = await readJsonInput(String(commandOptions.input)) as VolunteerRegisterInput;
+      const operation = "volunteers.register";
+      if (commandOptions.via === "ego" && commandOptions.dryRun !== true) {
+        const data = await prepareVolunteerRegistrationInEgo({
+          activityId: id,
+          input,
+          taskSpaceId: Number(commandOptions.egoTaskSpace),
+          page: typeof commandOptions.egoPage === "string" ? commandOptions.egoPage : undefined,
+          levelNo: typeof commandOptions.levelNo === "string" ? commandOptions.levelNo : undefined,
+          unitNo: typeof commandOptions.unitNo === "string" ? commandOptions.unitNo : undefined,
+          baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+          command: process.env.FRIENDS_EGO_COMMAND,
+        });
+        options.output(data, {
+          operation,
+          ...meta({ entry: "ego", session: data.verification }, operation),
+          nextAction: "Review the visible form and personally submit it",
+        });
+        return;
+      }
       const source = await options.selectedSession(sessionOptions(commandOptions), process.env.FRIENDS_BASE_URL ?? productionBaseUrl);
       const client = await options.sdk().createVolunteerClient(source.session);
       const preparation = await client.prepareRegistration(id, input);
-      const operation = "volunteers.register";
       if (commandOptions.dryRun === true) {
         options.output({ wouldWrite: true, payload: preparation.payload, activity: preparation.activity, posts: preparation.posts }, {
           operation, ...meta(source, operation), dryRun: true,
         });
-        return;
-      }
-      if (source.entry === "ego") {
-        const visibleAnswers: VisibleVolunteerAnswer[] = (input.questionnaireAnswers ?? []).map((answer) => {
-          const question = preparation.activity.questionnaires.find((item) => item.id === answer.itemUuid);
-          if (question === undefined) invalid("Questionnaire answer does not belong to this activity");
-          const title = requireVisibleText(question.title, "questionnaire title", question.id);
-          if (answer.type === "CHOICE") {
-            const option = question.options.find((item) => item.id === answer.optionUuid);
-            if (option === undefined) invalid("Questionnaire option does not belong to this activity question");
-            return { title, type: answer.type, optionLabels: [requireVisibleText(option.name, "questionnaire option label", option.id)] };
-          }
-          if (answer.type === "MULTIPLE_CHOICE") {
-            return {
-              title,
-              type: answer.type,
-              optionLabels: answer.optionUuids.map((optionId) => {
-                const option = question.options.find((item) => item.id === optionId);
-                if (option === undefined) invalid("Questionnaire option does not belong to this activity question");
-                return requireVisibleText(option.name, "questionnaire option label", option.id);
-              }),
-            };
-          }
-          if (answer.type === "DATE") {
-            invalid("DATE questionnaire Ego preparation is not implemented; complete the visible date field after handoff");
-          }
-          return { title, type: answer.type, inputContent: answer.inputContent };
-        });
-        const data = await prepareVolunteerRegistrationEgo({
-          activityId: id,
-          activityName: preparation.activity.name,
-          postName: preparation.payload.postName,
-          answers: visibleAnswers,
-          taskSpaceId: Number(commandOptions.egoTaskSpace),
-          command: process.env.FRIENDS_EGO_COMMAND,
-        });
-        options.output(data, { operation, ...meta(source, operation), nextAction: "Review the visible form and personally submit it" });
         return;
       }
       const data = await client.register(id, { ...input, confirmation: "volunteers.register" });
@@ -362,6 +338,7 @@ export function registerVolunteerCommands(
     .option("--confirm", "confirm one API write; never confirms through Ego")
     .option("--dry-run", "validate without writing")
     .option("--ego-task-space <number>", "existing Ego task space required by --via ego")
+    .option("--ego-page <label>", "existing school session page (default p1)")
     .option("--level-no <value>", "select an Ego level when multiple contexts match")
     .option("--unit-no <value>", "select an Ego identity unit when multiple contexts match")
     .option("--json", "print stable JSON", true)
@@ -369,23 +346,32 @@ export function registerVolunteerCommands(
       validateWriteFlags(commandOptions);
       const activityId = volunteerActivityId(activityIdValue);
       const registrationId = volunteerRegistrationId(registrationIdValue);
+      const operation = "volunteers.withdraw";
+      if (commandOptions.via === "ego" && commandOptions.dryRun !== true) {
+        const data = await prepareVolunteerWithdrawalInEgo({
+          activityId,
+          registrationId,
+          taskSpaceId: Number(commandOptions.egoTaskSpace),
+          page: typeof commandOptions.egoPage === "string" ? commandOptions.egoPage : undefined,
+          levelNo: typeof commandOptions.levelNo === "string" ? commandOptions.levelNo : undefined,
+          unitNo: typeof commandOptions.unitNo === "string" ? commandOptions.unitNo : undefined,
+          baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+          command: process.env.FRIENDS_EGO_COMMAND,
+        });
+        options.output(data, {
+          operation,
+          ...meta({ entry: "ego", session: data.verification }, operation),
+          nextAction: "Review the page and personally confirm withdrawal",
+        });
+        return;
+      }
       const source = await options.selectedSession(sessionOptions(commandOptions), process.env.FRIENDS_BASE_URL ?? productionBaseUrl);
       const client = await options.sdk().createVolunteerClient(source.session);
       const preparation = await client.prepareWithdrawal(activityId, registrationId);
-      const operation = "volunteers.withdraw";
       if (commandOptions.dryRun === true) {
         options.output({ wouldWrite: true, activity: preparation.activity, registration: preparation.registration }, {
           operation, ...meta(source, operation), dryRun: true,
         });
-        return;
-      }
-      if (source.entry === "ego") {
-        const data = await prepareVolunteerWithdrawalEgo({
-          activityId,
-          taskSpaceId: Number(commandOptions.egoTaskSpace),
-          command: process.env.FRIENDS_EGO_COMMAND,
-        });
-        options.output(data, { operation, ...meta(source, operation), nextAction: "Review the page and personally confirm withdrawal" });
         return;
       }
       const data = await client.withdraw(activityId, registrationId, { confirmation: "volunteers.withdraw" });

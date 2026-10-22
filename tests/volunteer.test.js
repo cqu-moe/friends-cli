@@ -11,9 +11,9 @@ import {
   volunteerRegistrationId,
 } from "../dist/index.js";
 import {
-  prepareVolunteerRegistrationEgo,
-  prepareVolunteerWithdrawalEgo,
-} from "../dist/volunteer-ego.js";
+  prepareVolunteerRegistrationInEgo,
+  prepareVolunteerWithdrawalInEgo,
+} from "../dist/node.js";
 
 function json(res, status, body) {
   res.writeHead(status, { "content-type": "application/json" });
@@ -36,13 +36,58 @@ function identity(res) {
 
 async function setupStrictVolunteerEgo(t, fixtureFile) {
   const actualRequests = [];
+  const apiRequests = [];
   const html = await readFile(resolve("tests/fixtures", fixtureFile), "utf8");
+  const registration = {
+    uuid: "registration-1",
+    activityId: "activity-1",
+    studentNo: "20210001",
+    postId: "post-1",
+    postName: "签到岗",
+    postDuration: 2,
+    flowOverallState: 7,
+    flowCurrMsg: "审核通过",
+  };
   const server = createServer((req, res) => {
-    if (/^\/(write|quit)$/.test(req.url ?? "") && req.method !== "GET") {
-      actualRequests.push({ method: req.method, url: req.url });
-    }
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(html);
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      if (/^\/(write|quit)$/.test(req.url ?? "") && req.method !== "GET") {
+        actualRequests.push({ method: req.method, url: req.url });
+        res.destroy();
+        return;
+      }
+      if (req.url.startsWith("/mobile/")) {
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.end(html);
+        return;
+      }
+      const payload = body ? JSON.parse(body) : null;
+      apiRequests.push({ method: req.method, url: req.url, body: payload });
+      if (req.url.endsWith("/checkUserAndGetUserLevel")) return identity(res);
+      if (req.url.endsWith("/user/info")) {
+        return json(res, 200, { code: "0", data: { userNo: "20210001", userName: "张三" } });
+      }
+      if (req.url.endsWith("/enterHall")) {
+        return json(res, 200, {
+          code: "0",
+          data: { account: "20210001", name: "张三", userLoginStateLevel: "XS", departmentNo: "unit-a" },
+        });
+      }
+      if (req.url.endsWith("/school-activity-apply/approve-detail/activity-1")) {
+        return json(res, 200, { code: "0", data: { ...activity, studentApplied: null } });
+      }
+      if (req.url.endsWith("/school-activity-apply/post/activity-1")) {
+        return json(res, 200, { code: "0", data: posts });
+      }
+      if (req.url.endsWith("/schoolActivityStudentApply/can-apply/activity-1")) {
+        return json(res, 200, { code: "0", data: true });
+      }
+      if (req.url.endsWith("/schoolActivityStudentApply/registration-1")) {
+        return json(res, 200, { code: "0", data: registration });
+      }
+      return json(res, 200, { code: "0", data: null });
+    });
   });
   await new Promise((done) => server.listen(0, "127.0.0.1", done));
   t.after(() => {
@@ -54,11 +99,17 @@ async function setupStrictVolunteerEgo(t, fixtureFile) {
   t.after(() => rm(home, { recursive: true, force: true }));
   const result = join(home, "observed.json");
   const config = join(home, "ego.json");
-  const url = `http://127.0.0.1:${server.address().port}/fixture.html`;
+  const isWithdrawalFixture = fixtureFile.includes("withdraw");
+  const pagePath = isWithdrawalFixture
+    ? "/mobile/volunteerManage/campusActivityInfo"
+    : "/mobile/volunteerManage/campusActivityApplyDetail";
+  const url = `http://127.0.0.1:${server.address().port}${pagePath}?uuid=activity-1`;
   await writeFile(config, JSON.stringify({
     html: resolve("tests/fixtures", fixtureFile),
     result,
     url,
+    token: "ego-fixture-token",
+    accountUserNo: "20210001",
   }));
   const previousConfig = process.env.FRIENDS_EGO_FIXTURE_CONFIG;
   process.env.FRIENDS_EGO_FIXTURE_CONFIG = config;
@@ -76,7 +127,9 @@ async function setupStrictVolunteerEgo(t, fixtureFile) {
   return {
     command,
     url,
+    baseUrl: `http://127.0.0.1:${server.address().port}/gateway`,
     actualRequests,
+    apiRequests,
     async observed() {
       return JSON.parse(await readFile(result, "utf8"));
     },
@@ -208,7 +261,10 @@ test("volunteer SDK completes queries, registration, withdrawal, and separate re
         });
       }
       if (req.url.endsWith("/school-activity-apply/approve-detail/activity-1")) {
-        if (mode === "closed") return json(res, 200, { code: "0", data: { ...activity, deadline: "2000-01-01 10:00" } });
+        if (mode === "closed") return json(res, 200, {
+          code: "0",
+          data: { ...activity, openTime: "1990-01-01 10:00", deadline: "2000-01-01 10:00" },
+        });
         return json(res, 200, { code: "0", data: { ...activity, studentApplied: registered ? {
           uuid: "registration-1",
           activityId: "activity-1",
@@ -517,50 +573,64 @@ test("volunteer SDK completes queries, registration, withdrawal, and separate re
   assert.equal(lostWriteRequests, 1);
 });
 
-test("volunteer Ego adapters execute against visible strict DOM and stop before final requests", async (t) => {
+test("public volunteer Node SDK executes visible strict DOM and stops before final requests", async (t) => {
   const register = await setupStrictVolunteerEgo(t, "volunteer-apply-fixture.html");
-  const preparation = await prepareVolunteerRegistrationEgo({
-    activityId: "activity-1",
-    activityName: "示例志愿活动",
-    postName: "签到岗",
-    taskSpaceId: 7,
-    pageUrl: register.url,
-    command: register.command,
-    answers: [
-      { title: "是否同意服务安排", type: "CHOICE", optionLabels: ["选项A"] },
-      { title: "可携带物品", type: "MULTIPLE_CHOICE", optionLabels: ["选项B", "选项C"] },
-      { title: "服务人数", type: "NUMBER", inputContent: "3" },
-      { title: "为什么参加", type: "TEXT", inputContent: "受控验收答案" },
+  const input = {
+    postId: "post-1",
+    questionnaireAnswers: [
+      { itemUuid: "question-text", type: "TEXT", inputContent: "受控验收答案" },
+      { itemUuid: "question-choice", type: "CHOICE", optionUuid: "option-a" },
+      { itemUuid: "question-multiple", type: "MULTIPLE_CHOICE", optionUuids: ["option-b", "option-c"] },
+      { itemUuid: "question-number", type: "NUMBER", inputContent: "3" },
     ],
-  });
-  assert.deepEqual(preparation, {
+  };
+  const preparation = await prepareVolunteerRegistrationInEgo({
     activityId: "activity-1",
-    pageLabel: "p1",
-    submitted: false,
-    handoff: true,
+    input,
+    taskSpaceId: 7,
+    baseUrl: register.baseUrl,
+    command: register.command,
+    timeoutMs: 5000,
+    schoolTimeoutMs: 1000,
   });
+  assert.equal(preparation.status, "awaiting-user");
+  assert.equal(preparation.activityId, "activity-1");
+  assert.equal(preparation.pageLabel, "p1");
+  assert.equal(preparation.submitted, false);
+  assert.equal(preparation.handoff, true);
+  assert.equal(preparation.verification.account.userNo, "20210001");
+  assert.ok(preparation.completedActions.includes("session-verified"));
+  assert.ok(preparation.completedActions.includes("activity-verified"));
+  assert.ok(preparation.completedActions.includes("post:selected"));
+  assert.deepEqual(preparation.preservedFields, ["question:为什么参加", "question:是否同意服务安排"]);
   const observed = await register.observed();
   assert.equal(observed.newPages, 1);
   assert.equal(observed.navigations, 1);
   assert.equal(observed.handoffs, 1);
   assert.deepEqual(
     observed.fieldValues.filter((field) => field.value !== "").map((field) => field.value),
-    ["post-1", "受控验收答案", "3"],
+    ["post-1", "人工已经填写", "3"],
   );
-  assert.equal(observed.html.match(/data-selected="true"/g)?.length, 4);
-  assert.equal(observed.clicks.length, 6);
-  assert.equal(observed.fills.length, 2);
+  assert.equal(observed.html.match(/data-selected="true"|aria-checked="true"/g)?.length, 3);
+  assert.equal(observed.clicks.length, 5);
+  assert.equal(observed.fills.length, 1);
   assert.match(observed.html, /申请加入/);
   assert.doesNotMatch(observed.html, />提交</);
   assert.equal(observed.finalRequests, 0);
   assert.deepEqual(register.actualRequests, []);
+  assert.ok(register.apiRequests.some(({ url }) => url.endsWith("/school-activity-apply/approve-detail/activity-1")));
+  assert.ok(register.apiRequests.some(({ url }) => url.endsWith("/school-activity-apply/post/activity-1")));
+  assert.ok(register.apiRequests.some(({ url }) => url.endsWith("/schoolActivityStudentApply/can-apply/activity-1")));
 
   const withdraw = await setupStrictVolunteerEgo(t, "volunteer-withdraw-fixture.html");
-  const withdrawal = await prepareVolunteerWithdrawalEgo({
+  const withdrawal = await prepareVolunteerWithdrawalInEgo({
     activityId: "activity-1",
+    registrationId: "registration-1",
     taskSpaceId: 7,
-    pageUrl: withdraw.url,
+    baseUrl: withdraw.baseUrl,
     command: withdraw.command,
+    timeoutMs: 5000,
+    schoolTimeoutMs: 1000,
   });
   assert.equal(withdrawal.submitted, false);
   const withdrawalObserved = await withdraw.observed();
@@ -568,6 +638,64 @@ test("volunteer Ego adapters execute against visible strict DOM and stop before 
   assert.deepEqual(withdrawalObserved.clicks, []);
   assert.equal(withdrawalObserved.handoffs, 1);
   assert.deepEqual(withdraw.actualRequests, []);
+
+  const interrupted = await setupStrictVolunteerEgo(t, "volunteer-apply-interrupted-fixture.html");
+  const beforeInvalidInput = interrupted.apiRequests.length;
+  await assert.rejects(
+    () => prepareVolunteerRegistrationInEgo({
+      activityId: "activity-1",
+      input: { postId: "post-1", questionnaireAnswers: [{ itemUuid: "question-number", type: "BOOLEAN", inputContent: "x" }] },
+      taskSpaceId: 7,
+      baseUrl: interrupted.baseUrl,
+      command: interrupted.command,
+    }),
+    (error) => error.code === FriendsErrorCode.InvalidInput && interrupted.apiRequests.length === beforeInvalidInput,
+  );
+  await assert.rejects(
+    () => prepareVolunteerRegistrationInEgo({
+      activityId: "not/a-volunteer-activity",
+      input,
+      taskSpaceId: 7,
+      baseUrl: interrupted.baseUrl,
+      command: interrupted.command,
+    }),
+    (error) => error.code === FriendsErrorCode.InvalidInput && interrupted.apiRequests.length === beforeInvalidInput,
+  );
+  await assert.rejects(
+    () => prepareVolunteerRegistrationInEgo({
+      activityId: "activity-1",
+      input,
+      taskSpaceId: 7,
+      baseUrl: interrupted.baseUrl,
+      command: interrupted.command,
+      timeoutMs: 0,
+    }),
+    (error) => error.code === FriendsErrorCode.InvalidInput && interrupted.apiRequests.length === beforeInvalidInput,
+  );
+  await assert.rejects(
+    () => prepareVolunteerRegistrationInEgo({
+      activityId: "activity-1",
+      input,
+      taskSpaceId: 7,
+      baseUrl: interrupted.baseUrl,
+      command: interrupted.command,
+      timeoutMs: 5000,
+      schoolTimeoutMs: 1000,
+    }),
+    (error) => {
+      assert.equal(error.code, FriendsErrorCode.UnknownOutcome);
+      assert.equal(error.retryable, false);
+      assert.equal(error.recovery.activityId, "activity-1");
+      assert.equal(error.recovery.pageLabel, "p1");
+      assert.equal(error.recovery.serverAcknowledged, false);
+      assert.ok(error.recovery.completed.includes("post:selected"));
+      return true;
+    },
+  );
+  const interruptedObserved = await interrupted.observed();
+  assert.equal(interruptedObserved.handoffs, 1);
+  assert.equal(interruptedObserved.finalRequests, 0);
+  assert.deepEqual(interrupted.actualRequests, []);
 });
 
 test("volunteer SDK rejects invalid state, ownership, domain IDs, and unsupported questions before writes", async (t) => {
@@ -599,7 +727,10 @@ test("volunteer SDK rejects invalid state, ownership, domain IDs, and unsupporte
         return json(res, 200, { code: "0", data: { ...detail, studentApplied: { uuid: "registration-1", studentNo: "20210001" } } });
       }
       if (mode === "closed" && req.url.endsWith("/school-activity-apply/approve-detail/activity-1")) {
-        return json(res, 200, { code: "0", data: { ...detail, deadline: "2000-01-01 10:00" } });
+        return json(res, 200, {
+          code: "0",
+          data: { ...detail, openTime: "1990-01-01 10:00", deadline: "2000-01-01 10:00" },
+        });
       }
       if (mode === "other-student" && req.url.endsWith("/schoolActivityStudentApply/registration-1")) {
         return json(res, 200, { code: "0", data: { uuid: "registration-1", activityId: "activity-1", studentNo: "20219999", flowOverallState: 7 } });
