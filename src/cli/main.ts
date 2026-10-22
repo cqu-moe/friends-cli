@@ -1,7 +1,9 @@
 #!/usr/bin/env node
+import {courseReviewSchemas, registerCourseReviewCommands} from "./course-reviews.js";
 import {volunteerActivityReviewSchemas,registerVolunteerActivityReviewCommands} from "./volunteer-activity-reviews.js";
 import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
 import { Command } from "commander";
+import { organizationActivityReviewSchemas, registerOrganizationActivityReviewCommands } from "./organization-activity-reviews.js";
 import {
   courseId,
   validateCourseListInput,
@@ -27,15 +29,19 @@ import { createCquAuthClient } from "../auth.js";
 import { resolveQuerySession } from "./session.js";
 import { draftSchemas, registerDraftCommands } from "./drafts.js";
 import { organizationSchemas, registerOrganizationCommands } from "./organizations.js";
+import { registerVolunteerReviewCommands, volunteerReviewSchemas } from "./volunteer-reviews.js";
 import { offeringSchemas, registerOfferingCommands } from "./offerings.js";
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
+  ...courseReviewSchemas,
   ...offeringSchemas,
   ...volunteerActivityReviewSchemas,
   ...certificationApiSchemas,
   ...draftSchemas,
   ...organizationSchemas,
+  ...organizationActivityReviewSchemas,
+  ...volunteerReviewSchemas,
   errors: {
     operation: "errors", readonly:true, permission:"none", phases:["inspect"], supportedVia:["local"],
     exitCodes: {0:"success", 2:"INVALID_INPUT", 3:"AUTH_REQUIRED", 4:"PERMISSION_DENIED", 5:"BUSINESS_REJECTED", 6:"NETWORK_PROTOCOL_ERROR", 7:"UNKNOWN_OUTCOME"},
@@ -401,6 +407,10 @@ courses
     });
   });
 
+registerOrganizationActivityReviewCommands(program, { baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl });
+
+
+registerCourseReviewCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 registerVolunteerActivityReviewCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 registerCertificationApiCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 
@@ -411,6 +421,10 @@ registerDraftCommands(program, {
 });
 
 registerOrganizationCommands(program, {
+  baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+});
+
+registerVolunteerReviewCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
 });
 

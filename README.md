@@ -1,6 +1,6 @@
 # friends-cli
 
-重庆大学第二课堂平台的本地 CLI 与可复用 SDK。当前包含学校会话与课程查询、志愿认证草稿与 API 认证提交、校内志愿活动开办及审批，以及学生组织资料/成员查询与加入退出申请审批。各操作的 API/Ego 支持阶段以命令 schema 和验收记录为准；Ego 需人工审阅的写流程只准备并交接。
+重庆大学第二课堂平台的本地 CLI 与可复用 SDK。SDK 提供共享业务契约；CLI 支持本地 API 与 Ego 会话查询、活动与认证准备、明确确认的 API 写入。Ego 写操作保留给用户审核并亲自最终提交。完整范围和验证层次见下文与 docs/verification。
 
 ## 安装与命令
 
@@ -43,6 +43,16 @@ friends organizations approvals decide <organizationUuid> <applicationUuid> \
 friends organizations approvals decide <organizationUuid> <applicationUuid> \
   --type join --decision approve --via api --yes --message "同意加入" \
   --time 2026-10-22 --json
+
+friends volunteer-hours list --page 1 --page-size 10 --json
+friends volunteer-hours show <transcriptUuid> --json
+friends volunteer-certification-reviews list --via ego \
+  --ego-task-space 16 --ego-page p1 --json
+friends volunteer-certification-reviews show <reviewUuid> --json
+friends volunteer-certification-reviews decide <reviewUuid> \
+  --via api --decision pass --message "同意认证" --time 2026-10-22 --confirm --json
+friends volunteer-certification-reviews prepare <reviewUuid> \
+  --via ego --ego-task-space 16 --decision back --message "请补充材料" --json
 friends drafts activities --via ego --ego-task-space 16 --ego-page p1 --json
 friends drafts create --activity-id <activityUuid> --json
 friends drafts edit <draftId> --expected-revision 0 --input patch.json --json
@@ -156,6 +166,14 @@ friends certification status <activityId> --via ego --ego-task-space 16
 
 `--input -` 读取 stdin 导出的草稿。当前认证表单没有附件入口，带材料的草稿会在写入前拒绝。`UNKNOWN_OUTCOME`（退出码 7）时保留草稿，先用 `certification status` 回查，不自动重交。业务确认与回查结果分别返回；已有认证不会被这个新建命令覆盖。
 
+## 个人志愿时长与认证审批
+
+`volunteer-hours` 查询学校成绩单分页和详情，时长按生产页面已核实的单位投影为小时；未知活动类型、状态和分页能力保留原值或 `null`，不把待审时长解释为已认定。`volunteer-certification-reviews` 先用学校返回的真实登录角色映射审批 `handleType`，角色不能由 CLI 参数指定或提升。
+
+认证审批 API 决定只暴露生产页面可见的 `pass` 和 `back`。决定必须独立 `--via api`，并使用 `--confirm` 或 `--dry-run`；写入前会用当前学校会话重新核对账号、真实角色、待办列表、申请 UUID 和活动绑定，BACK 的回退节点只能来自学校 callback-list。请求确认和只读回查分开返回，写入响应丢失时即使回查匹配也保持 `UNKNOWN_OUTCOME`，不会重试。
+
+Ego prepare 同样用已核验会话新建 review SDK client 并重新读取学校返回的账号、角色、待办申请和活动绑定，不信任 CLI 传入的角色或绑定。它会复用已打开的目标审批页；其他页面直接拒绝，只有调用者显式给出 `--allow-blank-navigation` 且当前页是 `about:blank` 时才导航。命令先取得页面快照再点击通过/打回；若审批意见已有非空人工输入则保留该值，只在空字段填入请求意见，然后输出 `submitted:false` 并交接页面。它不点击最终确认、不触发保存 PUT、不调用写入 API；BACK 的回退节点和最终提交由用户人工确认。
+
 ## 校内志愿活动开办申请
 
 `offerings prepare` 会重新核验学校身份、志愿组织、活动类型/等级和当前学年学期，只构造公开源码核实过的第一页与报名字段。`SCHOOL_ACTIVITY` 先创建中间 UUID 再最终提交；`TEMP_ACTIVITY` 的 `next-step` 本身就是最终写入，并额外携带 `posts: []` 与 `nameList`。两类标识和输入不同，不能互换。
@@ -238,3 +256,38 @@ Ego 准备要求指定页面已打开对应组织的 `/mobile/groupManage/studen
 SDK 根入口的组织 client 提供 `listLeaderChangeCandidates`、`getLeaderChangeState`、`prepareLeaderChange` 和 `submitLeaderChange`。写方法需要独立 `{via:"api",intent:"submit-organization-leader-change",confirm:true}`，不能使用 Ego 准备作为 API 写授权。可见准备从 Node 入口导出 `prepareOrganizationLeaderChangeInEgo({input,taskSpaceId,page})`，并自行读取新鲜的 Ego 会话和核实学校权限。
 
 API 只提交一次申请，再分别回查申请及当前组织负责人。`status:"submitted"` 不代表审批通过，`responsiblePersonChanged` 单独表示查询到的实际负责人是否为候选学号。响应丢失、超时、已确认但回查丢失或不匹配均保持不可重试的 `UNKNOWN_OUTCOME`（exit 7），含组织/已知申请标识与回查证据；不会重交、跨路径续交或回滚。详见 [#23 验收记录](docs/verification/2026-10-23-organization-leader-change.md)。
+
+
+## 组织活动开办与报名审批（#20）
+
+`createOrganizationActivityReviewClient({ session })` 的 `offering` 与 `registration` 分别提供 `list/get/prepare/decide/verify`。操作既有学校申请，不要求由本工具创建活动。开办输入必须指定组织与开办申请 UUID；报名另需活动 UUID，报名 UUID 不能代替活动 UUID。
+
+```sh
+friends organization-activities offering-reviews list --organization <组织UUID>
+friends organization-activities registration-reviews show <报名UUID> --organization <组织UUID> --activity <活动UUID>
+friends organization-activities offering-reviews decide <开办申请UUID> --organization <组织UUID> --decision pass --input review.json --via api --dry-run
+friends organization-activities registration-reviews prepare <报名UUID> --organization <组织UUID> --activity <活动UUID> --decision refuse --input review.json --via ego --ego-task-space 8 --ego-page p2
+friends organization-activities registration-reviews verify <报名UUID> --organization <组织UUID> --activity <活动UUID> --via ego --ego-task-space 8 --ego-page p2
+```
+
+`review.json`（或 `--input -` 的 stdin JSON）只含 `message`（1–100 字）和 `time`（YYYY-MM-DD）。开办允许 `pass/back/refuse`，打回和拒绝可附 `callbackActivityId`，且必须匹配学校当前首个退回节点；报名只允许 `pass/refuse`。未支持字段和日期、空意见均拒绝。
+
+API 真正执行必须同时显式指定 `--via api --yes`。开办通过按学校源码先保存现有活动资料，再审批；预览会列出 `saveBeforeApproval`，不会执行这两步。每次执行前重新核对学校身份、组织权限、活动/申请绑定和待办；准备结果是一次性执行计划。API 响应丢失或超时保留 `UNKNOWN_OUTCOME`/退出码 7，即使随后只读回查已不在待办中也不改判、不重试、不继续下一次写入。恢复信息保留申请/组织/活动标识及已确认的部分步骤。
+
+Ego 查询使用刚核对的现有会话直接读 API；写操作仅打开源页面的审批弹窗、填入空意见，保留已有人工输入并交接。日期不同会列为人工处理字段。用户亲自点击最终“确定”，然后用 `verify` 只读核对；`prepare --yes` 和 `decide --via ego` 均拒绝。Ego `--dry-run` 不点击、不填表。
+
+`readback: matched` 仅表示学校已确认请求且申请不再位于当前角色的待办，`decisionVerified: false` 不把源码尚未确认的流程记录字段解释成最终通过/拒绝证明。详情见 [#20 验证记录](docs/verification/2026-10-23-organization-activity-reviews.md)。
+
+## 课程开办与报名审批
+
+`courses reviews` 分别处理学校已有的开办申请和报名申请，无需先用本工具创建课程。`show` 返回待办归属和当前可用决定：开办为 `pass/back/refuse`，报名为 `pass/refuse`。审批 UUID 必须属于选定 `--type`；报名另外绑定课程 UUID 与学生。
+
+```sh
+friends courses reviews list --type offering --via api
+friends courses reviews show <报名申请UUID> --type registration --via ego --ego-task-space 16
+friends courses reviews decide <开办申请UUID> --type offering --decision pass --via api --input review.json --dry-run
+friends courses reviews decide <开办申请UUID> --type offering --decision pass --via api --input review.json --yes
+friends courses reviews prepare <报名申请UUID> --type registration --decision refuse --via ego --ego-task-space 16 --input review.json
+```
+
+`review.json` 只接受 `{"message":"审批意见","time":"2026-10-23"}`，也可用 `--input -` 从 stdin 读取。API 实际执行必须显式 `--via api --yes`，执行前刷新身份、待办和详情；`--dry-run` 只读。Ego 查询直接使用核验后的学校 API；Ego 写入只准备可见对话框并保留人工现值，交接后 `submitted:false`，用户亲自最终确定，`--yes` 无法绕过。返回 `UNKNOWN_OUTCOME`（exit 7）时即使回查匹配也不能自动重交；先用 `show` 只读检查。详情见 [#15 验收记录](docs/verification/2026-10-23-course-reviews.md)。
