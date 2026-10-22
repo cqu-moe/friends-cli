@@ -19,6 +19,14 @@
     "./node": {
       "types": "./dist/node.d.ts",
       "default": "./dist/node.js"
+    },
+    "./auth": {
+      "types": "./dist/auth.d.ts",
+      "default": "./dist/auth.js"
+    },
+    "./auth-node": {
+      "types": "./dist/auth-node.d.ts",
+      "default": "./dist/auth-node.js"
     }
   },
   "scripts": {
@@ -28,10 +36,12 @@
   },
   "dependencies": {
     "@napi-rs/keyring": "^2.1.2",
-    "commander": "^14.0.2"
+    "commander": "^14.0.2",
+    "oauth4webapi": "3.8.8"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
+    "jsdom": "29.0.1",
     "typescript": "^5.9.3"
   },
   "files": [

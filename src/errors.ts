@@ -18,6 +18,8 @@ export interface WriteRecovery {
   organizationId?: string;
   draftId?: string;
   completed?: string[];
+  serverAcknowledged?: boolean | "unknown";
+  readback?: "matched" | "unmatched" | "unavailable";
 }
 
 export class FriendsError extends Error {
