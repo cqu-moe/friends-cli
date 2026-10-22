@@ -1,9 +1,25 @@
 import { FriendsError, FriendsErrorCode } from "./errors.js";
+import {
+  createCourseParticipationClient,
+} from "./course-participation.js";
 
 export { FriendsError, FriendsErrorCode, exitCodeFor } from "./errors.js";
 export type { WriteRecovery } from "./errors.js";
 export * from "./drafts.js";
 export * from "./draft-source.js";
+export {
+  courseRegistrationId,
+  validateCourseRegistrationListInput,
+} from "./course-participation.js";
+export type {
+  CourseParticipationClient,
+  CourseParticipationSession,
+  CourseRegistrationId,
+  CourseRegistrationListInput,
+  CourseRegistrationPage,
+  CourseRegistrationState,
+  CourseRegistrationSummary,
+} from "./course-participation.js";
 
 declare const courseIdBrand: unique symbol;
 export type CourseId = string & { readonly [courseIdBrand]: true };
@@ -565,6 +581,32 @@ export function createFriendsSdk(options: {
           }};
         },
       };
+    },
+    async createCourseParticipationClient(input: VerifiedCourseSession) {
+      const session = snapshotSession(input);
+      await sdk.activateLocalContext({
+        token: session.token,
+        userLevel: session.userLevel,
+        expectedAccount: session.account.userNo,
+        selector: {
+          levelNo: session.context.levelNo,
+          unitNo: session.context.unit.unitNo,
+        },
+      });
+      const participationHeaders = headers(
+        session.token,
+        session.userLevel,
+        curriculumService,
+      );
+      return createCourseParticipationClient(session, {
+        request: (path, init) => callApi(
+          baseUrl,
+          path,
+          { ...init, headers: participationHeaders },
+          fetchImpl,
+          timeoutMs,
+        ),
+      });
     },
   };
   return sdk;

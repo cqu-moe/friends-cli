@@ -17,10 +17,15 @@ import {
 } from "../node.js";
 import { resolveQuerySession } from "./session.js";
 import { draftSchemas, registerDraftCommands } from "./drafts.js";
+import {
+  courseParticipationSchemas,
+  registerCourseParticipationCommands,
+} from "./course-participation.js";
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
   ...draftSchemas,
+  ...courseParticipationSchemas,
   errors: {
     operation: "errors", readonly:true, permission:"none", phases:["inspect"], supportedVia:["local"],
     exitCodes: {0:"success", 2:"INVALID_INPUT", 3:"AUTH_REQUIRED", 4:"PERMISSION_DENIED", 5:"BUSINESS_REJECTED", 6:"NETWORK_PROTOCOL_ERROR", 7:"UNKNOWN_OUTCOME"},
@@ -246,6 +251,10 @@ auth
 
 const courses = program.command("courses").description("Course queries");
 
+registerCourseParticipationCommands(courses, {
+  baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+});
+
 courses
   .command("list")
   .description("List one page of courses")
@@ -312,6 +321,8 @@ program.parseAsync(process.argv).catch((error: unknown) => {
   const nextAction =
     friendsError.code === FriendsErrorCode.AuthRequired
       ? "friends auth login --method local"
+      : friendsError.code === FriendsErrorCode.UnknownOutcome
+        ? "friends courses registrations list --json; inspect read-only state before any human retry"
       : undefined;
   process.stdout.write(
     `${JSON.stringify(

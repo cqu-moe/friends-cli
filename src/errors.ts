@@ -11,6 +11,7 @@ export type FriendsErrorCode = (typeof FriendsErrorCode)[keyof typeof FriendsErr
 
 export interface WriteRecovery {
   operation: string;
+  courseId?: string;
   activityId?: string;
   registrationId?: string;
   applicationId?: string;

@@ -1,6 +1,6 @@
 # friends-cli
 
-重庆大学第二课堂平台的本地 CLI 与可复用 SDK。当前交付 Issue #2–#3 的最小只读课程链，以及 Issue #5 的志愿认证本地草稿：Ego 浏览器本地登录、学校 API 身份/上下文核验、课程查询、可管理志愿活动/报名名单只读查询、草稿编辑与恢复。不包含 OAuth、报名、审批或学校认证提交。
+重庆大学第二课堂平台的本地 CLI 与可复用 SDK。当前交付 Issue #2–#3 的最小只读课程链、Issue #13 的个人课程报名管理，以及 Issue #5 的志愿认证本地草稿：Ego 浏览器本地登录、学校 API 身份/上下文核验、课程与个人报名记录查询、课程报名/撤销/退出的显式 API 操作、可管理志愿活动/报名名单只读查询、草稿编辑与恢复。不包含 OAuth、学校认证提交或志愿认证提交。
 
 ## 安装与命令
 
@@ -24,6 +24,12 @@ friends auth status --json
 friends courses list --page 1 --page-size 10 --keyword 周周艺 --json
 friends courses show <courseUuid> --json
 friends courses list --via ego --ego-task-space 12 --ego-page p1 --json
+friends courses registrations list --page 1 --page-size 10 --keyword 周周艺 --json
+friends courses registrations show <registrationUuid> --json
+friends courses registrations apply <courseUuid> --dry-run --json
+friends courses registrations apply <courseUuid> --confirm apply --json
+friends courses registrations withdraw <registrationUuid> --confirm withdraw --json
+friends courses registrations exit <registrationUuid> --confirm exit --json
 friends drafts activities --via ego --ego-task-space 16 --ego-page p1 --json
 friends drafts create --activity-id <activityUuid> --json
 friends drafts edit <draftId> --expected-revision 0 --input patch.json --json
@@ -56,6 +62,16 @@ await courses.list({ keyword: "周周艺" });
 普通 SDK 根导入不加载 Ego、文件系统或凭据库；这些 Node 集成从 `@cqu-moe/friends-cli/node` 按需加载。同一 SDK 实例拒绝将同一学校 token 同时绑定到不同身份单位/角色；跨客户端需要各自的学校会话，不能把服务器会话当作可并发切换的全局状态。课程 client 绑定学校返回的账号、角色和身份单位；身份单位不是学生组织 UUID，不能据此推断组织管理权限。恢复时重新核对学校身份。
 
 课程列表使用实测的 `student-apply-page-list` 与 `key` 参数，不使用历史聚合接口的 `type: CURRICULUM` 过滤。详情只投影课程资料、报名限制和必要状态；未知状态保留标量原值并标记 `known: false`。详情保留岗位名称、积分与学时；非空问卷仅报告数量和 `unverified`，尚未解析其内容，不能据此宣称已展示全部报名要求。
+
+## 课程报名与个人记录
+
+`createCourseParticipationClient` 绑定已核验的学校账号/角色/身份单位。个人记录只通过 `apply/my-applied-page-list` 分页读取，并用课程内 `studentApplied` 投影报名记录 UUID 与学校返回的审批状态；未知审批状态保留原始标量和 `known: false`，不把课程开办状态映射成报名审批结果。
+
+报名前 `prepareApply` 只读取课程详情，生成当前前端已核实的 `student-apply/apply` payload，并返回 `submitted: false`。无问卷课程才能自动准备；非空问卷必须走人工审阅流程。课程返回角色时必须显式传入详情中的 `roleId`，CLI 不会默认选择唯一角色，也不会猜测角色名称、学时或积分。dry-run 不调用 `student-apply/can-apply/{courseId}`，因为当前生产页面把该 GET 的成功响应当作“报名成功”，副作用不明。
+
+API 写入必须分别使用字面确认：报名 `--confirm apply`、撤销申请 `--confirm withdraw`、退出已接受报名 `--confirm exit`。当前前端把 `GET student-apply/{registrationId}` 用作确认后的撤销动作，因此 CLI schema 将它标记为业务写入，而不是只读详情。所有写入响应丢失都返回退出码 7 / `UNKNOWN_OUTCOME`，仅执行个人记录只读回查，保留课程或报名 ID，不自动重试、跨路径续交或回滚。
+
+`courses registrations list/show` 与 `apply --dry-run` 支持 `--via api|ego` 并复用不导航的 Ego 查询会话。三类写入只支持 `--via api`；Ego 最终提交必须由用户在真实页面亲自完成，CLI 拒绝 `--via ego` 写入、隐藏 API、`--yes` 或其他绕过确认的方式。
 
 ## 志愿认证草稿
 
