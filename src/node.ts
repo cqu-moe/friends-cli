@@ -17,7 +17,7 @@ export interface BrowserSession {
 
 export interface StoredSession {
   schemaVersion: 1;
-  loginMethod: "local";
+  loginMethod: "local" | "cqu-auth";
   storage: SessionStorageType;
   token: string;
   userLevel: string;
@@ -515,12 +515,12 @@ export async function saveSession(
 
 function validateMetadata(value: unknown): SessionMetadata {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw safeError("The local friends session file is invalid", FriendsErrorCode.NetworkProtocol);
+    throw safeError("The friends session file is invalid", FriendsErrorCode.NetworkProtocol);
   }
   const session = value as StoredSession;
   if (
     session.schemaVersion !== 1 ||
-    session.loginMethod !== "local" ||
+    (session.loginMethod !== "local" && session.loginMethod !== "cqu-auth") ||
     (session.storage !== "keyring" && session.storage !== "file") ||
     typeof session.userLevel !== "string" ||
     session.userLevel === "" ||
@@ -533,7 +533,7 @@ function validateMetadata(value: unknown): SessionMetadata {
     typeof session.context?.unit?.unitName !== "string" ||
     typeof session.context?.unit?.unitType !== "number"
   ) {
-    throw safeError("The local friends session file is invalid", FriendsErrorCode.NetworkProtocol);
+    throw safeError("The friends session file is invalid", FriendsErrorCode.NetworkProtocol);
   }
   if (session.storage === "file" && (typeof session.token !== "string" || session.token === "")) {
     throw safeError("The file friends session is missing its token", FriendsErrorCode.NetworkProtocol);
@@ -566,7 +566,7 @@ export async function loadSession(): Promise<StoredSession> {
   try {
     parsed = JSON.parse(await readFile(path, "utf8"));
   } catch {
-    throw safeError("The local friends session file is invalid", FriendsErrorCode.NetworkProtocol);
+    throw safeError("The friends session file is invalid", FriendsErrorCode.NetworkProtocol);
   }
   const metadata = validateMetadata(parsed);
   const token = metadata.storage === "keyring"
