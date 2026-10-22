@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import {courseReviewSchemas, registerCourseReviewCommands} from "./course-reviews.js";
+import {volunteerActivityReviewSchemas,registerVolunteerActivityReviewCommands} from "./volunteer-activity-reviews.js";
 import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
 import { Command } from "commander";
 import {
@@ -30,13 +32,19 @@ import {
   registerCourseParticipationCommands,
 } from "./course-participation.js";
 import { organizationSchemas, registerOrganizationCommands } from "./organizations.js";
+import { registerVolunteerReviewCommands, volunteerReviewSchemas } from "./volunteer-reviews.js";
+import { offeringSchemas, registerOfferingCommands } from "./offerings.js";
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
+  ...courseReviewSchemas,
+  ...offeringSchemas,
+  ...volunteerActivityReviewSchemas,
   ...certificationApiSchemas,
   ...draftSchemas,
   ...courseParticipationSchemas,
   ...organizationSchemas,
+  ...volunteerReviewSchemas,
   errors: {
     operation: "errors", readonly:true, permission:"none", phases:["inspect"], supportedVia:["local"],
     exitCodes: {0:"success", 2:"INVALID_INPUT", 3:"AUTH_REQUIRED", 4:"PERMISSION_DENIED", 5:"BUSINESS_REJECTED", 6:"NETWORK_PROTOCOL_ERROR", 7:"UNKNOWN_OUTCOME"},
@@ -406,13 +414,21 @@ courses
     });
   });
 
+registerCourseReviewCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
+registerVolunteerActivityReviewCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 registerCertificationApiCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
+
+registerOfferingCommands(program, { baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl });
 
 registerDraftCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
 });
 
 registerOrganizationCommands(program, {
+  baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+});
+
+registerVolunteerReviewCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
 });
 
