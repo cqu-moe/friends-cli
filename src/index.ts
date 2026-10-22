@@ -28,6 +28,8 @@ export type {
 } from "./organizations.js";
 export * from "./certification-api.js";
 
+export * from "./volunteer-offering.js";
+export * from "./volunteer-offering-api.js";
 declare const courseIdBrand: unique symbol;
 export type CourseId = string & { readonly [courseIdBrand]: true };
 export type UserLevel = string;
