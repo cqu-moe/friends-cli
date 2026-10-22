@@ -11,6 +11,7 @@ import { FriendsError, FriendsErrorCode } from "./errors.js";
 
 export interface VolunteerCertificationEgoPreparationResult extends VolunteerCertificationPreparation {
   handoff?: "completed";
+  inProgress?: string;
   executionError?: {code:string;message:string}|null;
   completedActions: Array<VolunteerCertificationPreparation["actions"][number]>;
   page: CertificationPageSnapshot;
@@ -53,6 +54,11 @@ function targetUrl(options: EgoOptions): string {
 }
 
 function validateEgoOptions(options: EgoOptions): void {
+  if (!options || typeof options !== 'object' || options.dryRun !== undefined && typeof options.dryRun !== 'boolean') invalid('Invalid Ego preparation options');
+  const session=options.session;
+  if (!session || [session.token,session.userLevel,session.account?.userNo,session.context?.levelNo,session.context?.unit?.unitNo].some(value=>typeof value!=='string'||!value||/[\r\n]/.test(value)) || session.userLevel!==session.context.levelNo) invalid('A complete verified Ego account and context are required');
+  try{const url=new URL(options.baseUrl??'https://friends.cqu.edu.cn/gateway');if(!['http:','https:'].includes(url.protocol)||url.username||url.password)invalid('Invalid friends base URL');}catch{invalid('Invalid friends base URL');}
+
   if (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1) {
     throw error("Invalid Ego task space", FriendsErrorCode.InvalidInput);
   }
@@ -64,7 +70,7 @@ function validateEgoOptions(options: EgoOptions): void {
   }
 }
 
-async function runEgoJson<T>(options: {
+export async function runEgoJson<T>(options: {
   script: string;
   command: string;
   timeoutMs: number;
@@ -146,10 +152,15 @@ try {
  console.log("FRIENDS_CLI_CERTIFICATION_PREPARE:" + JSON.stringify({error:error.message,errorCode:error.code}));
 }
 `;
-  const result = await runEgoJson<VolunteerCertificationEgoPreparationResult>({script,
+  let result:VolunteerCertificationEgoPreparationResult;
+  try{result = await runEgoJson<VolunteerCertificationEgoPreparationResult>({script,
     command:options.command??"ego-browser",timeoutMs:(options.timeoutMs??300_000)+30_000,
-    marker:"FRIENDS_CLI_CERTIFICATION_PREPARE:",failure:"Could not prepare the visible volunteer certification page; inspect it before retrying"});
-  if(result.executionError) throw new FriendsError({code:FriendsErrorCode.UnknownOutcome,message:result.executionError.message,recovery:{operation:"drafts.prepare",draftId:draft.id,activityId:draft.activity.id,completed:result.completedActions.map(action=>action.kind)}});
+    marker:"FRIENDS_CLI_CERTIFICATION_PREPARE:",failure:"Could not prepare the visible volunteer certification page; inspect it manually"});
+  }catch(cause){
+    if(cause instanceof FriendsError && cause.code===FriendsErrorCode.UnknownOutcome)throw new FriendsError({code:FriendsErrorCode.UnknownOutcome,message:cause.message,recovery:{operation:'drafts.prepare',draftId:draft.id,activityId:draft.activity.id,pageLabel:options.page??'p1',completed:[],serverAcknowledged:false}});
+    throw cause;
+  }
+  if(result.executionError) throw new FriendsError({code:FriendsErrorCode.UnknownOutcome,message:result.executionError.message,recovery:{operation:"drafts.prepare",draftId:draft.id,activityId:draft.activity.id,pageLabel:options.page??'p1',completed:result.completedActions.map(action=>action.kind+':'+action.studentNo),inProgress:result.inProgress,serverAcknowledged:false}});
   return result;
 }
 

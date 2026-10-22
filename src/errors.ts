@@ -18,6 +18,7 @@ export interface WriteRecovery {
   draftId?: string;
   pageLabel?: string;
   completed?: string[];
+  inProgress?: string;
   serverAcknowledged?: boolean | "unknown";
   readback?: "matched" | "unmatched" | "unavailable";
 }

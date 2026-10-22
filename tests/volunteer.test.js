@@ -106,6 +106,8 @@ async function setupStrictVolunteerEgo(t, fixtureFile) {
   const url = `http://127.0.0.1:${server.address().port}${pagePath}?uuid=activity-1`;
   await writeFile(config, JSON.stringify({
     html: resolve("tests/fixtures", fixtureFile),
+    iframe: true,
+    executeSession: true,
     result,
     url,
     token: "ego-fixture-token",

@@ -96,7 +96,7 @@ async function runEgo(options: {
     }
   }
   if (
-    parsed !== null && parsed.status === "prepared" && parsed.submitted === false &&
+    exitCode === 0 && parsed !== null && parsed.status === "prepared" && parsed.submitted === false &&
     parsed.handoff === true && Array.isArray(parsed.completedActions) &&
     Array.isArray(parsed.preservedFields) && typeof parsed.pageLabel === "string" && parsed.pageLabel !== ""
     && parsed.activityId === options.recovery.activityId
@@ -271,12 +271,13 @@ try {
   completedActions.push("activity-verified");
 
   const postState = await page.evaluate(() => {
-    const field = Array.from(document.querySelectorAll(".van-field")).find((item) =>
+    const d = document.querySelector("iframe")?.contentDocument ?? document;
+    const field = Array.from(d.querySelectorAll(".van-field")).find((item) =>
       item.querySelector(".van-field__label")?.textContent?.replace(/\\s+/g, " ").trim() === "申请岗位");
     const input = field?.querySelector("input,textarea");
     return {
       found: field !== undefined && input !== null && input !== undefined,
-      value: input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement ? input.value : ""
+      value: input && (input.tagName === "INPUT" || input.tagName === "TEXTAREA") ? input.value : ""
     };
   });
   if (!postState.found) throw new Error("volunteer post field is not editable");
@@ -295,25 +296,27 @@ try {
 
   for (const answer of ${JSON.stringify(answers)}) {
     const state = await page.evaluate((title) => {
-      const group = Array.from(document.querySelectorAll(".form-outside")).find((item) =>
+      const d = document.querySelector("iframe")?.contentDocument ?? document;
+      const group = Array.from(d.querySelectorAll(".form-outside")).find((item) =>
         item.querySelector(".item-title")?.textContent?.replace(/\\s+/g, " ").trim() === title);
       const input = group?.querySelector("input,textarea");
       const selected = group ? Array.from(group.querySelectorAll(".van-cell")).filter((cell) => {
         const icon = cell.querySelector(".van-radio__icon,.van-checkbox__icon");
-        return icon?.getAttribute("aria-checked") === "true" || icon?.classList.contains("checked") ||
+        return icon?.getAttribute("aria-checked") === "true" || icon?.classList.contains("checked") || icon?.classList.contains("van-radio__icon--checked") || icon?.classList.contains("van-checkbox__icon--checked") ||
           icon?.getAttribute("data-selected") === "true";
       }).map((cell) => cell.textContent?.replace(/\\s+/g, " ").trim() ?? "") : [];
       return {
         found: group !== undefined,
         hasInput: input !== null && input !== undefined,
-        value: input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement ? input.value : "",
+        readonly: input?.readOnly === true || input?.disabled === true,
+        value: input && (input.tagName === "INPUT" || input.tagName === "TEXTAREA") ? input.value : "",
         selected
       };
     }, answer.title);
     if (!state.found) throw new Error("volunteer questionnaire is not visible: " + answer.title);
     if (answer.type === "TEXT" || answer.type === "NUMBER") {
       if (!state.hasInput) throw new Error("volunteer questionnaire input is not visible: " + answer.title);
-      if (state.value !== "") {
+      if (state.readonly || state.value !== "") {
         preservedFields.push("question:" + answer.title);
         completedActions.push("question:" + answer.title + ":preserved");
         continue;
@@ -321,10 +324,11 @@ try {
       await page.waitForSelector(answer.inputSelector, { state: "visible", timeout: 15000 });
       await page.fill(answer.inputSelector, answer.inputContent);
       await page.waitForFunction((expected) => {
-        const group = Array.from(document.querySelectorAll(".form-outside")).find((item) =>
+        const d = document.querySelector("iframe")?.contentDocument ?? document;
+        const group = Array.from(d.querySelectorAll(".form-outside")).find((item) =>
           item.querySelector(".item-title")?.textContent?.replace(/\\s+/g, " ").trim() === expected.title);
         const input = group?.querySelector("input,textarea");
-        return input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement ?
+        return input && (input.tagName === "INPUT" || input.tagName === "TEXTAREA") ?
           input.value === expected.value : false;
       }, { title: answer.title, value: answer.inputContent }, { timeout: 15000 });
       completedActions.push("question:" + answer.title + ":filled");
@@ -339,9 +343,10 @@ try {
         await page.click(selector, { label: "select questionnaire option" });
       }
       await page.waitForFunction((expected) => {
-        const group = Array.from(document.querySelectorAll(".form-outside")).find((item) =>
+        const d = document.querySelector("iframe")?.contentDocument ?? document;
+        const group = Array.from(d.querySelectorAll(".form-outside")).find((item) =>
           item.querySelector(".item-title")?.textContent?.replace(/\\s+/g, " ").trim() === expected.title);
-        return group?.querySelector(".van-radio__icon.checked,.van-radio__icon[aria-checked=true],.van-radio__icon[data-selected=true],.van-checkbox__icon.checked,.van-checkbox__icon[aria-checked=true],.van-checkbox__icon[data-selected=true]") !== null;
+        return Boolean(group?.querySelector(".van-radio__icon--checked,.van-checkbox__icon--checked,.van-radio__icon.checked,.van-radio__icon[aria-checked=true],.van-radio__icon[data-selected=true],.van-checkbox__icon.checked,.van-checkbox__icon[aria-checked=true],.van-checkbox__icon[data-selected=true]"));
       }, { title: answer.title }, { timeout: 15000 });
       completedActions.push("question:" + answer.title + ":selected");
     }

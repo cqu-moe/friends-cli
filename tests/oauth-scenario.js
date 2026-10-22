@@ -128,6 +128,12 @@ export async function controlledCquAuthScenario(options = {}) {
     requests.push(record);
     try {
       if (url.pathname === "/api/auth/.well-known/openid-configuration") {
+        if (options.discoveryFailure) {
+          const { status, headers, body } = options.discoveryFailure;
+          res.writeHead(status, headers);
+          res.end(body);
+          return;
+        }
         json(res, 200, {
           issuer: state.discoveryIssuer ?? `${url.origin}/api/auth`,
           authorization_endpoint: `${url.origin}/api/v1/auth/oauth2/authorize`,

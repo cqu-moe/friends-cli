@@ -156,7 +156,7 @@ Ego 资料修改只执行可见 prepare：先经现有页面会话核验权限�
 
 SDK 写入方法本身要求精确确认值：报名为 `confirmation: "volunteers.register"`，退出为 `confirmation: "volunteers.withdraw"`。CLI 的 `--confirm` 只负责构造对应 SDK 确认；缺少确认、`--dry-run` 或 Ego 路径带 `--confirm` 都不会写入。写入成功返回分离的 `receipt` 与 `readback`；`receipt` 仅表示学校网关确认收到请求，`readback` 是第一页个人报名列表证据，两者都不把审批状态说成通过。
 
-`--via ego` 的查询只复用现有 Ego 页面会话并直接调用 API，不导航当前页面。Ego 写入从 `@cqu-moe/friends-cli/node` 公开入口进入：每次重新核验学校会话、账号和上下文，重新读取活动、岗位、问卷和 `can-apply` 要求，再新开一个专用页面并校验该页面 token、账号、角色、路由和活动 UUID。适配器点击 Vant FieldSelect 的可见包装层和嵌套 `.van-ellipsis` picker 文本；已有非空文本、岗位或选择会被保留，不覆盖、不盲切换。填写中断返回不可重试的 `UNKNOWN_OUTCOME`，并保留已发生步骤与专用页面 label。准备完成后 `handOff()`；适配器不隐藏调用提交 API，不点击最终提交/确认，也不自动重试。受控页面验收入口：
+`--via ego` 的查询只复用现有 Ego 页面会话并直接调用 API，不导航当前页面。Ego 写入从 `@cqu-moe/friends-cli/node` 公开入口进入：每次重新核验学校会话、账号和上下文，重新读取活动、岗位、问卷和 `can-apply` 要求，再新开一个专用页面并校验该页面 token、账号、角色、路由和活动 UUID。适配器定位可见表单和嵌套 `.van-ellipsis` picker 文本；已有非空文本、岗位或选择会被保留，不覆盖、不盲切换。填写中断返回不可重试的 `UNKNOWN_OUTCOME`，并保留已发生步骤与专用页面 label。准备完成后 `handOff()`；适配器不隐藏调用提交 API，不点击最终提交/确认，也不自动重试。受控页面验收入口：
 
 ```sh
 npm run verify:volunteer-ego -- register
@@ -164,3 +164,16 @@ npm run verify:volunteer-ego -- withdraw
 ```
 
 仓库内的 jsdom strict fixture 会执行当前生成的 Ego 脚本并检查可见 DOM 输入；runner 的 HTTP fixture 会统计真实到达 `/write` 或 `/quit` 的请求数，并要求准备阶段为 0。该入口只验收可见控件、会话绑定和受控服务器链路，不代表生产写入。真实 Ego 与学校生产验收另行记录。
+
+## 捕获人工修改
+
+用户明确交还 Ego 控制后执行：
+
+```sh
+friends drafts capture <draftId> --via ego --ego-task-space 16 \
+  --ego-page p3 --expected-revision 1 --user-returned-control
+```
+
+命令重新核验当前身份、组织和活动，通过可见编辑弹窗只读核对学号、岗位及小时，保存本地新修订。它不会点击弹窗“保存”、上传或提交认证。过期修订保留冲突文件；未完成输入、页面缺失人员和不可恢复材料会列出待处理项。未捕获的网页修改不保证在关闭浏览器后保留。
+
+按需要用 `drafts edit` 明确修改选择和时长，再单独 `drafts prepare` 恢复录入。用户最终提交后只用 `certification status` 查询。详见[捕获验收](docs/verification/2026-10-22-certification-capture.md)。
