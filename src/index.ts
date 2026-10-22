@@ -25,6 +25,9 @@ export type {
   CourseRegistrationState,
   CourseRegistrationSummary,
   CourseQuestionnaireAnswerInput,
+  CourseQuestionnaireAttachmentInput,
+  CourseQuestionnaireAttachmentPlan,
+  CourseApplyAttachmentResult,
   CourseQuestionnaireDefinition,
   CourseQuestionnaireItemType,
   CourseQuestionnaireResult,
@@ -627,13 +630,21 @@ export function createFriendsSdk(options: {
         curriculumService,
       );
       return createCourseParticipationClient(session, {
-        request: (path, init) => callApi(
-          baseUrl,
-          path,
-          { ...init, headers: participationHeaders },
-          fetchImpl,
-          timeoutMs,
-        ),
+        request: (path, init) => {
+          const requestHeaders: Record<string, string> = {
+            ...participationHeaders,
+            "h-zove-appkey": path.startsWith("/ek-agg-mob/biz-common/") ? mainService : curriculumService,
+            ...(init.headers as Record<string, string> | undefined),
+          };
+          if (init.body instanceof FormData) delete requestHeaders["content-type"];
+          return callApi(
+            baseUrl,
+            path,
+            { ...init, headers: requestHeaders },
+            fetchImpl,
+            timeoutMs,
+          );
+        },
         reverifySession: () => sdk.activateLocalContext({
           token: session.token,
           userLevel: session.userLevel,

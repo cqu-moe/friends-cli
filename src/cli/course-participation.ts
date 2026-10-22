@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { lstat, readFile } from "node:fs/promises";
+import { loadCourseQuestionnaireFiles } from "../course-questionnaire-files.js";
 import { resolveQuerySession } from "./session.js";
 import { prepareCourseRegistrationInEgo } from "../node.js";
 import {
@@ -8,7 +9,6 @@ import {
   FriendsError,
   FriendsErrorCode,
   validateCourseRegistrationListInput,
-  type CourseQuestionnaireAnswerInput,
 } from "../index.js";
 
 export const courseParticipationSchemas = {
@@ -59,7 +59,9 @@ export const courseParticipationSchemas = {
       unitNo: { type: "string", required: "only when multiple Ego contexts match" },
       courseId: { type: "course UUID", required: true },
       roleId: { type: "course role UUID", required: "when course detail returns roles" },
-      questionnaire: { type: "JSON file or stdin: {questionnaire:[...]}; verified non-attachment types only" },
+      questionnaire: {
+        type: "JSON file or stdin: {questionnaire:[...]}; attachments use {attachments:[{path,mimeType,filename?}]}",
+      },
     },
     output: "course facts and exact API payload with submitted=false",
     readonly: true,
@@ -83,13 +85,15 @@ export const courseParticipationSchemas = {
       roleId: { type: "course role UUID", required: "when course detail returns roles" },
       confirm: { type: "literal apply", required: true },
       via: { type: "api or ego", required: true },
-      questionnaire: { type: "JSON file or stdin: {questionnaire:[...]}; verified non-attachment types only" },
+      questionnaire: {
+        type: "JSON file or stdin: {questionnaire:[...]}; attachments use {attachments:[{path,mimeType,filename?}]}",
+      },
     },
     output: "school acceptance plus a read-only personal-record follow-up when visible",
     readonly: false,
     httpMethod: "POST",
     businessEffect: "create course registration",
-    sideEffect: "api submits exactly once after confirmation; ego opens an editable page and hands it off",
+    sideEffect: "api uploads supplied attachments and submits once after confirmation; ego visibly fills empty controls/uploads and hands off for human final submission",
     unknownOutcome: "exit 7 with recovery IDs; read-only follow-up only; no automatic retry",
     supportedVia: ["api", "ego"],
     finalSubmissionBy: "api or human-via-ego",
@@ -187,7 +191,8 @@ export function registerCourseParticipationCommands(
   courses: Command,
   options: { baseUrl: string },
 ): void {
-  const sdk = createFriendsSdk({ baseUrl: options.baseUrl });
+  const baseUrl = options.baseUrl;
+  const sdk = createFriendsSdk({ baseUrl });
   const registrations = courses
     .command("registrations")
     .description("Manage personal course registrations");
@@ -215,6 +220,7 @@ export function registerCourseParticipationCommands(
   function queryMeta(
     source: { entry: "api" | "ego"; session: { account: unknown; context: unknown } },
     readonly: boolean,
+    remoteWrites = readonly ? 0 : 1,
   ) {
     return {
       via: source.entry === "ego" ? "ego-selected+direct-api" : "api",
@@ -225,7 +231,7 @@ export function registerCourseParticipationCommands(
         account: source.session.account,
         context: source.session.context,
         queryContract: "public-source+controlled-api",
-        remoteWrites: readonly ? 0 : 1,
+        remoteWrites,
       },
     };
   }
@@ -283,7 +289,7 @@ export function registerCourseParticipationCommands(
     .option("--role-id <uuid>", "explicit role UUID returned by course detail")
     .option("--dry-run", "read course detail and return submitted=false without any write")
     .option("--confirm <action>", "required literal action for an API write")
-    .option("--input <file|->", "JSON questionnaire input for verified non-attachment answers")
+    .option("--input <file|->", "JSON questionnaire answers; attachments require path and mimeType")
     .option("--json", "print stable JSON", true)
     .action(async (courseIdValue: string, options: Record<string, string | boolean | undefined>) => {
       const queryInput = options as Record<string, string | undefined>;
@@ -291,17 +297,11 @@ export function registerCourseParticipationCommands(
       const roleId = typeof options.roleId === "string" ? options.roleId : undefined;
       const inputSource = typeof options.input === "string" ? options.input : undefined;
       const questionnaireInput = await readJsonInput(inputSource);
-      const questionnaire = questionnaireInput.questionnaire as CourseQuestionnaireAnswerInput[] | undefined;
       if (!dryRun && options.confirm !== "apply") {
         invalid("--confirm apply is required for course registration writes");
       }
-      if (!dryRun && queryInput.via === "ego" && inputSource !== undefined) {
-        invalid("Questionnaire --input builds an API payload; --via ego leaves form input to the human");
-      }
-      if (!dryRun && queryInput.via === "ego" && roleId !== undefined) {
-        invalid("Visible Ego preparation cannot select a course role; role selection is not verified");
-      }
       if (dryRun) {
+        const { answers: questionnaire } = await loadCourseQuestionnaireFiles(questionnaireInput.questionnaire);
         const active = await client(queryInput);
         const prepared = await active.client.prepareApply(courseIdValue, {
           roleId,
@@ -316,37 +316,36 @@ export function registerCourseParticipationCommands(
       const active = await explicitWriteSession(queryInput);
       if (active.source.entry === "ego") {
         const prepared = await active.client.inspectApply(courseIdValue);
-        if (prepared.rolesRequired) {
-          invalid("This course requires a role, but visible Ego role selection is not verified; use --via api with --role-id");
-        }
         if (prepared.course.name === null) {
           invalid("The school course response did not provide a name for visible Ego preparation");
         }
         const browserPreparation = await prepareCourseRegistrationInEgo({
           operation: "apply",
+          session: active.source.session,
+          baseUrl,
+          roleId,
+          questionnaire: questionnaireInput.questionnaire,
           taskSpaceId: Number(queryInput.egoTaskSpace),
           page: queryInput.egoPage,
           courseId: courseIdValue,
           courseName: prepared.course.name,
         });
-        output({
-          ...browserPreparation,
-          course: prepared.course,
-          pendingQuestionnaires: prepared.questionnaires,
-        }, {
+        output(browserPreparation, {
           operation: "courses.registrations.apply.prepare",
           ...egoPrepareMeta(active.source),
         });
         return;
       }
-      output(await active.client.apply({
+      const { answers: questionnaire } = await loadCourseQuestionnaireFiles(questionnaireInput.questionnaire);
+      const result = await active.client.apply({
         courseId: courseIdValue,
         roleId,
         questionnaire,
         confirm: "apply",
-      }), {
+      });
+      output(result, {
         operation: "courses.registrations.apply",
-        ...queryMeta(active.source, false),
+        ...queryMeta(active.source, false, 1 + result.attachments.flatMap(item => item.resourceIds).length),
       });
     });
 
@@ -372,15 +371,14 @@ export function registerCourseParticipationCommands(
           }
           const browserPreparation = await prepareCourseRegistrationInEgo({
             operation,
+            session: active.source.session,
+            baseUrl,
             taskSpaceId: Number(options.egoTaskSpace),
             page: options.egoPage,
             registrationId: id,
             courseName: summary.courseName,
           });
-          output({
-            ...browserPreparation,
-            registration: summary.registration,
-          }, {
+          output(browserPreparation, {
             operation: `courses.registrations.${operation}.prepare`,
             ...egoPrepareMeta(active.source),
           });

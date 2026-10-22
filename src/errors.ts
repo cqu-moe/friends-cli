@@ -17,6 +17,8 @@ export interface WriteRecovery {
   applicationId?: string;
   organizationId?: string;
   draftId?: string;
+  attachmentGroupUuids?: string[];
+  resourceIds?: string[];
   completed?: string[];
   serverAcknowledged?: boolean | "unknown";
   readback?: "matched" | "unmatched" | "unavailable";

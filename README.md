@@ -93,11 +93,15 @@ const members = await organizationClient.listMembers(organizationId(organization
 
 `createCourseParticipationClient` 绑定已核验的学校账号/角色/身份单位。个人记录只通过 `apply/my-applied-page-list` 分页读取，并用课程内 `studentApplied` 投影报名记录 UUID 与学校返回的审批状态；未知审批状态保留原始标量和 `known: false`，不把课程开办状态映射成报名审批结果。
 
-报名前 `inspectApply` 只读取课程详情并返回课程状态、问卷定义和是否需要角色，不生成可提交问卷 payload。`prepareApply` 在同一详情读取上生成当前前端已核实的 `student-apply/apply` payload，并返回 `submitted: false`；CLI 可用 `--input <file|->` 提供问卷答案。已核实非附件题型为单选、多选、文本、数字和日期，选答项可省略并按前端 payload 置空；图片/附件题的上传与分组生命周期未核实，当前精确拒绝。课程返回角色时 API 必须显式传入详情中的 `roleId`，CLI 不会默认选择唯一角色，也不会猜测角色名称、学时或积分。dry-run 不调用 `student-apply/can-apply/{courseId}`，因为当前生产页面把该 GET 的成功响应当作“报名成功”，副作用不明。
+报名前 `inspectApply` 读取 `apply/approve-detail/{courseId}`，返回学校课程状态、角色和问卷定义。`prepareApply` 验证输入并生成 `student-apply/apply` payload，返回 `submitted:false`，不上传附件。CLI 用 `--input <file|->` 提供 `{ "questionnaire": [...] }`；单选、多选、文本、数字和日期分别使用 `choiceOptionId`、`choiceOptionIds` 或 `text`。题目和选项 ID 必须来自当前学校详情，选答题可省略。API 报名若存在角色，必须显式选择学校返回的 `roleId`，不会默认唯一角色或猜测名称、学时、积分。
 
-API 写入必须同时提供执行方式和字面确认：`--via api` 加报名 `--confirm apply`、撤销申请 `--confirm withdraw`、退出已接受报名 `--confirm exit`。当前前端把 `GET student-apply/{registrationId}` 用作确认后的撤销动作，因此 CLI schema 将它标记为业务写入，而不是只读详情。三类敏感写入都会在最终请求前重新核对账号与身份单位；写入响应丢失返回退出码 7 / `UNKNOWN_OUTCOME`，仅执行个人记录只读回查，保留课程或报名 ID，不自动重试、跨路径续交或回滚。学校已明确返回 `code:"0"` 时，即使后续只读回查失败，也保留 `serverAck` 并标记 `readback:"unavailable"`，不把确定成功误报为可重试网络错误。
+图片与附件题 `PICTURE/MULTIPLE_PICTURE/FILE/MULTIPLE_FILE` 使用 `{ "questionId": "...", "attachments": [{ "path": "/absolute/path/proof.pdf", "mimeType": "application/pdf" }] }`。普通 SDK 对应传入 `{content: Blob, filename?}`；Ego 文件选择保留本地文件名，改名只支持 API 路径。图片接受 PNG/JPG/JPEG/GIF/BMP，文件接受 PDF，单文件不超过 20 MiB；单图/单文件题只接受一个文件。显式 API 写入通过 `/gateway/ek-agg-mob/biz-common/protected-file-upload` 上传，AppKey 为 `zovecenter-saip-ek-agg-mob`，每题使用独立分组，再生成报名答案。分组回查失败不会否认已收到的确定上传回执；缺少资源 UUID、响应丢失或分组不匹配则立即停止，保留 `UNKNOWN_OUTCOME` 及已知资源/分组 ID，不继续上传、报名、删除或重试。dry-run 不产生上传，也不调用副作用未知的 `student-apply/can-apply/{courseId}`。
 
-`courses registrations list/show` 与 `apply --dry-run` 支持 `--via api|ego` 并复用不导航的 Ego 查询会话。三类正式写入支持显式 `--via api` 或 `--via ego`：API 路径执行一次确认写入；Ego 路径只导航到可见报名表单或撤销/退出确认层并 `handOff`，返回 `submitted:false`、`status:"awaiting-user"`、`finalSubmissionBy:"human"` 和 `remoteFinalWrites:0`。CLI 不注入或代答问卷、不选择未核实角色、不点击最终确认、不调用隐藏 API，也不提供 `--yes` 绕过；用户亲自完成或取消最终动作。
+API 写入要求 `--via api` 和字面确认：报名 `--confirm apply`、撤销 `--confirm withdraw`、退出 `--confirm exit`。学校前端把 `GET student-apply/{registrationId}` 用作确认后的撤销动作，所以它被标为业务写入，个人记录详情只通过列表定位。读取及每次写入前重新核对账号、角色和身份单位。确定的业务拒绝保留上游码及已完成上传；响应丢失返回退出码 7 / `UNKNOWN_OUTCOME`，即使只读回查匹配也不转成成功或自动续交。
+
+查询和 dry-run 支持 `--via api|ego`。正式 `--via ego --ego-task-space ... --ego-page ...` 只准备可见表单/确认层，然后交接，返回 `submitted:false`、`status:"awaiting-user"` 和 `finalSubmissionBy:"human"`。Node SDK 的 `prepareCourseRegistrationInEgo` 必须传入学校 session，并独立重新核对学校状态和页面绑定。目标必须是正确课程页或明确选定的空白页；不导航覆盖已有编辑。问卷只通过当前同源 iframe 中的可见控件填入空值，已有人工值和附件保留。附件选择会触发学校控件上传，属于有副作用的准备阶段；中断后保留可见页面和完成/尝试步骤，立即停止。
+
+当前公开源码的角色选择块被注释，因此 Ego 校验所选角色并列为人工核对事项，不注入隐藏模型；日期等只读选择器也交给用户。撤销/退出只打开与当前个人记录唯一匹配的确认层。最终按钮、提交 API、快捷键和 `--yes` 都不能代替用户亲自提交。上述路径通过源码与受控 SDK/CLI/DOM 测试，真实 Ego、学校生产读写及用户最终提交由集中验收另行确认。
 
 ## 志愿认证草稿
 
