@@ -22,7 +22,7 @@ function replyIdentity(res, levelNos = ["XS"]) {
   });
 }
 
-test("course SDK uses the live curriculum endpoint and keeps clients context-isolated", async () => {
+test("course SDK uses the live curriculum endpoint and keeps clients context-isolated", async (t) => {
   const requests = [];
   const server = createServer((req, res) => {
     let body = "";
@@ -35,6 +35,18 @@ test("course SDK uses the live curriculum endpoint and keeps clients context-iso
       }
       if (req.url.endsWith("/user/info")) {
         json(res, 200, { code: "0", data: { userNo: "20210001", userName: "张三" } });
+        return;
+      }
+      if (req.url.endsWith("/enterHall")) {
+        json(res, 200, {
+          code: "0",
+          data: {
+            account: "20210001",
+            name: "张三",
+            userLoginStateLevel: req.headers["h-zove-userlevel"],
+            departmentNo: "24080",
+          },
+        });
         return;
       }
       json(res, 200, {
@@ -76,6 +88,10 @@ test("course SDK uses the live curriculum endpoint and keeps clients context-iso
     });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
   const sdk = createFriendsSdk({
     baseUrl: `http://127.0.0.1:${server.address().port}/gateway`,
   });
@@ -147,7 +163,109 @@ test("course SDK uses the live curriculum endpoint and keeps clients context-iso
   server.close();
 });
 
-test("SDK rejects HTTP 200 business failures and invalid pagination locally", async () => {
+test("SDK default entry and public inspect-activate-course chain stay context-bound", async (t) => {
+  assert.equal(typeof createFriendsSdk().inspectLocalSession, "function");
+  const requests = [];
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      requests.push({ url: req.url, headers: req.headers, body: body ? JSON.parse(body) : null });
+      if (req.url.endsWith("/checkUserAndGetUserLevel")) {
+        replyIdentity(res);
+        return;
+      }
+      if (req.url.endsWith("/user/info")) {
+        json(res, 200, { code: "0", data: { userNo: "20210001", userName: "张三" } });
+        return;
+      }
+      if (req.url.endsWith("/enterHall")) {
+        json(res, 200, {
+          code: "0",
+          data: {
+            account: "20210001",
+            name: "张三",
+            userLoginStateLevel: "XS",
+            departmentNo: "24080",
+          },
+        });
+        return;
+      }
+      json(res, 200, {
+        code: "0",
+        data: {
+          currentPage: 1,
+          pageSize: 10,
+          totalCount: 1,
+          pages: 1,
+          data: [{ uuid: "course-1", curriculumName: "周周艺", curriculumState: "NEW" }],
+        },
+      });
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  const sdk = createFriendsSdk({
+    baseUrl: `http://127.0.0.1:${server.address().port}/gateway`,
+  });
+
+  const inspection = await sdk.inspectLocalSession({ token: "token-a", userLevel: "XS" });
+  assert.equal(inspection.account.userNo, "20210001");
+  const activated = await sdk.activateLocalContext({
+    token: "token-a",
+    userLevel: "XS",
+  });
+  const courseSession = {
+    token: "token-a",
+    userLevel: activated.context.levelNo,
+    account: activated.account,
+    context: activated.context,
+  };
+  const verified = await sdk.verifyLocalSession(courseSession);
+  assert.equal(verified.account.userNo, activated.account.userNo);
+  assert.equal(verified.contexts[0].unit.unitNo, activated.context.unit.unitNo);
+  const client = await sdk.createCourseClient(courseSession);
+  courseSession.context.levelNo = "JS";
+  const page = await client.list({ keyword: "周周艺" });
+  assert.equal(page.items[0].name, "周周艺");
+
+  const courseRequest = requests.find((request) =>
+    request.url.endsWith("student-apply-page-list"),
+  );
+  assert.equal(courseRequest.headers["h-zove-userlevel"], "XS");
+  const requestCount = requests.length;
+  for (const invalidInput of [null, {}, { token: "token-a" }, {
+    token: "token-a",
+    userLevel: "XS",
+    account: null,
+    context: { levelNo: "XS", unit: { unitNo: "24080" } },
+  }, {
+    token: "token-a",
+    userLevel: "XS",
+    account: activated.account,
+    context: null,
+  }]) {
+    await assert.rejects(
+      () => sdk.createCourseClient(invalidInput),
+      (error) => error.code === FriendsErrorCode.InvalidInput,
+    );
+  }
+  await assert.rejects(
+    () =>
+      sdk.createCourseClient({
+        token: "token-a",
+        userLevel: "XS",
+        account: activated.account,
+        context: { levelNo: "JS", unit: { unitNo: "24080" } },
+      }),
+    (error) => error.code === FriendsErrorCode.InvalidInput && requests.length === requestCount,
+  );
+});
+
+test("SDK rejects HTTP 200 business failures and invalid pagination locally", async (t) => {
   const server = createServer((req, res) => {
     if (req.url.endsWith("/checkUserAndGetUserLevel")) {
       replyIdentity(res);
@@ -157,9 +275,25 @@ test("SDK rejects HTTP 200 business failures and invalid pagination locally", as
       json(res, 200, { code: "0", data: { userNo: "20210001", userName: "张三" } });
       return;
     }
+    if (req.url.endsWith("/enterHall")) {
+      json(res, 200, {
+        code: "0",
+        data: {
+          account: "20210001",
+          name: "张三",
+          userLoginStateLevel: "XS",
+          departmentNo: "24080",
+        },
+      });
+      return;
+    }
     json(res, 200, { code: "10030", message: "missing resource", requestId: "request-b", data: null });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
   const sdk = createFriendsSdk({
     baseUrl: `http://127.0.0.1:${server.address().port}/gateway`,
   });
@@ -184,7 +318,7 @@ test("SDK rejects HTTP 200 business failures and invalid pagination locally", as
   server.close();
 });
 
-test("course detail projects only public course data", async () => {
+test("course detail projects only public course data", async (t) => {
   const server = createServer((req, res) => {
     if (req.url.endsWith("/checkUserAndGetUserLevel")) {
       replyIdentity(res);
@@ -192,6 +326,31 @@ test("course detail projects only public course data", async () => {
     }
     if (req.url.endsWith("/user/info")) {
       json(res, 200, { code: "0", data: { userNo: "20210001", userName: "张三" } });
+      return;
+    }
+    if (req.url.endsWith("/enterHall")) {
+      json(res, 200, {
+        code: "0",
+        data: {
+          account: "20210001",
+          name: "张三",
+          userLoginStateLevel: "XS",
+          departmentNo: "24080",
+        },
+      });
+      return;
+    }
+    if (req.url.endsWith("/course-empty")) {
+      json(res, 200, {
+        code: "0",
+        data: {
+          uuid: "course-empty",
+          curriculumName: "空问卷课程",
+          roles: [],
+          questionnaires: [],
+          approvalRecords: [{ reviewerName: "赵六" }],
+        },
+      });
       return;
     }
     assert.equal(req.url, "/gateway/zovecenter-saip-ek-app-curriculum/mob/apply/course-1");
@@ -218,7 +377,7 @@ test("course detail projects only public course data", async () => {
         limitSpecialtyTypeOne: ["B"],
         curriculumState: "NEW_LIVE_STATE",
         flowOverallState: 7,
-        roles: [{ uuid: "role-1", integral: 0.5 }],
+        roles: [{ uuid: "role-1", roleName: "讲师", integral: 0.5, classHour: 2, reviewerName: "王五" }],
         questionnaires: [{ reviewerName: "张三" }],
         approvalStateRecords: [{ reviewerName: "李四" }],
         approvalRecords: [{ reviewerName: "王五" }],
@@ -226,6 +385,10 @@ test("course detail projects only public course data", async () => {
     });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
   const sdk = createFriendsSdk({ baseUrl: `http://127.0.0.1:${server.address().port}/gateway` });
   const client = await sdk.createCourseClient({
     token: "token",
@@ -234,15 +397,21 @@ test("course detail projects only public course data", async () => {
     context: { levelNo: "XS", unit: { unitNo: "24080" } },
   });
   const detail = await client.get(courseId("course-1"));
+  const emptyDetail = await client.get(courseId("course-empty"));
 
   assert.equal(detail.id, "course-1");
   assert.equal(detail.name, "周周艺");
-  assert.deepEqual(detail.roles, [{ uuid: "role-1", integral: 0.5 }]);
+  assert.deepEqual(detail.roles, [
+    { uuid: "role-1", roleName: "讲师", integral: 0.5, classHour: 2 },
+  ]);
+  assert.deepEqual(detail.questionnaires, { count: 1, content: "unverified" });
+  assert.deepEqual(emptyDetail.questionnaires, { count: 0, content: "none" });
+  assert.deepEqual(emptyDetail.roles, []);
   assert.equal(JSON.stringify(detail).includes("reviewerName"), false);
   server.close();
 });
 
-test("SDK preserves the gateway prefix and rejects unsafe or invalid transport responses", async () => {
+test("SDK preserves the gateway prefix and rejects unsafe or invalid transport responses", async (t) => {
   let mode = "identity";
   let requests = 0;
   const server = createServer((req, res) => {
@@ -255,6 +424,18 @@ test("SDK preserves the gateway prefix and rejects unsafe or invalid transport r
       json(res, 200, { code: "0", data: { userNo: "20210001", userName: "张三" } });
       return;
     }
+    if (mode === "identity" && req.url.endsWith("/enterHall")) {
+      json(res, 200, {
+        code: "0",
+        data: {
+          account: "20210001",
+          name: "张三",
+          userLoginStateLevel: "XS",
+          departmentNo: "24080",
+        },
+      });
+      return;
+    }
     if (mode === "non-2xx") {
       json(res, 502, { code: "0", message: "misleading success", data: {} });
     } else {
@@ -263,6 +444,10 @@ test("SDK preserves the gateway prefix and rejects unsafe or invalid transport r
     }
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
   const baseUrl = `http://127.0.0.1:${server.address().port}/gateway`;
   const sdk = createFriendsSdk({ baseUrl });
   const client = await sdk.createCourseClient({
@@ -285,13 +470,13 @@ test("SDK preserves the gateway prefix and rejects unsafe or invalid transport r
   await assert.rejects(
     () => client.get("not/a-course-id"),
     (error) =>
-      error.code === FriendsErrorCode.InvalidInput && requests === 4,
+      error.code === FriendsErrorCode.InvalidInput && requests === 5,
   );
   server.closeAllConnections();
   server.close();
 });
 
-test("SDK rejects unknown login types and verifies the entered level and unit", async () => {
+test("SDK rejects unknown login types and verifies the entered level and unit", async (t) => {
   let loginType = "ON_PROXY";
   let enteredLevel = "WRONG";
   const server = createServer((req, res) => {
@@ -315,6 +500,10 @@ test("SDK rejects unknown login types and verifies the entered level and unit", 
     });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
   const sdk = createFriendsSdk({ baseUrl: `http://127.0.0.1:${server.address().port}/gateway` });
   const input = { token: "token", userLevel: "XS" };
 

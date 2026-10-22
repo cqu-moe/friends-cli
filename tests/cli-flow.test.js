@@ -8,14 +8,16 @@ import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
-const run = promisify(execFile);
+const execFileAsync = promisify(execFile);
+const run = (file, args, options = {}) =>
+  execFileAsync(file, args, { timeout: 20_000, ...options });
 
 function reply(res, body) {
   res.writeHead(200, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
 }
 
-test("real CLI performs local login, fixed-context activation, storage, and course search", async () => {
+test("real CLI performs local login, fixed-context activation, storage, and course search", async (t) => {
   const requests = [];
   let mode = "normal";
   const server = createServer((req, res) => {
@@ -96,7 +98,14 @@ test("real CLI performs local login, fixed-context activation, storage, and cour
             curriculumName: "周周艺",
             organizationName: "艺术学院",
             curriculumState: "NEW_LIVE_STATE",
-            roles: [{ uuid: "role-1", integral: 0.5 }],
+            roles: [{
+              uuid: "role-1",
+              roleName: "讲师",
+              integral: 0.5,
+              classHour: 2,
+              reviewerName: "王五",
+            }],
+            questionnaires: [{ reviewerName: "张三" }],
             approvalRecords: [{ reviewerName: "王五" }],
           },
         });
@@ -107,15 +116,20 @@ test("real CLI performs local login, fixed-context activation, storage, and cour
     });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
 
   const home = join(tmpdir(), `friends-cli-flow-${Date.now()}`);
   const bin = join(home, "bin");
-  await mkdir(bin, { recursive: true });
+  await mkdir(home, { recursive: true, mode: 0o700 });
+  await mkdir(bin, { recursive: true, mode: 0o700 });
   const egoBrowser = join(bin, "ego-browser");
   const egoScriptLog = join(home, "ego-script.js");
   await writeFile(
     egoBrowser,
-    "#!/bin/sh\ncat > \"$EGO_SCRIPT_LOG\"\ngrep -q 'taskSpace(\"friends-cli local login\")' \"$EGO_SCRIPT_LOG\" || exit 19\nprintf '%s' '{\"token\":\"bridge-token\",\"userLevel\":\"XS\"}'\n",
+    "#!/bin/sh\ncat > \"$EGO_SCRIPT_LOG\"\ngrep -q 'taskSpace(\"friends-cli local login\")' \"$EGO_SCRIPT_LOG\" || exit 19\nprintf '%s\\n' 'ego login noise' >&2\ncat <<'FRIENDS_MARKER' >&2\nFRIENDS_CLI_EGO_SESSION:{\"token\":\"{\\\"token\\\":\\\"bridge-token\\\"}\",\"userLevel\":\"XS\"}\nFRIENDS_MARKER\n",
   );
   await chmod(egoBrowser, 0o700);
   const env = {
@@ -145,6 +159,7 @@ test("real CLI performs local login, fixed-context activation, storage, and cour
   assert.match(egoScript, /taskSpace\("friends-cli local login"\)/);
   assert.doesNotMatch(egoScript, /taskSpace\(12\)/);
   assert.match(egoScript, /task\.finish\(\{ keep: \[\] \}\)/);
+  assert.match(egoScript, /FRIENDS_CLI_EGO_SESSION:/);
 
   const sessionPath = join(home, "session.json");
   const sessionStat = await stat(sessionPath);
@@ -177,7 +192,10 @@ test("real CLI performs local login, fixed-context activation, storage, and cour
   const detail = await run(process.execPath, [cli, "courses", "show", "course-1", "--json"], { env });
   const detailJson = JSON.parse(detail.stdout);
   assert.equal(detailJson.data.name, "周周艺");
-  assert.deepEqual(detailJson.data.roles, [{ uuid: "role-1", integral: 0.5 }]);
+  assert.deepEqual(detailJson.data.roles, [
+    { uuid: "role-1", roleName: "讲师", integral: 0.5, classHour: 2 },
+  ]);
+  assert.deepEqual(detailJson.data.questionnaires, { count: 1, content: "unverified" });
   assert.equal(JSON.stringify(detailJson).includes("reviewerName"), false);
 
   const enter = requests.find(

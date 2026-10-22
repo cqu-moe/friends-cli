@@ -4,7 +4,9 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
-const run = promisify(execFile);
+const execFileAsync = promisify(execFile);
+const run = (file, args, options = {}) =>
+  execFileAsync(file, args, { timeout: 60_000, ...options });
 
 test('packed installation exposes SDK without Ego and runs the complete CLI flow', { timeout: 120000 }, async () => {
   const root = resolve('.test-artifacts');
@@ -17,7 +19,7 @@ test('packed installation exposes SDK without Ego and runs the complete CLI flow
     assert.ok(packed.files.some(file => file.path === 'dist/cli/main.js'));
     assert.ok(packed.files.every(file => file.path.startsWith('dist/') || ['package.json', 'README.md'].includes(file.path)));
     await run('npm', ['install', '--prefix', install, '--ignore-scripts', '--package-lock=false', '--no-audit', '--no-fund', join(install, packed.filename)]);
-    const imported = await run(process.execPath, ['--input-type=module', '--eval', "import {createFriendsSdk} from '@cqu-moe/friends-cli'; console.log(typeof createFriendsSdk);"], {cwd:install, env:{...process.env,PATH:''}});
+    const imported = await run(process.execPath, ['--input-type=module', '--eval', "import {createFriendsSdk} from '@cqu-moe/friends-cli'; const sdk = createFriendsSdk(); console.log(typeof sdk.inspectLocalSession);"], {cwd:install, env:{...process.env,PATH:''}});
     assert.equal(imported.stdout.trim(), 'function');
     assert.equal(imported.stderr, '');
     const cli = join(install, 'node_modules/.bin/friends');
