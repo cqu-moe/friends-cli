@@ -1,0 +1,51 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>志愿报名准备 fixture</title>
+<style>
+body{font:16px/1.5 system-ui;margin:0;background:#f6f8fb;color:#18212f}
+.form-outside,.form-picker,.van-cell{background:#fff}
+.form-outside{padding:12px 16px;border-bottom:1px solid #e5eaf2}
+.item-title{font-weight:600}
+.van-field{display:block;padding:10px 0}
+.van-picker{padding:12px;background:#fff}
+.van-picker.hidden{display:none}
+.van-picker-column__item,.van-radio__icon,.van-checkbox__icon{cursor:pointer;padding:8px}
+.van-radio__icon[data-selected=true],.van-checkbox__icon[data-selected=true]{outline:3px solid #2c92fe}
+button{padding:8px 14px}
+</style>
+<div class="van-cell">示例志愿活动</div>
+<div class="form-picker">
+  <label class="van-field">申请岗位<input id="post" readonly value=""></label>
+  <div class="van-picker hidden" id="post-picker">
+    <div class="van-picker-column__item" data-value="post-1" onclick="this.dataset.selected='true'">签到岗</div>
+    <button class="van-picker__confirm" type="button" onclick="document.getElementById('post').value=document.querySelector('.van-picker-column__item[data-selected=true]').dataset.value;this.parentElement.classList.add('hidden')">确认</button>
+  </div>
+</div>
+<div class="form-outside">
+  <div class="item-title">为什么参加</div>
+  <div class="form-content"><label class="van-field"><textarea aria-label="为什么参加"></textarea></label></div>
+</div>
+<div class="form-outside">
+  <div class="item-title">是否同意服务安排</div>
+  <div class="form-content">
+    <div class="van-cell"><span>选项A</span><div class="van-radio__icon" data-selected="false" onclick="this.dataset.selected=this.dataset.selected==='true'?'false':'true'"></div></div>
+  </div>
+</div>
+<div class="form-outside">
+  <div class="item-title">可携带物品</div>
+  <div class="form-content">
+    <div class="van-cell"><span>选项B</span><div class="van-checkbox__icon" data-selected="false" onclick="this.dataset.selected=this.dataset.selected==='true'?'false':'true'"></div></div>
+    <div class="van-cell"><span>选项C</span><div class="van-checkbox__icon" data-selected="false" onclick="this.dataset.selected=this.dataset.selected==='true'?'false':'true'"></div></div>
+  </div>
+</div>
+<div class="form-outside">
+  <div class="item-title">服务人数</div>
+  <div class="form-content"><label class="van-field"><input aria-label="服务人数" inputmode="numeric"></label></div>
+</div>
+<script>
+document.querySelector(".form-picker .van-field").addEventListener("click", () => {
+  document.getElementById("post-picker").classList.remove("hidden");
+});
+</script>
+<button class="submit" type="button" onclick="fetch('/write',{method:'POST'}).catch(()=>{})">申请加入</button>

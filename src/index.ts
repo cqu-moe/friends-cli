@@ -3,6 +3,7 @@ import {
   createVerifiedOrganizationClient,
   type OrganizationSession,
 } from "./organizations.js";
+import { createVolunteerClient } from "./volunteer.js";
 
 export { FriendsError, FriendsErrorCode, exitCodeFor } from "./errors.js";
 export type { WriteRecovery } from "./errors.js";
@@ -27,6 +28,39 @@ export type {
   SavedOrganizationProfile,
 } from "./organizations.js";
 export * from "./certification-api.js";
+
+export {
+  validateVolunteerListInput,
+  volunteerActivityId,
+  volunteerRegistrationId,
+} from "./volunteer.js";
+export type {
+  VolunteerActivityDetail,
+  VolunteerActivityId,
+  VolunteerActivityPage,
+  VolunteerActivityPost,
+  VolunteerActivitySummary,
+  VolunteerClient,
+  VolunteerIdentity,
+  VolunteerListInput,
+  VolunteerManageableActivity,
+  VolunteerQuestionnaire,
+  VolunteerQuestionnaireAnswer,
+  VolunteerQuestionnaireOption,
+  VolunteerRegisterInput,
+  VolunteerRegisterWriteInput,
+  VolunteerRegisterPayload,
+  VolunteerRegistration,
+  VolunteerRegistrationId,
+  VolunteerRegistrationPage,
+  VolunteerRegistrationRecord,
+  VolunteerRegistrationRequirements,
+  VolunteerWithdrawalPreparation,
+  VolunteerWriteReceipt,
+  VolunteerWriteReadback,
+  VolunteerWriteResult,
+  VolunteerRegistrationPreparation,
+} from "./volunteer.js";
 
 declare const courseIdBrand: unique symbol;
 export type CourseId = string & { readonly [courseIdBrand]: true };
@@ -613,6 +647,14 @@ export function createFriendsSdk(options: {
             },
           });
         },
+      });
+    },
+    async createVolunteerClient(input: VerifiedCourseSession) {
+      return createVolunteerClient({
+        session: input,
+        baseUrl,
+        fetch: fetchImpl,
+        timeoutMs,
       });
     },
   };
