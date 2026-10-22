@@ -42,7 +42,12 @@ function pickerVisibility(visible: boolean): boolean {
     const rect = picker.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
   });
-  return visible ? shown.length === 1 : shown.length === 0;
+  if (!visible) return shown.length === 0;
+  if (shown.length !== 1) return false;
+  for (let node: Element | null = shown[0]!; node; node = node.parentElement) {
+    if (node.getAnimations?.().some(animation => animation.playState === "running")) return false;
+  }
+  return true;
 }
 
 async function waitForPicker(page: Page, visible: boolean) {

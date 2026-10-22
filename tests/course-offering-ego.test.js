@@ -71,7 +71,7 @@ test("course offering Ego preparation fails closed on a different visible sessio
 
 
 test("course offering Ego preserves human input with source slot controls and reports remaining manual work", async (t) => {
-  const fixture = await setup(t, { humanName: "人工课程名称", sourceSlots: true, previousPreparation: true, unreliablePickerWait: true });
+  const fixture = await setup(t, { humanName: "人工课程名称", sourceSlots: true, previousPreparation: true, unreliablePickerWait: true, openingAnimation: true });
   const result = await prepareCourseOfferingInEgo(fixture.options);
   assert.equal(result.executionError, null);
   assert.equal(result.page.curriculumName, "人工课程名称");

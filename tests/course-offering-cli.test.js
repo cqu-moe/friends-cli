@@ -126,7 +126,7 @@ test("course offering CLI prepares a visible Ego page and hands it off without s
   const upstream = await courseOfferingSchool(t);
   const { home, env } = await courseOfferingCliSetup(t, upstream);
   const url = `${upstream.baseUrl.replace("/gateway", "")}/mobile/course/courseInfo?type=add`;
-  const ego = await installCourseOfferingEgoFixture(home, "ego-fixture-token", url, { sourceSlots: true, previousPreparation: true, unreliablePickerWait: true });
+  const ego = await installCourseOfferingEgoFixture(home, "ego-fixture-token", url, { sourceSlots: true, previousPreparation: true, unreliablePickerWait: true, openingAnimation: true });
   const egoEnv = {
     ...env,
     FRIENDS_EGO_FIXTURE_CONFIG: ego.config,
