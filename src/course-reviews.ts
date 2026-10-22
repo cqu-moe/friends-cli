@@ -87,11 +87,12 @@ export function createCourseReviewClient(options: {baseUrl: string; session: Ver
   }
   async function role(kind: CourseReviewType) {
     await sdk.verifyLocalSession(session);
-    const user = object(await request('/ek-agg-mob/user/info', {}));
-    if (user.userNo !== session.account.userNo || user.userLoginStateLevel !== session.userLevel) fail('School account or active role changed; select the intended context again', FriendsErrorCode.AuthRequired);
+    const active = await sdk.activateLocalContext({token: session.token, userLevel: session.userLevel,
+      expectedAccount: session.account.userNo,
+      selector: {levelNo: session.context.levelNo, unitNo: session.context.unit.unitNo}});
     if (kind === 'registration') return 'XS02';
     const roles: Record<string, string> = {XSC: 'ZNBM', XY: 'EJXY', FDY: 'ZDLS'};
-    const handle = typeof user.userLoginStateLevel === 'string' ? roles[user.userLoginStateLevel] : undefined;
+    const handle = roles[active.context.levelNo];
     if (!handle) fail('This school identity has no source-supported offering review role', FriendsErrorCode.PermissionDenied);
     return handle;
   }

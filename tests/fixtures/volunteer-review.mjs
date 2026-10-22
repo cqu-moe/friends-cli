@@ -6,9 +6,9 @@ const require = createRequire(import.meta.url);
 
 export const session = {
   token: "review-token",
-  userLevel: "XS",
+  userLevel: "XSC",
   accountUserNo: "20210001",
-  levelNo: "XS",
+  levelNo: "XSC",
   unitNo: "24080",
 };
 
@@ -57,6 +57,10 @@ export async function school(t) {
   const state = {
     mode: "ok",
     role: "XSC",
+    availableRole: "XSC",
+    unit: "24080",
+    availableUnit: "24080",
+    enteredAccount: "20210001",
     account: "20210001",
     pendingMissing: false,
     activityMismatch: false,
@@ -80,22 +84,21 @@ export async function school(t) {
       requests.push({ method: req.method, url: req.url, body: input });
       if (req.url.endsWith("/ek-agg-mob/user/checkUserAndGetUserLevel")) {
         return reply(res, {
-          userLoginType: "STUDENT",
+          userLoginType: state.availableRole === "XS" ? "STUDENT" : "TEACHER",
           loginLevels: [{
-            levelNo: "XS",
+            levelNo: state.availableRole,
             levelName: "学生",
-            units: [{ unitType: 2, unitNo: "24080", unitName: "示例学院" }],
+            units: [{ unitType: 2, unitNo: state.availableUnit, unitName: "示例学院" }],
           }],
         });
       }
       if (req.url.endsWith("/ek-agg-mob/user/info")) {
         const info = { userNo: state.account, userName: "示例" };
-        if (state.mode !== "no-role") info.userLoginStateLevel = state.role;
         return reply(res, info);
       }
       if (req.url.endsWith("/ek-agg-mob/user/enterHall")) {
         return reply(res, {
-          account: "20210001", name: "示例", userLoginStateLevel: "XS", departmentNo: "24080",
+          account: state.enteredAccount, name: "示例", userLoginStateLevel: state.role, departmentNo: state.unit,
         });
       }
       if (req.url === "/gateway/ek-agg-mob/biz-common/flow/template-activity-state") {
@@ -221,7 +224,7 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
     const [scriptPath, actionPath, configPath] = process.argv.slice(2);
     const source = await readFile(scriptPath, "utf8");
     if (source.includes("FRIENDS_CLI_EGO_SESSION:")) {
-      console.log("FRIENDS_CLI_EGO_SESSION:" + JSON.stringify({ token: "review-token", userLevel: "XS" }));
+      console.log("FRIENDS_CLI_EGO_SESSION:" + JSON.stringify({ token: "review-token", userLevel: "XSC" }));
       process.exit(0);
     }
     const configuration = JSON.parse(await readFile(configPath, "utf8"));
@@ -252,7 +255,7 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
     Object.defineProperty(frame,'contentDocument',{get:()=>contentDom.window.document});
     Object.defineProperty(frame,'contentWindow',{get:()=>contentDom.window});
     const window = dom.window, document = contentDom.window.document;
-    for(const w of [window,contentDom.window]){w.localStorage.setItem('token_str',configuration.browserToken);w.localStorage.setItem('userLevel_str','XS');}
+    for(const w of [window,contentDom.window]){w.localStorage.setItem('token_str',configuration.browserToken);w.localStorage.setItem('userLevel_str','XSC');}
 
     let currentUrl = configuration.currentUrl;
     let handedOff = false;

@@ -5,13 +5,13 @@ export const courseReviewSession = {token:'fixture-token',userLevel:'XY',account
 const prefix='/gateway/zovecenter-saip-ek-app-curriculum/mob';
 
 // Exact contracts from the downloaded course list/detail chunks, not a suffix router.
-export async function courseReviewScenario() {
+export async function courseReviewScenario({levelNo='XY'} = {}) {
   const requests=[], violations=[];
   const rows={
     offering:{uuid:'course-apply-1',curriculumName:'示例课程',organizationId:'org-1',roles:[{uuid:'role-1',roleName:'参与者',integral:1}],flowOverallState:1,flowCurrMsg:'等待学院审批',approvalRecords:[]},
     registration:{uuid:'course-reg-1',curriculumId:'course-apply-1',studentNo:'20210002',studentName:'示例学生',roleId:'role-1',roleName:'参与者',roleIntegral:1,roleClassHour:2,flowOverallState:1,flowCurrMsg:'等待报名审批',approvalRecords:[]},
   };
-  const state={mode:'ok',role:'XY',managed:true,pending:{offering:true,registration:true},denied:false,detailOverride:null,pageCount:1,recordPage:1};
+  const state={mode:'ok',role:levelNo,availableRole:levelNo,unit:'college-1',availableUnit:'college-1',account:'20210001',enteredAccount:'20210001',managed:true,pending:{offering:true,registration:true},denied:false,detailOverride:null,pageCount:1,recordPage:1};
   const server=createServer(async(req,res)=>{
     let body='';for await(const chunk of req)body+=chunk;
     const data=body?JSON.parse(body):null;
@@ -22,13 +22,13 @@ export async function courseReviewScenario() {
       assert.equal(req.headers['h-zove-token'],'fixture-token');
       assert.equal(req.headers['h-zove-appkey'],path.startsWith(prefix+'/')?'zovecenter-saip-ek-app-curriculum':'zovecenter-saip-ek-agg-mob');
       if(path==='/gateway/ek-agg-mob/user/checkUserAndGetUserLevel'){
-        assert.equal(req.method,'POST');return reply({userLoginType:'TEACHER',loginLevels:[{levelNo:'XY',levelName:'学院',units:[{unitNo:'college-1',unitName:'示例学院',unitType:1}]}]});
+        assert.equal(req.method,'POST');return reply({userLoginType:state.availableRole==='XS'?'STUDENT':'TEACHER',loginLevels:[{levelNo:state.availableRole,levelName:'可用身份',units:[{unitNo:state.availableUnit,unitName:'示例学院',unitType:1}]}]});
       }
       if(path==='/gateway/ek-agg-mob/user/enterHall'){
-        assert.equal(req.method,'POST');return reply({account:'20210001',name:'示例管理者',userLoginStateLevel:state.role,departmentNo:'college-1'});
+        assert.equal(req.method,'POST');assert.equal(data.userStateLevel,state.availableRole);assert.equal(data.departNo,state.availableUnit);return reply({account:state.enteredAccount,name:'示例管理者',userLoginStateLevel:state.role,departmentNo:state.unit});
       }
       if(path==='/gateway/ek-agg-mob/user/info'){
-        assert.equal(req.method,'POST');return reply({userNo:'20210001',userName:'示例管理者',userLoginStateLevel:state.role});
+        assert.equal(req.method,'POST');return reply({userNo:state.account,userName:'示例管理者',profileCounts:0});
       }
       if(path==='/gateway/ek-agg-mob/biz-common/flow/template-activity-state'){
         assert.equal(req.method,'POST');assert.deepEqual(data,{businessTypeCode:'课程学生报名申请',handleType:'XS02'});return reply([{code:'0',name:'待审批'}]);
