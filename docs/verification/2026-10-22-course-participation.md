@@ -25,7 +25,9 @@
 
 - 本票 `npm run build && node --test tests/course-participation.test.js`：8 项通过，0 失败、0 跳过。
 - 严格 common 前缀/AppKey、缺失资源回执、源码详情路由/多选绑定和实际 iframe 行为均先观察到修复前失败，再通过修复。
-- integration 合入及全量 `npm test` 的最终结果见本次提交后的 worker handoff 记录。
+- 已合入 integration `3865ab6`（合并提交 `e1b7fb3`）和更新后的 `6bd109c`（合并提交 `0749ef3`）。最终完整 `npm test`：143 项通过，0 失败、0 跳过；包含 TypeScript 构建。完整日志位于共享 notes 的 `issue13-integration-npm-test.log`。
+- 首次合入后的全量测试发现 fixture origin 与 integration 新的 `baseUrl` 会话契约不一致；`26ed63b` 修复后，完整 132 项通过；再次合入最新 integration 后 143 项通过。生产默认 origin 仍为学校域名，受控测试的页面和 API 使用同一 loopback origin。
+- 增加外层同名表单回归：fixture 按 Ego 文档优先定位 outer document，生产适配器在动作前拒绝可能截获 iframe 选择器的外层控件；不误填、不触发外层 change 副作用。
 
 ## 未验收与限制
 
