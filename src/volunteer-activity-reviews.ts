@@ -124,13 +124,13 @@ export function createVolunteerActivityReviewClient(options: VolunteerActivityRe
     }
     async function role(kind: VolunteerActivityReviewType) {
         await sdk.verifyLocalSession(session);
+        const active = await sdk.activateLocalContext({token: session.token, userLevel: session.userLevel,
+            expectedAccount: session.account.userNo,
+            selector: {levelNo: session.context.levelNo, unitNo: session.context.unit.unitNo}});
         if (kind === 'registration')
             return 'XS02';
-        const user = object(await request('/ek-agg-mob/user/info', {}));
-        if (user.userNo !== session.account.userNo)
-            fail('School account changed', FriendsErrorCode.AuthRequired);
         const roles: Record<string, string> = { XSC: 'XJ02', XY: 'YJ01', FDY: 'FDY01', Tutor: 'JZG01', GuidingUnit: 'YRDW01' };
-        const handle = typeof user.userLoginStateLevel === 'string' ? roles[user.userLoginStateLevel] : undefined;
+        const handle = roles[active.context.levelNo];
         if (!handle)
             fail('This school identity has no offering review role', FriendsErrorCode.PermissionDenied);
         return handle;

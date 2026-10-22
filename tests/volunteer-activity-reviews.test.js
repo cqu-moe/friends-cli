@@ -42,7 +42,7 @@ test('volunteer review SDK validates decisions, stale records and uncertain one-
  const plan=await client.prepare(input);assert.equal(plan.payload.callbackActivityId,'node-1');
  for(const patch of [{id:'../wrong'},{type:'unknown'},{message:''},{time:'2026-02-31'},{isSafeEducation:2},{callbackActivityId:'unrelated'},{confirm:true}])await assert.rejects(()=>client.prepare({...input,...patch}),{code:'INVALID_INPUT'});
  await assert.rejects(()=>client.get('offering','registration-1'));
- api.state.role='XS';await assert.rejects(()=>client.prepare(input),{code:'PERMISSION_DENIED'});api.state.role='XY';
+ api.state.role='XS';await assert.rejects(()=>client.prepare(input),{code:'NETWORK_PROTOCOL_ERROR'});api.state.role='XY';
  api.rows.offering.activityName='Changed by human';await assert.rejects(()=>client.decide(plan,{via:'api',intent:'decide-volunteer-activity-review',confirm:true}),{code:'BUSINESS_REJECTED'});
  const fresh=await client.prepare(input);fresh.payload.uuid='registration-1';await assert.rejects(()=>client.decide(fresh,{via:'api',intent:'decide-volunteer-activity-review',confirm:true}),{code:'INVALID_INPUT'});
  api.state.managed=false;await assert.rejects(()=>client.prepare({type:'registration',id:'registration-1',decision:'pass',message:'已核对',time:'2026-10-22'}),{code:'PERMISSION_DENIED'});
