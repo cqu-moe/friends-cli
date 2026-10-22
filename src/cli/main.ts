@@ -3,6 +3,7 @@ import {courseReviewSchemas, registerCourseReviewCommands} from "./course-review
 import {volunteerActivityReviewSchemas,registerVolunteerActivityReviewCommands} from "./volunteer-activity-reviews.js";
 import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
 import { Command } from "commander";
+import { organizationActivityReviewSchemas, registerOrganizationActivityReviewCommands } from "./organization-activity-reviews.js";
 import {
   courseId,
   validateCourseListInput,
@@ -44,6 +45,7 @@ const schemas = {
   ...draftSchemas,
   ...courseParticipationSchemas,
   ...organizationSchemas,
+  ...organizationActivityReviewSchemas,
   ...volunteerReviewSchemas,
   errors: {
     operation: "errors", readonly:true, permission:"none", phases:["inspect"], supportedVia:["local"],
@@ -413,6 +415,9 @@ courses
       ...queryMeta(source),
     });
   });
+
+registerOrganizationActivityReviewCommands(program, { baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl });
+
 
 registerCourseReviewCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 registerVolunteerActivityReviewCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
