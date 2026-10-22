@@ -194,7 +194,7 @@ test("SDK verifies current account, pending membership, and activity binding bef
   });
 });
 
-test("SDK uses real callback nodes for BACK and rejects missing real review roles", async (t) => {
+test("SDK uses real callback nodes for BACK and rejects unsupported verified review roles", async (t) => {
   const upstream = await school(t);
   const client = createVolunteerCertificationReviewClient({ ...upstream, session });
   const back = await client.decide("review-1", {
@@ -210,8 +210,10 @@ test("SDK uses real callback nodes for BACK and rejects missing real review role
   assert.equal(upstream.writes[0].body.callbackActivityId, "callback-1");
   assert.equal(upstream.writes[0].body.applyInfo, null);
 
-  upstream.state.mode = "no-role";
-  await assert.rejects(() => client.list(), (error) =>
+  upstream.state.availableRole = "XS";
+  upstream.state.role = "XS";
+  const student = createVolunteerCertificationReviewClient({ ...upstream, session: { ...session, userLevel: "XS", levelNo: "XS" } });
+  await assert.rejects(() => student.list(), (error) =>
     error.code === FriendsErrorCode.PermissionDenied);
 });
 
