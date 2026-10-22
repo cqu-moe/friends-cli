@@ -281,7 +281,7 @@ export async function installCourseOfferingEgoFixture(home, token = "course-fixt
     function setValue(node,value){if(node.matches('input,textarea'))node.value=value;else node.textContent=value||'请选择';}
     for (const node of document.querySelectorAll('[data-model]')) { setValue(node,model[node.dataset.model]); node.oninput=()=>model[node.dataset.model]=node.value; }
     function picker(columns, apply) {
-      const popup=document.createElement('div'); popup.className='van-popup'; const panel=document.createElement('div'); panel.className='van-picker'; popup.append(panel);
+      const popup=document.createElement('div'); popup.className='van-popup'; const panel=document.createElement('div'); panel.className='van-picker'; panel.getBoundingClientRect=()=>({width:858,height:308}); popup.append(panel); popup.style.display='none';
       const done=document.createElement('button'); done.type='button'; done.className='van-picker__confirm'; done.textContent='确认'; panel.append(done);
       const all=document.createElement('div'); all.className='van-picker__columns'; panel.append(all); const chosen=columns.map(c=>c[0]); const moving=columns.map(()=>false);
       columns.forEach((items,index)=>{ const col=document.createElement('div'); col.className='van-picker-column'; all.append(col); const list=document.createElement('ul'); list.className='van-picker-column__wrapper'; col.append(list); list.getAnimations=()=>[{playState:moving[index]?'running':'finished'}];
@@ -289,19 +289,20 @@ export async function installCourseOfferingEgoFixture(home, token = "course-fixt
           option.onclick=()=>{ moving[index]=true; list.querySelectorAll('li').forEach(n=>n.classList.remove('van-picker-column__item--selected')); option.classList.add('van-picker-column__item--selected'); setTimeout(()=>{chosen[index]=item;moving[index]=false;},25); };
         });
       });
-      done.onclick=()=>{apply(chosen);popup.remove();};document.body.append(popup);
+      done.onclick=()=>{apply(chosen);setTimeout(()=>{popup.style.display='none'},20);};document.body.append(popup);setTimeout(()=>{popup.style.display='block'},20);return popup;
     }
     const selections={curriculumType:${JSON.stringify(options.missingType ? ['其他类型'] : ['其他类型','通识课'])},curriculumLevel:['其他级别','校级'],organizationName:['其他组织','示例课程组织']};
     for(const [key,values] of Object.entries(selections)) {
       const control=document.querySelector('[data-model="'+key+'"]');
       const trigger=control.matches('input')?control.parentElement:control;
-      trigger.onclick=()=>picker([values],v=>{model[key]=v[0];setValue(control,v[0]);});
+      trigger.onclick=()=>{if(Array.from(document.querySelectorAll('.van-popup')).some(p=>p.style.display!=='none'))return;picker([values],v=>{model[key]=v[0];setValue(control,v[0]);});};
     }
     for(const key of ['beginTime','endTime']) {
       const control=document.querySelector('[data-model="'+key+'"]');
       const trigger=control.matches('input')?control.parentElement:control;
-      trigger.onclick=()=>picker([['2026'],['09','10'],['01','31'],['08','18'],['00']],v=>{const value=v[0]+'-'+v[1]+'-'+v[2]+' '+v[3]+':'+v[4];model[key]=value;setValue(control,value);});
+      trigger.onclick=()=>{if(Array.from(document.querySelectorAll('.van-popup')).some(p=>p.style.display!=='none'))return;picker([['2026'],['09','10'],['01','31'],['08','18'],['00']],v=>{const value=v[0]+'-'+v[1]+'-'+v[2]+' '+v[3]+':'+v[4];model[key]=value;setValue(control,value);});};
     }
+    if(${JSON.stringify(options.openPicker === true)}) picker([['人工选项']],()=>{}).style.display='block';
     document.querySelector('#next').onclick=()=>fetch('/business/course-next-step',{method:'POST',body:JSON.stringify(model)});
     </script></div>`;
   const htmlPath = join(home, "course.html");
@@ -310,7 +311,7 @@ export async function installCourseOfferingEgoFixture(home, token = "course-fixt
   const bin = join(home, "bin");
   const command = join(bin, "ego-browser");
   await writeFile(htmlPath, html);
-  await writeFile(config, JSON.stringify({ html: htmlPath, result, token, url, outerUrl: `${new URL(url).origin}/mobile/stuhall`, frame: true, executeSession: true }));
+  await writeFile(config, JSON.stringify({ html: htmlPath, result, token, url, outerUrl: `${new URL(url).origin}/mobile/stuhall`, frame: true, executeSession: true, unreliablePickerWait: options.unreliablePickerWait === true }));
   await mkdir(bin, { recursive: true });
   const runner = pathToFileURL(resolve("tests/fixtures/strict-ego.mjs")).href;
   await writeFile(command, `#!/usr/bin/env node\nawait import(${JSON.stringify(runner)});\n`, { mode: 0o700 });

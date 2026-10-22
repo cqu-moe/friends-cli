@@ -59,3 +59,14 @@ node --test tests/course-offering.test.js tests/course-offering-cli.test.js test
 修复将定位标记落到 `.van-field__body > .van-field__control--custom > div`，保留旧具名控件的支持；再次准备前只清除本助手以前的定位标记，防止旧外层和新内层同时匹配，保留表单中的已有值。严格 iframe fixture 仅让内层节点绑定打开回调，外层 click 不会打开；还模拟上次准备遗留的外层标记。旧实现分别复现 picker 超时和重复匹配，修复后公开 SDK 与真实 CLI 回归通过，五个选择/日期值均由实际 DOM 回调写入独立表单模型。
 
 移除 #14 运行时及 Node 结果类型、桥接检查中的硬编码 `finalSubmitActions:0`。提交数是受控 fixture 的观测值；测试断言真实 fixture 的 `submits` 和 `remoteWrites` 均为零，运行时结果不再伪装成真实浏览器计数。补丁仍不上传、不点下一步、不最终提交；真实页面补丁复验由主任务单独记录。
+
+
+## 同轮 iframe 等待及公共错误契约修复
+
+主任务进一步报告：修复内层 click 后真实 picker 已打开，但同次 `waitForSelector(... visible, 15000)` 仍超时；下一轮观测到恰好一个 picker，computed display 为 block、visibility 为 visible、矩形 858×308，同一 selector 的等待立即成功。这只证明存在同轮等待/页面状态观察不一致，尚不能确认 Ego 的具体内部原因。
+
+picker 的打开与关闭等待改用 `waitForFunction`：直接读取同源 iframe，检查 picker 及祖先的 computed display/visibility、hidden 属性与实际矩形。打开要求恰好一个真实可见 picker，关闭要求没有可见 picker；不靠 locator 等待的 frame 绑定或元素单纯存在来判定。开始时若已有 picker 打开，保留该窗口和所有输入并交接，不取消、不补点、不自动续跑。
+
+公共 Node SDK 不再把非空 `executionError` 作为成功结果返回；它在页面交接后抛出非重试的 `UNKNOWN_OUTCOME`，真实 CLI 子进程输出 `ok:false`、退出码 7。`error.recovery` 包含已完成字段、已有课程 ID、输入副本、页面值、缺项、底层错误及实际交接状态。底层 helper 的诊断对象保留，但不再被公开 SDK/CLI 包装成成功。
+
+受控测试在外部 Ego 边界模拟主任务观测到的 locator-wait 故障，仍执行实际 DOM 回调；popup 延迟打开、延迟隐藏并保留隐藏节点，jsdom 的测试几何值显式提供，不能据此证明真实浏览器几何或时序。已观察旧实现失败，再验证 SDK/CLI 成功路径、部分失败的 exit 7 与恢复信息、已打开人工 picker 的零填充/零点击交接。真实补丁复验仍须由主任务执行并另记，不能把这些受控结果当成真实页面通过。

@@ -155,7 +155,7 @@ API 写入要求 `--via api` 和字面确认：报名 `--confirm apply`、撤销
 
 上传、第一步保存或最终提交响应丢失时返回 `UNKNOWN_OUTCOME`（退出码 7）。`error.recovery` 保留可另存为申请 JSON 的 `input`、已确认上传项、待确认文件、材料组和已有课程 UUID；已知 UUID 或上传组只做只读回查。即使回查匹配仍保持未知，不重试、不继续下一写操作，也不跨 API/Ego 续交。首次创建丢失 UUID 时无法按 ID 回查，必须人工核实。确认提交后回查失败，也会保留 `serverAcknowledged:true` 并以未知结果停止。
 
-`prepare-ego` 核验既有 Ego 页面中的账号、角色、路由和课程标识，只通过同源 iframe 内的可见控件准备名称、地址、介绍、类型、级别、组织和日期。既支持直接具名控件，也支持公开源码中的 Vant 标签、slot 和分行文本域；picker 等待选项选中及动画结束后才确认。已有人工值会保留，积分、认证设置、材料和下一页报名设置交给用户审阅；缺项及中途失败记录在 `missing`、`executionError` 中，然后 `handOff()`。`submitted:false`，不点“下一步/提交”，`--yes`、`--confirm` 无法绕过。dry-run 不导航、不录入、不点击、不交接。
+`prepare-ego` 核验既有 Ego 页面中的账号、角色、路由和课程标识，只通过同源 iframe 内的可见控件准备名称、地址、介绍、类型、级别、组织和日期。既支持直接具名控件，也支持公开源码中的 Vant 标签、slot 和分行文本域；picker 等待选项选中及动画结束后才确认。已有人工值会保留，积分、认证设置、材料和下一页报名设置交给用户审阅；缺项记录在 `missing` 中；底层可见准备出现中途失败时先 `handOff()`，公共 SDK 随后抛出 `UNKNOWN_OUTCOME`，CLI 退出 7，`error.recovery` 保留已完成字段、已有课程 ID、页面值、缺项及交接状态。已打开的人工 picker 不会自动取消或续跑。`submitted:false`，不点“下一步/提交”，`--yes`、`--confirm` 无法绕过。dry-run 不导航、不录入、不点击、不交接。
 
 `status <courseUuid> --via api|ego` 直接查询 `GET apply/approve-detail/{uuid}`；Ego 来源先核验登录上下文。只投影必要课程、组织与流程状态，未知枚举不解释为获批。材料上传、第一步保存、提交确认和开办批准是不同结果。本任务仅完成源码核对与受控 SDK/CLI/iframe 验证，真实 Ego 和生产写入尚未验收。
 

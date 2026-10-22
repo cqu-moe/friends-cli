@@ -29,6 +29,22 @@ type Field = keyof typeof labels;
 const activePicker = '.van-popup:not([style*="display: none"]) .van-picker';
 const selector = (field: Field) => `loc=css:[data-friends-course-field="${field}"]`;
 
+function pickerVisibility(visible: boolean): boolean {
+  const frame = document.querySelector("iframe");
+  const d = frame ? frame.contentDocument : document;
+  const w = d?.defaultView;
+  if (!d || !w) return false;
+  const shown = Array.from(d.querySelectorAll(".van-popup .van-picker")).filter(picker => {
+    for (let node: Element | null = picker; node; node = node.parentElement) {
+      const style = w.getComputedStyle(node);
+      if (node.hasAttribute("hidden") || style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return false;
+    }
+    const rect = picker.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  return visible ? shown.length === 1 : shown.length === 0;
+}
+
 async function choose(page: Page, column: number, expected: string) {
   const selector = `${activePicker} .van-picker-column:nth-child(${column})`;
   // Vant clips distant options; move through visible neighbours and wait for its transition.
@@ -122,6 +138,7 @@ export async function prepareCourseOfferingPage(task: Task, input: Input) {
     beginTime: input.prepared.firstStep.beginTime, endTime: input.prepared.firstStep.endTime,
   };
   try {
+    if (!await page.evaluate(pickerVisibility, false)) throw new FriendsError({ code: FriendsErrorCode.UnknownOutcome, message: "An existing course picker is open; preserve it for human review" });
     for (const [field, expected] of Object.entries(requested) as Array<[Field, string]>) {
       const value = (await capture()).fields[field];
       const isDate = field === "beginTime" || field === "endTime";
@@ -135,12 +152,12 @@ export async function prepareCourseOfferingPage(task: Task, input: Input) {
         actions.push({ field, action: "filled" });
       } else {
         await page.click(selector(field));
-        await page.waitForSelector(`loc=css:${activePicker}`, { state: "visible", timeout: 15_000 });
+        await page.waitForFunction(pickerVisibility, true, { timeout: 15_000 });
         await page.snapshot();
         const columns = isDate ? expected.slice(0, 16).split(/[- :]/) : [expected];
         for (const [i, label] of columns.entries()) await choose(page, i + 1, label);
         await page.click(`loc=css:${activePicker} .van-picker__confirm`);
-        await page.waitForSelector(`loc=css:${activePicker}`, { state: "hidden", timeout: 15_000 });
+        await page.waitForFunction(pickerVisibility, false, { timeout: 15_000 });
         const actual = (await capture()).fields[field];
         if (actual !== expected && !(isDate && actual === expected.slice(0, 16))) throw new Error(`Course picker did not retain its value: ${field}`);
         actions.push({ field, action: "filled" });

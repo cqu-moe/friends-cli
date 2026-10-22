@@ -136,7 +136,27 @@ try {
   ) {
     throw error("The Ego course preparation did not preserve the required handoff boundary", FriendsErrorCode.UnknownOutcome);
   }
-  return { ...(raw as unknown as CourseOfferingEgoResult), prepared };
+  const result = raw as unknown as CourseOfferingEgoResult;
+  if (result.executionError != null) {
+    const { term, organization, typeName, levelName, materialGroups, ...input } = prepared;
+    throw new FriendsError({
+      code: FriendsErrorCode.UnknownOutcome,
+      message: "Visible course preparation stopped. Inspect the handed-off page before any new operation; no automatic retry was made.",
+      recovery: {
+        operation: "course-offering.prepare-ego",
+        courseId: prepared.uuid ?? undefined,
+        applicationId: prepared.uuid ?? undefined,
+        organizationId: prepared.organization.id,
+        input,
+        completed: result.actions?.filter(action => action.action === "filled" || action.action === "already-matching").map(action => action.field) ?? [],
+        handoff: result.handoff,
+        page: result.page,
+        missing: result.missing,
+        executionError: result.executionError,
+      },
+    });
+  }
+  return { ...result, prepared };
 }
 
 export type { CourseOfferingApplication };

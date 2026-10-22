@@ -21,6 +21,10 @@ export interface WriteRecovery {
   resourceIds?: string[];
   input?: unknown;
   completed?: string[];
+  handoff?: "completed";
+  page?: Record<string, string | null>;
+  missing?: string[];
+  executionError?: { code: string; message: string };
   serverAcknowledged?: boolean | "unknown";
   readback?: "matched" | "unmatched" | "unavailable";
   materialGroups?: {

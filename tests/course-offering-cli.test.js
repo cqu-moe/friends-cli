@@ -126,7 +126,7 @@ test("course offering CLI prepares a visible Ego page and hands it off without s
   const upstream = await courseOfferingSchool(t);
   const { home, env } = await courseOfferingCliSetup(t, upstream);
   const url = `${upstream.baseUrl.replace("/gateway", "")}/mobile/course/courseInfo?type=add`;
-  const ego = await installCourseOfferingEgoFixture(home, "ego-fixture-token", url, { sourceSlots: true, previousPreparation: true });
+  const ego = await installCourseOfferingEgoFixture(home, "ego-fixture-token", url, { sourceSlots: true, previousPreparation: true, unreliablePickerWait: true });
   const egoEnv = {
     ...env,
     FRIENDS_EGO_FIXTURE_CONFIG: ego.config,
@@ -287,4 +287,29 @@ test("course offering CLI uses the verified Ego query context and enforces the h
   assert.equal(observed.handoffs, 1);
   assert.equal(observed.remoteWrites, 0);
   assert.equal(upstream.requests.some(r => r.url.includes("file-upload") || r.url.endsWith("/apply/next-step") || r.url.endsWith("/apply/apply")), false);
+});
+
+
+test("course offering CLI reports a partial visible preparation as exit 7 with a preserved editable handoff", async (t) => {
+  const upstream = await courseOfferingSchool(t);
+  const { home, env } = await courseOfferingCliSetup(t, upstream);
+  const url = `${upstream.baseUrl.replace("/gateway", "")}/mobile/course/courseInfo?type=Apply&uuid=course-fixture`;
+  const ego = await installCourseOfferingEgoFixture(home, "ego-fixture-token", url, { sourceSlots: true, missingType: true, humanName: "人工保留" });
+  const result = await run(["course-offering", "prepare-ego", "--input", "-", "--ego-task-space", "7"], {
+    ...env, FRIENDS_EGO_FIXTURE_CONFIG: ego.config, PATH: `${ego.bin}:${process.env.PATH}`,
+  }, JSON.stringify({ ...application, uuid: "course-fixture" }));
+  assert.equal(result.code, 7);
+  assert.equal(result.json.ok, false);
+  assert.equal(result.json.error.code, "UNKNOWN_OUTCOME");
+  assert.equal(result.json.error.retryable, false);
+  assert.equal(result.json.error.recovery.courseId, "course-fixture");
+  assert.equal(result.json.error.recovery.handoff, "completed");
+  assert.deepEqual(result.json.error.recovery.completed, ["curriculumPlace", "curriculumContent"]);
+  assert.equal(result.json.error.recovery.page.curriculumName, "人工保留");
+  assert.notEqual(result.stderr, "");
+  const observed = JSON.parse(await readFile(ego.result, "utf8"));
+  assert.equal(observed.model.curriculumName, "人工保留");
+  assert.equal(observed.handoffs, 1);
+  assert.equal(observed.submits, 0);
+  assert.equal(observed.remoteWrites, 0);
 });
