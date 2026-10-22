@@ -1,8 +1,14 @@
 # CQU Auth 登录设计
 
-日期：2026-10-22。状态：设计与证据记录，尚无 friends-cli 登录实现或生产端到端验收。认证库按用户决定统一 Better Auth。
+日期：2026-10-22。状态：设计与证据记录，CQU Auth 登录尚未实现或进行生产端到端验收。认证库按用户决定统一 Better Auth。
 
 本文保留设计与调查过程；正式规格以 [Issue #1](https://github.com/cqu-moe/friends-cli/issues/1) 为准。规格要求 SDK 与 CLI 两层公开接口测试，Ego 录入流程由用户亲自最终提交。
+
+## 后续进展
+
+2026-10-22：[Auth #95](https://github.com/cqu-moe/auth/pull/95) 已合并，PR 与合并提交 CI、Workers Builds 检查均通过。经正常浏览器读取线上 discovery，确认已包含 `cqu:ticket:friends`。下文早期调查中“尚未发布 friends scope”的结论已被此证据替代；未核实的其他客户端能力仍需接入时验证。
+
+friends-cli #2 只交付 local 学校登录与课程查询。客户端注册、Better Auth/DPoP 互操作及真实 ST 核销仍归 [#4](https://github.com/cqu-moe/friends-cli/issues/4)；Auth #94 此时仍打开，不能把 scope 发布当作消费者端到端完成。
 
 ## 用户看到的流程
 

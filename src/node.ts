@@ -113,6 +113,7 @@ export async function readEgoSession(options: {
   const page = options.page ?? "p1";
   if (!/^p[1-9][0-9]*$/.test(page)) throw safeError("Invalid Ego page label", FriendsErrorCode.InvalidInput);
   const userWaitMs = options.timeoutMs ?? 300_000;
+  if (!Number.isSafeInteger(userWaitMs) || userWaitMs < 1) throw safeError("Invalid Ego timeout", FriendsErrorCode.InvalidInput);
   const taskExpression = options.taskSpaceId === undefined
     ? 'taskSpace("friends-cli local login")'
     : `taskSpace(${options.taskSpaceId})`;

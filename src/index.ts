@@ -412,12 +412,14 @@ export function createFriendsSdk(options: {
   const sdk = {
     inspectLocalSession,
     verifyLocalSession,
-    async activateLocalContext(input: {
+    async activateLocalContext(source: {
       token: string;
       userLevel: string;
       selector?: { levelNo?: string; unitNo?: string };
       expectedAccount?: string;
     }): Promise<ActivatedLocalContext> {
+      validateSession(source);
+      const input = {...source, selector:source.selector ? {...source.selector} : undefined};
       const inspection = await inspectLocalSession(input);
       if (
         input.expectedAccount !== undefined &&
