@@ -19,10 +19,19 @@ import {
 import {
   createCertificationDraftStore,
   prepareVolunteerCertificationInEgo,
+  captureVolunteerCertificationFromEgo,
   rejectVolunteerCertificationEgoSubmitInEgo,
 } from "../node.js";
 
 export const draftSchemas = {
+  "drafts.capture": {
+    operation:"drafts.capture", permission:"explicit human return and freshly verified activity manager",
+    phases:["take-over","query","visible-inspection","local-revision"], supportedVia:["ego"],
+    input:{draftId:"stored draft ID",via:"ego (required)",egoTaskSpace:"existing task",egoPage:"certification page",expectedRevision:"required non-negative integer",userReturnedControl:"required explicit human return; not --yes"},
+    readonly:false,remoteReadonly:true,localWrite:true,finalSubmission:"human-only",
+    sideEffect:"opens local row editors only to read identities/posts and closes without saving; saves a private draft revision, conflicts preserve both versions",
+    verifiedWith:"controlled SDK and real CLI; actual browser control separately recorded",
+  },
   "drafts.activities": {
     operation: "drafts.activities", permission: "volunteer manager context", phases: ["query"],
     input: {via:"api|ego",egoTaskSpace:"required with ego",egoPage:"p1"}, output: "manageable volunteer activities", readonly: true, remoteReadonly: true,
@@ -321,6 +330,22 @@ export function registerDraftCommands(program: Command, options: { baseUrl: stri
         requestMode: "direct-api-recheck+visible-ego-prepare",
         verification: { activityAndRoster: "school-api-rechecked", finalSubmission: "human-only" },
       });
+    });
+
+  drafts.command("capture").description("Capture human edits after explicit return of Ego control; never submit")
+    .argument("<draftId>","stored draft ID")
+    .requiredOption("--via <ego>","visible Ego capture")
+    .requiredOption("--ego-task-space <number>","existing Ego task space")
+    .option("--ego-page <label>","existing certification page","p1")
+    .requiredOption("--expected-revision <number>","revision being captured")
+    .option("--user-returned-control","the human explicitly returned browser control")
+    .option("--timeout <milliseconds>","capture timeout","300000")
+    .option("--json","stable JSON",true)
+    .action(async(draftId:string,options:Record<string,string|boolean>)=>{
+      if(options.via!=="ego"||options.userReturnedControl!==true)invalid("Capture requires --via ego and explicit --user-returned-control");
+      const draft=await store.load(draftId);
+      const result=await captureVolunteerCertificationFromEgo({draft,expectedRevision:Number(options.expectedRevision),userReturnedControl:true,taskSpaceId:Number(options.egoTaskSpace),page:String(options.egoPage),timeoutMs:Number(options.timeout),baseUrl:runtimeBaseUrl});
+      output(result,{operation:"drafts.capture",selectedEntry:"ego",requestMode:"fresh-api-query+visible-inspection+local-store",finalSubmission:"human-only"});
     });
 
   drafts.command("submit").description("Reject Ego certification submission before any side effect")

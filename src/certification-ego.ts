@@ -64,7 +64,7 @@ function validateEgoOptions(options: EgoOptions): void {
   }
 }
 
-async function runEgoJson<T>(options: {
+export async function runEgoJson<T>(options: {
   script: string;
   command: string;
   timeoutMs: number;
