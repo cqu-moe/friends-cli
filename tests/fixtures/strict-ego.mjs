@@ -8,11 +8,12 @@ if(!configuration.executeSession&&script.includes('FRIENDS_CLI_EGO_SESSION:')) {
   console.log('FRIENDS_CLI_EGO_SESSION:'+JSON.stringify({token:'ego-fixture-token',userLevel:'XS'}));
   process.exit(0);
 }
-const stats={clicks:[],fills:[],handoffs:0,newPages:0,navigations:0,loadStates:0,submits:0,finalRequests:0,snapshots:0};
+const stats={clicks:[],fills:[],handoffs:0,newPages:0,navigations:0,loadStates:0,submits:0,finalRequests:0,remoteWrites:0,snapshots:0};
 const html=await readFile(configuration.html,'utf8');
 function initialize(w){
   w.fetch=async(url,init)=>{
     const method=init?.method??'GET';
+    if(['POST','PUT','PATCH','DELETE'].includes(method.toUpperCase()))stats.remoteWrites++;
     if(method==='POST')stats.submits++;
     if(['/write','/quit'].includes(new URL(url,configuration.url).pathname)&&method!=='GET')stats.finalRequests++;
     return fetch(new URL(url,configuration.url),init);
@@ -140,6 +141,7 @@ try {
   await writeFile(configuration.result,JSON.stringify({
     ...stats,
     html:d.body.innerHTML,
+    model:content.__courseForm??null,
     fieldValues:[...d.querySelectorAll('input,textarea')].map(e=>({id:e.id||null,ariaLabel:e.getAttribute('aria-label'),value:e.value})),
   }));
   dom.window.close();

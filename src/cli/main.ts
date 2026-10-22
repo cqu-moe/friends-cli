@@ -2,6 +2,7 @@
 import {courseReviewSchemas, registerCourseReviewCommands} from "./course-reviews.js";
 import {volunteerActivityReviewSchemas,registerVolunteerActivityReviewCommands} from "./volunteer-activity-reviews.js";
 import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
+import { courseOfferingSchemas, registerCourseOfferingCommands } from "./course-offering.js";
 import { Command } from "commander";
 import { organizationActivityReviewSchemas, registerOrganizationActivityReviewCommands } from "./organization-activity-reviews.js";
 import {
@@ -28,6 +29,10 @@ import {
 import { createCquAuthClient } from "../auth.js";
 import { resolveQuerySession } from "./session.js";
 import { draftSchemas, registerDraftCommands } from "./drafts.js";
+import {
+  courseParticipationSchemas,
+  registerCourseParticipationCommands,
+} from "./course-participation.js";
 import { organizationSchemas, registerOrganizationCommands } from "./organizations.js";
 import { registerVolunteerCommands, volunteerSchemas } from "./volunteer.js";
 import { registerVolunteerReviewCommands, volunteerReviewSchemas } from "./volunteer-reviews.js";
@@ -42,7 +47,9 @@ const schemas = {
   ...offeringSchemas,
   ...volunteerActivityReviewSchemas,
   ...certificationApiSchemas,
+  ...courseOfferingSchemas,
   ...draftSchemas,
+  ...courseParticipationSchemas,
   ...organizationSchemas,
   ...organizationActivityReviewSchemas,
   ...volunteerSchemas,
@@ -369,6 +376,10 @@ auth
 
 const courses = program.command("courses").description("Course queries");
 
+registerCourseParticipationCommands(courses, {
+  baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+});
+
 courses
   .command("list")
   .description("List one page of courses")
@@ -437,6 +448,10 @@ registerVolunteerCommands(program, {
     resolveQuerySession(options, process.env.FRIENDS_BASE_URL ?? productionBaseUrl),
 });
 
+registerCourseOfferingCommands(program, {
+  baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+});
+
 registerVolunteerReviewCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
 });
@@ -460,7 +475,9 @@ program.parseAsync(process.argv).catch(async (error: unknown) => {
   const nextAction =
     friendsError.code === FriendsErrorCode.AuthRequired
       ? `friends auth login --method ${await loadSession().then(session => session.loginMethod).catch(() => "local")}`
-      : undefined;
+      : friendsError.code === FriendsErrorCode.UnknownOutcome
+        ? "Inspect read-only output before any human retry; for course registrations use friends courses registrations list --json"
+        : undefined;
   process.stdout.write(
     `${JSON.stringify(
       {
