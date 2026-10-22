@@ -2,6 +2,8 @@
 
 日期：2026-10-22。状态：设计与证据记录，尚无 friends-cli 登录实现或生产端到端验收。认证库按用户决定统一 Better Auth。
 
+本文保留设计与调查过程；正式规格以 [Issue #1](https://github.com/cqu-moe/friends-cli/issues/1) 为准。规格要求 SDK 与 CLI 两层公开接口测试，Ego 录入流程由用户亲自最终提交。
+
 ## 用户看到的流程
 
 ```sh
