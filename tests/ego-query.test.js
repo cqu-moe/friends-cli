@@ -200,6 +200,9 @@ test("real CLI uses an Ego-selected query without reading local credentials", as
   const script = await readFile(join(root, "ego-script.js"), "utf8");
   assert.match(script, /taskSpace\(7\)/);
   assert.match(script, /task\.page\("p2"\)/);
+  assert.doesNotMatch(script, /page\.goto\(/);
+  assert.doesNotMatch(script, /task\.handOff\(/);
+  assert.doesNotMatch(script, /task\.waitForControl\(/);
   assert.doesNotMatch(script, /task\.finish/);
 
   const show = await run(process.execPath, [
@@ -231,4 +234,68 @@ test("real CLI uses an Ego-selected query without reading local credentials", as
       (error) => error.code === 2 && JSON.parse(error.stdout).error.code === "INVALID_INPUT",
     );
   }
+});
+
+test("verified Ego queries require an existing school page and never navigate it", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "friends-ego-existing-"));
+  const ready = join(root, "ego-ready");
+  const readyLog = join(root, "ready.js");
+  const missing = join(root, "ego-missing");
+  const missingLog = join(root, "missing.js");
+  await writeFile(ready, [
+    "#!/bin/sh",
+    `cat > ${readyLog}`,
+    `printf '%s\\n' 'FRIENDS_CLI_EGO_SESSION:{\"token\":\"existing-token\",\"userLevel\":\"XS\"}'`,
+    "",
+  ].join("\n"));
+  await writeFile(missing, [
+    "#!/bin/sh",
+    `cat > ${missingLog}`,
+    "exit 0",
+    "",
+  ].join("\n"));
+  await chmod(ready, 0o700);
+  await chmod(missing, 0o700);
+  const scenario = controlledServer();
+  t.after(async () => {
+    scenario.server.closeAllConnections();
+    scenario.server.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  await new Promise((resolve) => scenario.server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${scenario.server.address().port}/gateway`;
+
+  const session = await readVerifiedEgoSession({
+    taskSpaceId: 9,
+    page: "p3",
+    command: ready,
+    timeoutMs: 1000,
+    baseUrl,
+  });
+  const script = await readFile(readyLog, "utf8");
+  assert.equal(session.account.userNo, "fixture-account");
+  assert.equal(session.context.unit.unitNo, "unit-a");
+  assert.match(script, /location\.origin === "https:\/\/friends\.cqu\.edu\.cn"/);
+  assert.match(script, /NO_EXISTING_FRIENDS_SESSION/);
+  assert.doesNotMatch(script, /page\.goto\(/);
+  assert.doesNotMatch(script, /task\.handOff\(/);
+  assert.doesNotMatch(script, /task\.waitForControl\(/);
+  assert.doesNotMatch(script, /task\.finish/);
+
+  await assert.rejects(
+    () => readVerifiedEgoSession({
+      taskSpaceId: 9,
+      page: "p3",
+      command: missing,
+      timeoutMs: 1000,
+      baseUrl,
+    }),
+    (error) => error.code === FriendsErrorCode.AuthRequired &&
+      error.message === "No existing Ego friends session is ready",
+  );
+  const missingScript = await readFile(missingLog, "utf8");
+  assert.doesNotMatch(missingScript, /page\.goto\(/);
+  assert.doesNotMatch(missingScript, /task\.handOff\(/);
+  assert.doesNotMatch(missingScript, /task\.waitForControl\(/);
+  assert.doesNotMatch(missingScript, /task\.finish/);
 });
