@@ -59,18 +59,20 @@ export async function prepareCourseOfferingPage(task: Task, input: Input) {
   if (await page.url() === "about:blank") await page.goto(target.href);
   await page.waitForSelector("loc=css:.cmine", { timeout: 15_000 });
   const identity = await page.evaluate(({ origin, token, userLevel }) => {
-    let current = localStorage.getItem("token_str");
+    const frame = document.querySelector("iframe");
+    if (frame && frame.contentDocument === null) return { matches: false, url: location.href, courseId: null };
+    const w = frame?.contentDocument?.defaultView ?? window;
+    let current = w.localStorage.getItem("token_str");
     try {
       if (current?.startsWith("{")) {
         const parsed = JSON.parse(current);
         current = parsed.token ?? (typeof parsed.data === "string" ? parsed.data : parsed.data?.token) ?? "";
       }
     } catch { current = ""; }
-    const frame = document.querySelector("iframe");
     return {
-      matches: location.origin === origin && current === token && localStorage.getItem("userLevel_str") === userLevel && (!frame || frame.contentDocument !== null),
-      url: location.href,
-      courseId: (frame?.contentWindow ?? window).sessionStorage.getItem("course_uuid"),
+      matches: location.origin === origin && w.location.origin === origin && current === token && w.localStorage.getItem("userLevel_str") === userLevel,
+      url: w.location.href,
+      courseId: w.sessionStorage.getItem("course_uuid"),
     };
   }, { origin: target.origin, token: input.session.token, userLevel: input.session.userLevel });
   const current = new URL(identity.url);

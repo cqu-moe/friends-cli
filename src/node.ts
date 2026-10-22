@@ -1,9 +1,15 @@
+import { prepareVolunteerActivityReviewPage } from "./volunteer-activity-review-page.js";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { createFriendsSdk, type LoginContext } from "./index.js";
+import {
+  createFriendsSdk,
+  createVolunteerCertificationReviewClient,
+  type LoginContext,
+  type VerifiedVolunteerSession,
+} from "./index.js";
 import { FriendsError, FriendsErrorCode } from "./errors.js";
 
 export * from "./draft-store.js";
@@ -287,6 +293,159 @@ console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({
     // Return the generic bridge failure below.
   }
   throw safeError("The Ego organization profile preparation did not return its route");
+}
+
+export async function prepareVolunteerCertificationReviewInEgo(options: {
+  taskSpaceId: number;
+  page?: string;
+  reviewId: string;
+  session: VerifiedVolunteerSession;
+  baseUrl?: string;
+  decision: "pass" | "back";
+  message: string;
+  allowBlankNavigation?: boolean;
+  timeoutMs?: number;
+  command?: string;
+}): Promise<{
+  route: string;
+  review: {
+    id: string;
+    activityId: string;
+    schoolRole: string;
+    handleType: string;
+  };
+  navigated: boolean;
+  decision: "pass" | "back";
+  messageAction: "filled" | "human-value-preserved";
+  status: "awaiting-user";
+  submitted: false;
+  handedOff: true;
+  manualFields: string[];
+}> {
+  if (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1) {
+    throw safeError("Invalid Ego task space", FriendsErrorCode.InvalidInput);
+  }
+  const page = options.page ?? "p1";
+  if (!/^p[1-9][0-9]*$/.test(page)) {
+    throw safeError("Invalid Ego page label", FriendsErrorCode.InvalidInput);
+  }
+  const userWaitMs = options.timeoutMs ?? 300_000;
+  if (!Number.isSafeInteger(userWaitMs) || userWaitMs < 1) {
+    throw safeError("Invalid Ego timeout", FriendsErrorCode.InvalidInput);
+  }
+  if (
+    options.decision !== "pass" && options.decision !== "back" ||
+    typeof options.message !== "string" || options.message.trim() === "" || options.message.length > 100 ||
+    [options.reviewId]
+      .some((value) => typeof value !== "string" || value === "" || /[\\/?#\s\r\n]/.test(value))
+  ) {
+    throw safeError("Invalid certification review preparation input", FriendsErrorCode.InvalidInput);
+  }
+  const client = createVolunteerCertificationReviewClient({
+    baseUrl: options.baseUrl ?? "https://friends.cqu.edu.cn/gateway",
+    session: options.session,
+  });
+  const detail = await client.getPending(options.reviewId);
+  if (detail.activity.id === null || detail.schoolRole === "") {
+    throw safeError("The pending certification review does not expose its page binding", FriendsErrorCode.PermissionDenied);
+  }
+  const query = new URLSearchParams({
+    uuid: detail.id,
+    activityId: detail.activity.id,
+    handleType: detail.schoolRole,
+  });
+  const route = `/mobile/volunteerManage/campusCerApprovalDetail?${query.toString()}`;
+  const runtime = new URL("./errors.js", import.meta.url).href;
+  const script = `
+const {FriendsError, FriendsErrorCode} = await import(${JSON.stringify(runtime)});
+const task = await taskSpace(${options.taskSpaceId});
+const page = task.page(${JSON.stringify(page)});
+const route = ${JSON.stringify(route)};
+let started = false;
+let completed = [];
+try {
+  const target = new URL("https://friends.cqu.edu.cn" + route);
+  const current = new URL(await page.url());
+  let navigated = false;
+  const same = current.origin === target.origin && current.pathname === target.pathname && [...target.searchParams].every(([key,value])=>current.searchParams.get(key)===value);
+  if (!same) {
+    if (current.href !== "about:blank" || !${options.allowBlankNavigation === true}) throw new FriendsError({code:FriendsErrorCode.PermissionDenied,message:"The Ego page is not the requested certification review page"});
+    await page.goto(target.href);navigated=true;
+  }
+  const storage = await page.evaluate(() => ({token:localStorage.getItem("token_str"),userLevel:localStorage.getItem("userLevel_str")}));
+  if ((${parseToken.toString()})(storage.token) !== ${JSON.stringify(options.session.token)} || storage.userLevel !== ${JSON.stringify(options.session.userLevel)}) throw new FriendsError({code:FriendsErrorCode.PermissionDenied,message:"The visible Ego account changed"});
+  started=true;
+  const result = await (${prepareVolunteerActivityReviewPage.toString()})(page,{url:target.href,decision:${JSON.stringify(options.decision)},message:${JSON.stringify(options.message)},time:""});
+  completed=result.completed;
+  if (result.executionError) {await task.handOff();throw new Error("Visible certification review preparation stopped partway; inspect the form");}
+  if (result.status !== "awaiting-user") throw new FriendsError({code:FriendsErrorCode.PermissionDenied,message:result.manualFields.join(", ")});
+  await task.handOff();
+  console.log("FRIENDS_CLI_EGO_REVIEW_PREPARED:"+JSON.stringify({route,navigated,decision:${JSON.stringify(options.decision)},messageAction:completed.includes("filled-message")?"filled":"human-value-preserved",manualFields:result.manualFields,status:"awaiting-user",submitted:false,handedOff:true}));
+} catch(error) {
+  console.log("FRIENDS_CLI_EGO_REVIEW_PREPARED:"+JSON.stringify({error:error.message,errorCode:error.code??(started?FriendsErrorCode.UnknownOutcome:FriendsErrorCode.NetworkProtocol),completed}));
+}
+`;
+  let output: string;
+  try { output = await runEgoProcess({script, command: options.command ?? "ego-browser", timeoutMs: userWaitMs + 30_000}); }
+  catch { throw new FriendsError({code:FriendsErrorCode.UnknownOutcome,message:"Ego review preparation may be partial; inspect the existing page before retrying",recovery:{operation:"volunteer-certification-reviews.prepare",applicationId:detail.id,activityId:detail.activity.id,completed:["visible-preparation-started"]}}); }
+  let bridgeError: { message: string; code?: FriendsErrorCode; completed?: string[] } | undefined;
+  try {
+    const parsed = singleMarker(output, "FRIENDS_CLI_EGO_REVIEW_PREPARED:") as {
+      route?: unknown;
+      navigated?: unknown;
+      decision?: unknown;
+      messageAction?: unknown;
+      status?: unknown;
+      submitted?: unknown;
+      handedOff?: unknown;
+      error?: unknown;
+      errorCode?: unknown;
+      completed?: unknown;
+      manualFields?: unknown;
+    } | null;
+    if (typeof parsed?.error !== "string") {
+      if (
+        parsed?.route === route &&
+        typeof parsed.navigated === "boolean" &&
+        parsed.decision === options.decision &&
+        (parsed.messageAction === "filled" || parsed.messageAction === "human-value-preserved") &&
+        parsed.status === "awaiting-user" &&
+        parsed.submitted === false &&
+        parsed.handedOff === true
+      ) {
+        return {
+          route: parsed.route,
+          review: {
+            id: detail.id,
+            activityId: detail.activity.id,
+            schoolRole: detail.schoolRole,
+            handleType: detail.handleType,
+          },
+          navigated: parsed.navigated,
+          decision: options.decision,
+          messageAction: parsed.messageAction,
+          status: "awaiting-user",
+          submitted: false,
+          handedOff: true,
+          manualFields: Array.isArray(parsed.manualFields) ? parsed.manualFields.filter((x): x is string => typeof x === "string") : [],
+        };
+      }
+    } else if (typeof parsed?.error === "string") {
+      bridgeError = {
+        message: parsed.error,
+        code: Object.values(FriendsErrorCode).find((value) => value === parsed.errorCode),
+        completed: Array.isArray(parsed.completed) ? parsed.completed.filter((x): x is string => typeof x === "string") : [],
+      };
+    } else {
+      bridgeError = { message: "The Ego certification review preparation returned an invalid result" };
+    }
+  } catch {
+    // Return the generic bridge failure below.
+  }
+  if (bridgeError !== undefined) {
+    throw new FriendsError({code:bridgeError.code ?? FriendsErrorCode.UnknownOutcome,message:bridgeError.message,recovery:bridgeError.code===FriendsErrorCode.UnknownOutcome?{operation:"volunteer-certification-reviews.prepare",applicationId:detail.id,activityId:detail.activity.id,completed:bridgeError.completed}:undefined});
+  }
+  throw safeError("The Ego certification review preparation did not return its route");
 }
 
 export async function readEgoSession(options: {
@@ -583,3 +742,7 @@ export async function loadSession(): Promise<StoredSession> {
 
 export * from "./certification-capture.js";
 export {prepareVolunteerActivityReviewInEgo} from './volunteer-activity-review-ego.js';
+
+export { prepareOrganizationActivityReviewInEgo } from "./organization-activity-review-ego.js";
+
+export {prepareCourseReviewInEgo} from './course-review-ego.js';

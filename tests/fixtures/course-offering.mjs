@@ -301,7 +301,7 @@ export async function installCourseOfferingEgoFixture(home, token = "course-fixt
   const bin = join(home, "bin");
   const command = join(bin, "ego-browser");
   await writeFile(htmlPath, html);
-  await writeFile(config, JSON.stringify({ html: htmlPath, result, token, url, frame: true, executeSession: true }));
+  await writeFile(config, JSON.stringify({ html: htmlPath, result, token, url, outerUrl: `${new URL(url).origin}/mobile/stuhall`, frame: true, executeSession: true }));
   await mkdir(bin, { recursive: true });
   const runner = pathToFileURL(resolve("tests/fixtures/strict-ego.mjs")).href;
   await writeFile(command, `#!/usr/bin/env node\nawait import(${JSON.stringify(runner)});\n`, { mode: 0o700 });

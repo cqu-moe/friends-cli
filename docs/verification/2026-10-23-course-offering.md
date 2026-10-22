@@ -41,9 +41,11 @@ node --test tests/course-offering.test.js tests/course-offering-cli.test.js test
 - 首次/后续上传、第一步新建/更新和最终提交的响应丢失；保留 `UNKNOWN_OUTCOME`、可恢复 `input`、组 ID、已确认文件和待确认文件。已知 ID/组只读回查，即使匹配仍为未知，无自动重试、跨路径续交、回滚或后续写入。首次创建丢失 UUID 时明确无法按 ID 回查。
 - 最终确认形状含糊，或最终已确认但回查被拒：退出码 7；后一种保留 `serverAcknowledged:true`。明确权限/业务拒绝保留原错误分类及已发生的部分上传事实。
 - 真实 CLI 子进程调用真实 SDK；全部六个命令的 help/schema，文件/stdin，非交互确认，版本化单 JSON stdout、stderr、退出码与执行方式；API dry-run 和不支持组合零业务写入。
-- strict Ego runner 执行生成脚本中的实际 DOM 回调，不伪造 evaluate 结果。测试具名控件和源码中的分行文本域/slot 两种同源 iframe 形状；input 事件更新独立表单模型，picker 必须等待所选项与动画结束，最终按钮连接可观测 HTTP 写请求。验证准备、人工值保留、中断交接、错误会话、dry-run、禁止越界提交，业务写请求为零。
+- strict Ego runner 执行生成脚本中的实际 DOM 回调，不伪造 evaluate 结果。测试具名控件和源码中的分行文本域/slot 两种同源 iframe 形状，外层大厅 URL 与内层课程 URL 独立，按内层路由及会话校验；input 事件更新独立表单模型，picker 必须等待所选项与动画结束，最终按钮连接可观测 HTTP 写请求。验证准备、人工值保留、中断交接、错误会话、dry-run、禁止越界提交，业务写请求为零。
 
 实现前已复现完整 URL 错误、prepared 输入可伪造/过期、缺少状态复核、假定表单包装层、错误材料必填约束、含糊确认被当成功、回查失败丢失提交确认、CLI 忽略文件声明、日期/当前学期校验缺口及丢失输入/回查信息等失败；修复后对应公开边界测试通过。
+
+合入集成分支 `6bd109c` 并解决命令、导出及 README 冲突后，完整 `npm test` 通过：174 项通过、0 失败、0 跳过。首轮合入前完整测试为 135 项通过；这些均为本地受控测试，不是 CI 或生产验收。
 
 ## 尚未验收的层次
 
