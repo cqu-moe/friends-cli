@@ -3,19 +3,25 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   createFriendsSdk,
+  courseId,
   createVolunteerCertificationReviewClient,
   type LoginContext,
   type VerifiedVolunteerSession,
 } from "./index.js";
-import { FriendsError, FriendsErrorCode } from "./errors.js";
+import { FriendsError, FriendsErrorCode, type WriteRecovery } from "./errors.js";
+import { courseRegistrationId, type CourseParticipationSession, type CourseRegistrationSummary, type CourseQuestionnaireDefinition, type PreparedCourseApply } from "./course-participation.js";
+import { loadCourseQuestionnaireFiles } from "./course-questionnaire-files.js";
+import { organizationApplicationId, organizationId } from "./organizations.js";
+import { runEgoJson } from "./certification-ego.js";
 
 export * from "./draft-store.js";
 export * from "./certification-ego.js";
 export * from "./volunteer-offering-ego.js";
 export * from "./course-offering-ego.js";
+export * from "./organization-leader-ego.js";
 
 export type SessionStorageType = "keyring" | "file";
 
@@ -107,6 +113,22 @@ async function runEgoProcess(options: {
 function singleMarker(output: string, marker: string): unknown {
   const lines = output.split("\n").filter(line => line.startsWith(marker));
   return lines.length === 1 ? JSON.parse(lines[0].slice(marker.length)) : null;
+}
+
+async function runEgoCommand(options: {
+  script: string;
+  command: string;
+  timeoutMs: number;
+  marker: string;
+}): Promise<Record<string, unknown>> {
+  const output = await runEgoProcess(options);
+  if (!output.split("\n").some(line => line.startsWith(options.marker))) return {};
+  try {
+    const parsed = singleMarker(output, options.marker) as Record<string, unknown> | null;
+    return parsed ?? {};
+  } catch {
+    throw safeError("The Ego browser bridge returned invalid output");
+  }
 }
 
 async function runEgo(options: {
@@ -293,6 +315,181 @@ console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({
     // Return the generic bridge failure below.
   }
   throw safeError("The Ego organization profile preparation did not return its route");
+}
+
+export async function prepareOrganizationApplicationDecisionInEgo(options: {
+  taskSpaceId: number;
+  page?: string;
+  route: string;
+  organizationId: string;
+  applicationId: string;
+  type: "join" | "exit";
+  decision: "approve" | "reject";
+  message: string;
+  time: string;
+  baseUrl?: string;
+  selector?: { levelNo?: string; unitNo?: string };
+  timeoutMs?: number;
+  command?: string;
+}): Promise<{
+  status: "awaiting-user";
+  submitted: false;
+  route: string;
+  navigated: boolean;
+  decisionAction: "opened-from-snapshot-ref" | "already-open";
+  messageAction: "filled" | "already-matching" | "human-value-preserved";
+  timeAction: "left-for-human-review";
+}> {
+  if (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1) {
+    throw safeError("Invalid Ego task space", FriendsErrorCode.InvalidInput);
+  }
+  const page = options.page ?? "p1";
+  if (!/^p[1-9][0-9]*$/.test(page)) throw safeError("Invalid Ego page label", FriendsErrorCode.InvalidInput);
+  const timeoutMs = options.timeoutMs ?? 300_000;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) throw safeError("Invalid Ego timeout", FriendsErrorCode.InvalidInput);
+  const organizationIdValue = organizationId(options.organizationId);
+  const applicationIdValue = organizationApplicationId(options.applicationId);
+  if ((options.type !== "join" && options.type !== "exit") ||
+      (options.decision !== "approve" && options.decision !== "reject")) {
+    throw safeError("Invalid organization application decision", FriendsErrorCode.InvalidInput);
+  }
+  const path = options.type === "join"
+    ? "/mobile/groupManage/studentApprovalJoinDetail"
+    : "/mobile/groupManage/studentApprovalExitDetail";
+  if (options.route !== `${path}?uuid=${encodeURIComponent(applicationIdValue)}`) {
+    throw safeError("Invalid organization application detail route", FriendsErrorCode.InvalidInput);
+  }
+  const session = await readVerifiedEgoSession(options);
+  const client = await createFriendsSdk({ baseUrl: options.baseUrl }).createOrganizationClient(session);
+  await client.prepareApplicationDecision({
+    organizationId: organizationIdValue,
+    applicationId: applicationIdValue,
+    type: options.type,
+    decision: options.decision,
+    message: options.message,
+    time: options.time,
+  });
+  const origin = new URL(options.baseUrl ?? "https://friends.cqu.edu.cn/gateway").origin;
+  const script = String.raw`
+const task = await taskSpace(${options.taskSpaceId});
+const page = task.page(${JSON.stringify(page)});
+const targetUrl = ${JSON.stringify(origin + options.route)};
+const expected = ${JSON.stringify({ origin, token: session.token, userLevel: session.userLevel })};
+async function inspect() {
+  return page.evaluate((expected) => {
+    const frame = document.querySelector("iframe");
+    const target = frame ? frame.contentWindow : window;
+    if (!target || location.origin !== expected.origin || target.location.origin !== expected.origin ||
+        localStorage.getItem("token_str") !== expected.token || target.localStorage.getItem("token_str") !== expected.token ||
+        localStorage.getItem("userLevel_str") !== expected.userLevel || target.localStorage.getItem("userLevel_str") !== expected.userLevel) {
+      throw new Error("The verified Ego session changed");
+    }
+    const doc = target.document;
+    const visible = (field) => {
+      const rect = field.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && !field.disabled && !field.readOnly;
+    };
+    const messages = Array.from(doc.querySelectorAll('textarea[name="msg"]')).filter(visible);
+    const docs = target === window ? [document] : [document, doc];
+    return {
+      url: target.location.href,
+      inputPresent: docs.some(d => Array.from(d.querySelectorAll('input,textarea,select,[contenteditable="true"]'))
+        .some(f => visible(f) && String(f.value ?? f.textContent).trim() !== "")),
+      messages: messages.map(f => f.value),
+      title: Array.from(doc.querySelectorAll(".title,h2")).filter(visible).map(e => e.textContent.trim()),
+    };
+  }, expected);
+}
+function snapshotRef(snapshot, label, role) {
+  const entries = snapshot.split(/\n(?=[^\n]*\[ref=\d+\])/);
+  const matches = entries.flatMap(entry => {
+    const ref = entry.match(/\[ref=(\d+)\]/);
+    if (!ref || !role.test(entry)) return [];
+    const text = entry.replace(/\[ref=\d+\]/g, "").replace(/^[\s-]*(button|generic|textbox)\b/, "").replace(/["']/g, "").trim();
+    return text === label || text === "请输入" + label ? ["@" + ref[1]] : [];
+  });
+  if (matches.length !== 1) throw new Error("Expected one snapshot target: " + label);
+  return matches[0];
+}
+try {
+  const before = await inspect();
+  const current = new URL(before.url);
+  if (!current.pathname.startsWith("/mobile/") || /login|sso|roles/i.test(current.pathname) || current.searchParams.has("ticket")) {
+    throw new Error("An existing school business page is required");
+  }
+  const navigated = before.url !== targetUrl;
+  if (navigated && (before.inputPresent || /studentApproval(?:Join|Exit)Detail/.test(current.pathname))) {
+    throw new Error("Keep the current application and human input; open the requested application in another page");
+  }
+  if (navigated) await page.goto(targetUrl);
+  await page.waitForLoadState("load");
+  await page.waitForFunction((url) => {
+    const target = document.querySelector("iframe")?.contentWindow ?? window;
+    return target.location.href === url && target.document.readyState === "complete" &&
+      target.document.body.innerText.includes("通过") && target.document.body.innerText.includes("拒绝");
+  }, targetUrl, { timeout: 15000 });
+  const ready = await inspect();
+  if (ready.url !== targetUrl) throw new Error("The visible application does not match the verified application");
+  let decisionAction = "already-open";
+  const decisionTitle = ${JSON.stringify(options.decision === "approve" ? "审批通过" : "审批拒绝")};
+  if (ready.messages.length === 0) {
+    const snapshot = await page.snapshot({ scope: "full_page" });
+    await page.click(snapshotRef(snapshot, ${JSON.stringify(options.decision === "approve" ? "通过" : "拒绝")}, /\b(button|generic)\b/));
+    await page.waitForFunction(() => {
+      const doc = (document.querySelector("iframe")?.contentWindow ?? window).document;
+      return Array.from(doc.querySelectorAll('textarea[name="msg"]')).some(f => {
+        const rect = f.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+    }, undefined, { timeout: 15000 });
+    decisionAction = "opened-from-snapshot-ref";
+  }
+  const dialog = await inspect();
+  if (dialog.url !== targetUrl || dialog.messages.length !== 1 || !dialog.title.includes(decisionTitle)) {
+    throw new Error("Expected the selected application decision dialog");
+  }
+  const requested = ${JSON.stringify(options.message.trim())};
+  let messageAction = dialog.messages[0] === requested ? "already-matching" : "human-value-preserved";
+  if (dialog.messages[0] === "") {
+    const snapshot = await page.snapshot({ scope: "full_page" });
+    await page.fill(snapshotRef(snapshot, "审批意见", /\btextbox\b/), requested);
+    const after = await inspect();
+    if (after.url !== targetUrl || after.messages.length !== 1 || after.messages[0] !== requested) throw new Error("Review opinion did not remain visible");
+    messageAction = "filled";
+  }
+  await task.handOff();
+  console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({ status: "awaiting-user", submitted: false,
+    route: ${JSON.stringify(options.route)}, navigated, decisionAction, messageAction, timeAction: "left-for-human-review" }));
+} catch (error) {
+  await task.handOff();
+  console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({ error: error.message, errorCode: "UNKNOWN_OUTCOME" }));
+}
+`;
+  type Result = {
+    status: "awaiting-user"; submitted: false; route: string; navigated: boolean;
+    decisionAction: "opened-from-snapshot-ref" | "already-open";
+    messageAction: "filled" | "already-matching" | "human-value-preserved";
+    timeAction: "left-for-human-review";
+  };
+  let result: Result;
+  try {
+    result = await runEgoJson<Result>({ script, command: options.command ?? "ego-browser", timeoutMs: timeoutMs + 30_000,
+    marker: "FRIENDS_CLI_EGO_PREPARED:", failure: "Inspect the organization application page before any further action" });
+  } catch {
+    throw new FriendsError({ code: FriendsErrorCode.UnknownOutcome,
+      message: "The organization review preparation result was lost or invalid; inspect the existing form before continuing",
+      recovery: { operation: "organizations.approvals.prepare", organizationId: organizationIdValue,
+        applicationId: applicationIdValue, completed: ["visible-preparation-started"] } });
+  }
+  if (typeof result !== "object" || result === null || result.status !== "awaiting-user" || result.submitted !== false || result.route !== options.route ||
+      typeof result.navigated !== "boolean" || !["opened-from-snapshot-ref", "already-open"].includes(result.decisionAction) ||
+      !["filled", "already-matching", "human-value-preserved"].includes(result.messageAction) || result.timeAction !== "left-for-human-review") {
+    throw new FriendsError({ code: FriendsErrorCode.UnknownOutcome,
+      message: "The Ego organization preparation result is ambiguous",
+      recovery: { operation: "organizations.approvals.prepare", organizationId: organizationIdValue,
+        applicationId: applicationIdValue, completed: ["visible-preparation-started"] } });
+  }
+  return result;
 }
 
 export async function prepareVolunteerCertificationReviewInEgo(options: {
@@ -588,6 +785,129 @@ export async function readVerifiedEgoSession(options: {
   };
 }
 
+export interface CourseRegistrationEgoPreparation {
+  operation: string;
+  execution: "ego-visible-prepare";
+  submitted: false;
+  status: "awaiting-user";
+  taskSpaceId: number;
+  page: string;
+  target:
+    | { kind: "course"; courseId: string; route: string }
+    | { kind: "registration"; registrationId: string; courseName: string; route: string };
+  userAction: string;
+  finalSubmissionBy: "human";
+  automaticSubmit: false;
+  remoteFinalWrites: 0;
+  role: { id: string; name: string; status: string } | null;
+  completedActions: string[];
+  preservedInputs: string[];
+  pendingInputs: string[];
+  pendingQuestionnaires: CourseQuestionnaireDefinition[];
+  course?: PreparedCourseApply["course"];
+  registration?: CourseRegistrationSummary["registration"];
+}
+
+export async function prepareCourseRegistrationInEgo(options: {
+  operation: "apply" | "withdraw" | "exit";
+  taskSpaceId: number;
+  session: CourseParticipationSession;
+  page?: string;
+  timeoutMs?: number;
+  command?: string;
+  baseUrl?: string;
+  courseId?: string;
+  registrationId?: string;
+  courseName: string;
+  roleId?: string;
+  questionnaire?: unknown;
+}): Promise<CourseRegistrationEgoPreparation> {
+  const invalid = (message: string): never => { throw safeError(message, FriendsErrorCode.InvalidInput); };
+  if (!["apply", "withdraw", "exit"].includes(options.operation)) invalid("Invalid course operation");
+  if (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1) invalid("Invalid Ego task space");
+  const page = options.page ?? "p1", timeoutMs = options.timeoutMs ?? 30_000;
+  if (!/^p[1-9][0-9]*$/.test(page) || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1) invalid("Invalid Ego page or timeout");
+  if (typeof options.courseName !== "string" || !options.courseName.trim()) invalid("A non-empty course name is required");
+  if (options.operation === "apply") {
+    if (options.courseId === undefined || options.registrationId !== undefined) invalid("One courseId is required for apply");
+    courseId(options.courseId!);
+  } else {
+    if (options.registrationId === undefined || options.courseId !== undefined || options.roleId !== undefined || options.questionnaire !== undefined) invalid("One registrationId is required for withdrawal or exit");
+    courseRegistrationId(options.registrationId!);
+  }
+  const session = structuredClone(options.session);
+  const client = await createFriendsSdk({ baseUrl: options.baseUrl }).createCourseParticipationClient(session);
+  let prepared: PreparedCourseApply | undefined;
+  let registration: CourseRegistrationSummary["registration"] | undefined;
+  const files = await loadCourseQuestionnaireFiles(options.questionnaire);
+  for (const answer of files.answers ?? []) if ("attachments" in answer) {
+    if (answer.attachments.some((file, index) => (file.content as File).name !== basename(files.paths[answer.questionId][index]))) {
+      invalid("Ego uploads preserve local filenames; filename overrides require the API path");
+    }
+  }
+  if (options.operation === "apply") {
+    prepared = files.answers === undefined
+      ? await client.inspectApply(options.courseId!)
+      : await client.prepareApply(options.courseId!, { roleId: options.roleId, questionnaire: files.answers });
+    if (prepared.course.name !== options.courseName) invalid("The course name differs from current school detail");
+    if (options.roleId !== undefined && !prepared.roles.some(role => role.id === options.roleId)) invalid("roleId was not returned by course detail");
+  } else {
+    const summary = await client.getMyRegistration(courseRegistrationId(options.registrationId!));
+    if (summary.courseName !== options.courseName) invalid("The course name differs from the current personal record");
+    registration = summary.registration;
+    let matches = 0;
+    for (let page = 1; ; page++) {
+      const records = await client.listMyRegistrations({ page, pageSize: 20, keyword: options.courseName });
+      matches += records.items.filter(item => item.courseName === options.courseName).length;
+      if (matches > 1 || records.hasMore === null || page > 100) invalid("The personal course name is ambiguous; select the exact school record manually");
+      if (!records.hasMore) break;
+    }
+    if (matches !== 1) invalid("The selected personal course is no longer visible");
+  }
+  const origin = new URL(options.baseUrl ?? "https://friends.cqu.edu.cn/gateway").origin;
+  const route = options.operation === "apply"
+    ? `${origin}/mobile/course/stuCourseDetail?uuid=${encodeURIComponent(options.courseId!)}&type=Apply`
+    : `${origin}/mobile/course/stuCourseQuery`;
+  const runtime = new URL("./course-participation-page.js", import.meta.url).href;
+  const input = { operation: options.operation, page, route, session, courseId: options.courseId,
+    registrationId: options.registrationId, courseName: options.courseName, prepared, roleId: options.roleId,
+    answers: files.answers?.map(answer => "attachments" in answer ? { questionId: answer.questionId, attachments: [] } : answer), paths: files.paths };
+  const script = `
+const task = await taskSpace(${options.taskSpaceId});
+const {prepareCourseParticipationPage} = await import(${JSON.stringify(runtime)});
+try {
+ const result = await prepareCourseParticipationPage(task, ${JSON.stringify(input)});
+ console.log("FRIENDS_CLI_EGO_RESULT:" + JSON.stringify({ok:true,...result}));
+} catch(error) {
+ console.log("FRIENDS_CLI_EGO_RESULT:" + JSON.stringify({error:error.message,errorCode:error.code,recovery:error.recovery}));
+}
+`;
+  let output: Record<string, unknown>;
+  try {
+    output = await runEgoCommand({ script, command: options.command ?? "ego-browser", timeoutMs: timeoutMs + 30_000, marker: "FRIENDS_CLI_EGO_RESULT:" });
+  } catch (cause) {
+    throw new FriendsError({ code: FriendsErrorCode.UnknownOutcome, message: "Course preparation response was lost; inspect the visible page before retrying", cause,
+      recovery: { operation: `courses.registrations.${options.operation}.prepare`, courseId: options.courseId, registrationId: options.registrationId } });
+  }
+  if (output.error || output.ok !== true || ![output.completedActions, output.preservedInputs, output.pendingInputs].every(value => Array.isArray(value) && value.every(item => typeof item === "string")) ||
+    !(output.role === null || typeof output.role === "object" && output.role !== null && typeof (output.role as Record<string, unknown>).id === "string" && typeof (output.role as Record<string, unknown>).status === "string")) {
+    const code = Object.values(FriendsErrorCode).find(code => code === output.errorCode) ?? FriendsErrorCode.UnknownOutcome;
+    throw new FriendsError({ code, message: typeof output.error === "string" ? output.error : "Course preparation returned no receipt",
+      recovery: output.recovery as WriteRecovery | undefined ?? { operation: `courses.registrations.${options.operation}.prepare`, courseId: options.courseId, registrationId: options.registrationId } });
+  }
+  return {
+    operation: `courses.registrations.${options.operation}.prepare`, execution: "ego-visible-prepare", submitted: false,
+    status: "awaiting-user", taskSpaceId: options.taskSpaceId, page,
+    target: options.operation === "apply" ? { kind: "course", courseId: options.courseId!, route }
+      : { kind: "registration", registrationId: options.registrationId!, courseName: options.courseName, route },
+    userAction: "Review the preserved form and pending inputs, then personally make the final decision",
+    finalSubmissionBy: "human", automaticSubmit: false, remoteFinalWrites: 0,
+    role: output.role as CourseRegistrationEgoPreparation["role"], completedActions: output.completedActions as string[],
+    preservedInputs: output.preservedInputs as string[], pendingInputs: output.pendingInputs as string[],
+    pendingQuestionnaires: prepared?.questionnaires ?? [], course: prepared?.course, registration,
+  };
+}
+
 function storageRoot(): string {
   return resolve(process.env.FRIENDS_HOME ?? join(homedir(), ".local", "state", "friends-cli"));
 }
@@ -743,6 +1063,7 @@ export async function loadSession(): Promise<StoredSession> {
 export * from "./certification-capture.js";
 export {prepareVolunteerActivityReviewInEgo} from './volunteer-activity-review-ego.js';
 
+export {prepareOrganizationParticipationInEgo} from "./organization-participation-ego.js";
 export { prepareOrganizationActivityReviewInEgo } from "./organization-activity-review-ego.js";
 
 export {prepareCourseReviewInEgo} from './course-review-ego.js';

@@ -1,5 +1,8 @@
 import { FriendsError, FriendsErrorCode } from "./errors.js";
 import {
+  createCourseParticipationClient,
+} from "./course-participation.js";
+import {
   createVerifiedOrganizationClient,
   type OrganizationSession,
 } from "./organizations.js";
@@ -12,22 +15,66 @@ export { FriendsError, FriendsErrorCode, exitCodeFor } from "./errors.js";
 export type { WriteRecovery } from "./errors.js";
 export * from "./drafts.js";
 export * from "./draft-source.js";
+export {
+  courseRegistrationId,
+  validateCourseRegistrationListInput,
+} from "./course-participation.js";
+export type {
+  CourseParticipationClient,
+  CourseParticipationDependencies,
+  CourseParticipationSession,
+  CourseRegistrationId,
+  CourseRegistrationListInput,
+  CourseRegistrationPage,
+  CourseRegistrationState,
+  CourseRegistrationSummary,
+  CourseQuestionnaireAnswerInput,
+  CourseQuestionnaireAttachmentInput,
+  CourseQuestionnaireAttachmentPlan,
+  CourseApplyAttachmentResult,
+  CourseQuestionnaireDefinition,
+  CourseQuestionnaireItemType,
+  CourseQuestionnaireResult,
+} from "./course-participation.js";
 export * from "./certification-prepare.js";
-export { organizationId, validateOrganizationMemberListInput } from "./organizations.js";
+export {
+  organizationId,
+  organizationApplicationId,
+  validateOrganizationMemberListInput,
+  validateOrganizationApplicationListInput,
+} from "./organizations.js";
 export type {
   EditableOrganizationProfileField,
+  OrganizationApplicationDetail,
+  OrganizationApplicationId,
+  OrganizationApplicationListInput,
+  OrganizationApplicationPage,
+  OrganizationApplicationRelation,
+  OrganizationApplicationSummary,
+  OrganizationApplicationType,
+  OrganizationApplicationDecision,
+  PreparedOrganizationApplicationDecision,
+  DecidedOrganizationApplication,
+  OrganizationApplicationDecisionIntent,
   OrganizationAccess,
   OrganizationClient,
   OrganizationId,
   OrganizationMember,
   OrganizationMemberListInput,
   OrganizationMemberPage,
+  OrganizationLeaderChangeCandidate,
+  OrganizationLeaderChangeApplication,
+  OrganizationLeaderChangeInput,
+  OrganizationLeaderChangeState,
+  OrganizationLeaderChangeSubmitIntent,
   OrganizationProfile,
   OrganizationProfileChanges,
   OrganizationProfileSaveIntent,
   OrganizationSession,
   OrganizationSummary,
+  PreparedOrganizationLeaderChange,
   PreparedOrganizationProfileUpdate,
+  SubmittedOrganizationLeaderChange,
   SavedOrganizationProfile,
 } from "./organizations.js";
 export * from "./certification-api.js";
@@ -598,6 +645,49 @@ export function createFriendsSdk(options: {
         },
       };
     },
+    async createCourseParticipationClient(input: VerifiedCourseSession) {
+      const session = snapshotSession(input);
+      await sdk.activateLocalContext({
+        token: session.token,
+        userLevel: session.userLevel,
+        expectedAccount: session.account.userNo,
+        selector: {
+          levelNo: session.context.levelNo,
+          unitNo: session.context.unit.unitNo,
+        },
+      });
+      const participationHeaders = headers(
+        session.token,
+        session.userLevel,
+        curriculumService,
+      );
+      return createCourseParticipationClient(session, {
+        request: (path, init) => {
+          const requestHeaders: Record<string, string> = {
+            ...participationHeaders,
+            "h-zove-appkey": path.startsWith("/ek-agg-mob/biz-common/") ? mainService : curriculumService,
+            ...(init.headers as Record<string, string> | undefined),
+          };
+          if (init.body instanceof FormData) delete requestHeaders["content-type"];
+          return callApi(
+            baseUrl,
+            path,
+            { ...init, headers: requestHeaders },
+            fetchImpl,
+            timeoutMs,
+          );
+        },
+        reverifySession: () => sdk.activateLocalContext({
+          token: session.token,
+          userLevel: session.userLevel,
+          expectedAccount: session.account.userNo,
+          selector: {
+            levelNo: session.context.levelNo,
+            unitNo: session.context.unit.unitNo,
+          },
+        }),
+      });
+    },
     async createOrganizationClient(input: OrganizationSession) {
       const session = snapshotSession(input);
       await sdk.activateLocalContext({
@@ -640,6 +730,7 @@ export function createFriendsSdk(options: {
 export {createVolunteerActivityReviewClient} from './volunteer-activity-reviews.js';
 export type {VolunteerActivityReviewType, VolunteerActivityReviewInput, PreparedVolunteerActivityReview, VolunteerActivityReviewClientOptions} from './volunteer-activity-reviews.js';
 
+export * from "./organization-participation.js";
 export { createOrganizationActivityReviewClient, validateOrganizationActivityReviewInput } from "./organization-activity-reviews.js";
 export type { OrganizationActivityReviewKind, OrganizationOfferingReviewQuery, OrganizationRegistrationReviewQuery, OrganizationOfferingReviewInput, OrganizationRegistrationReviewInput, PreparedOrganizationActivityReview, OrganizationActivityReviewClientOptions } from "./organization-activity-reviews.js";
 

@@ -33,3 +33,9 @@ _Avoid_：团员管理
 
 **团员管理（League member management）**：团员入团、注册、评议等团员身份业务，与组织及其成员关系管理分开。
 _Avoid_：组织管理
+
+**组织负责人（Organization responsible person）**：学校组织资料 `responsiblePerson` 指向的当前负责人；组织管理员不因此自动获得负责人变更申请权限。
+_Avoid_：把管理员、候选人或已提交申请的新负责人当作当前负责人
+
+**负责人变更申请（Responsible-person change application）**：通过 `responsiblePersonChangeInfo` 提交并查询的组织负责人变更流程。申请提交、学校审批结果与组织资料中的实际负责人分别读取，不能互相推定；与组织加入/退出审批分开。
+_Avoid_：个人加入组织申请、直接改负责人

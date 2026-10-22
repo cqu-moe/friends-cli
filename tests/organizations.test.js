@@ -303,3 +303,332 @@ test("organization SDK uses managed context, whitelisted profile fields, and non
       requests.filter((request) => request.method === "PUT").length === putsBeforeReadbackLoss + 1,
   );
 });
+
+test("organization SDK prepares and submits leader changes without conflating application and responsible-person state", async (t) => {
+  const requests = [];
+  let managedMode = "principal";
+  let postMode = "ok";
+  let applicationMode = "ok";
+  let candidateMode = "valid";
+  let application = null;
+  const profile = {
+    uuid: "leader-org",
+    organizationName: "负责人组织",
+    organizationType: "UNIVERSITY_STUDENT_ORGANIZATION",
+    labelCode: "LEADER-LABEL",
+    responsiblePerson: "20210001",
+    responsiblePersonName: "现任负责人",
+    responsiblePhone: "13900139000",
+    postUuid: "old-post",
+    postName: "旧职务",
+    privateField: "school-internal",
+  };
+  const candidate = {
+    uuid: "candidate-fixture",
+    studentNo: "20210002",
+    studentName: "新负责人",
+    postUuid: "new-post",
+    postName: "新职务",
+    isManager: true,
+    phone: "13800138000",
+    collegeName: "不投影",
+  };
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      requests.push({ method: req.method, url: req.url, body: body === "" ? null : JSON.parse(body) });
+      if (req.url.endsWith("/checkUserAndGetUserLevel")) return identity(res);
+      if (req.url.endsWith("/user/info")) {
+        return json(res, 200, { code: "0", data: { userNo: "20210001", userName: "示例学生" } });
+      }
+      if (req.url.endsWith("/enterHall")) {
+        return json(res, 200, {
+          code: "0",
+          data: { account: "20210001", name: "示例学生", userLoginStateLevel: "XS", departmentNo: "24080" },
+        });
+      }
+      if (req.url.endsWith("/student-organization-info/my")) {
+        return json(res, 200, {
+          code: "0",
+          data: managedMode === "principal"
+            ? [{ uuid: "leader-org", organizationName: "负责人组织", responsiblePerson: "20210001" }]
+            : [{ uuid: "leader-org", organizationName: "负责人组织", responsiblePerson: "20219999", currentUserIsManager: true }],
+        });
+      }
+      if (req.method === "GET" && req.url.endsWith("/student-organization-info/leader-org")) {
+        return json(res, 200, { code: "0", data: profile });
+      }
+      if (req.method === "GET" && req.url.includes("/responsiblePersonChangeInfo/new-response-person/leader-org")) {
+        const keyword = new URL(req.url, "https://friends.invalid").searchParams.get("key") ?? "";
+        return json(res, 200, {
+          code: "0",
+          data: (candidateMode === "valid"
+            ? [candidate, { ...candidate, uuid: "other", studentNo: "20219998" }]
+            : [{ ...candidate, uuid: "other", studentNo: "20219998" }]
+          ).filter((item) => item.studentName.includes(keyword) || item.studentNo.includes(keyword)),
+        });
+      }
+      if (req.method === "GET" && req.url.endsWith("/student-organization-info/post-list/LEADER-LABEL")) {
+        return json(res, 200, { code: "0", data: [{ uuid: "new-post", postName: "新职务" }] });
+      }
+      if (req.method === "GET" && req.url.endsWith("/labelInfo/code/LEADER-LABEL")) {
+        return json(res, 200, { code: "0", data: { isJobDivision: true, other: "ignored" } });
+      }
+      if (req.method === "GET" && req.url.endsWith("/responsiblePersonChangeInfo/organization/leader-org")) {
+        if (applicationMode === "lost") {
+          req.destroy();
+          return;
+        }
+        return json(res, 200, { code: "0", data: application });
+      }
+      if (req.method === "POST" && req.url.endsWith("/responsiblePersonChangeInfo/apply")) {
+        if (postMode === "denied") return json(res, 200, { code: "10000", message: "审批业务拒绝" });
+        if (postMode === "lost" || postMode === "timeout") {
+          application = {
+            ...JSON.parse(body),
+            uuid: JSON.parse(body).uuid || "change-fixture",
+            flowCurrMsg: "",
+            flowCurrNodeOperateRole: "XS01",
+            flowCurrNodeState: 3,
+            flowNextNodeOperateRole: "XS01",
+            flowOverallState: 3,
+            flowTemplateBranchNo: 1,
+            flowTemplateUuid: "flow-template",
+          };
+          if (postMode === "lost") req.destroy();
+          return;
+        }
+        if (postMode === "readback-lost") applicationMode = "lost";
+        if (postMode === "unchanged") {
+          return json(res, 200, { code: "0", message: "ok" });
+        }
+        application = {
+          ...JSON.parse(body),
+          uuid: JSON.parse(body).uuid || "change-fixture",
+          flowCurrMsg: "",
+          flowCurrNodeOperateRole: "XS01",
+          flowCurrNodeState: 3,
+          flowNextNodeOperateRole: "XS01",
+          flowOverallState: 3,
+          flowTemplateBranchNo: 1,
+          flowTemplateUuid: "flow-template",
+        };
+        return json(res, 200, { code: "0", message: "ok" });
+      }
+      return json(res, 404, {});
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+
+  const sdk = createFriendsSdk({
+    baseUrl: `http://127.0.0.1:${server.address().port}/gateway`,
+    timeoutMs: 250,
+  });
+  const client = await sdk.createOrganizationClient({
+    token: "leader-token",
+    userLevel: "XS",
+    account: { userNo: "20210001" },
+    context: { levelNo: "XS", unit: { unitNo: "24080" } },
+  });
+
+  assert.deepEqual(await client.listLeaderChangeCandidates(organizationId("leader-org"), "20210002"), [{
+    id: "candidate-fixture",
+    studentNo: "20210002",
+    name: "新负责人",
+    postUuid: "new-post",
+    postName: "新职务",
+    isManager: true,
+    phone: "13800138000",
+  }]);
+
+  const state = await client.getLeaderChangeState(organizationId("leader-org"));
+  assert.equal(state.currentResponsiblePerson, "20210001");
+  assert.equal(state.currentPostName, "旧职务");
+  assert.equal(state.application, null);
+  assert.equal(state.jobDivisionEnabled, true);
+  assert.deepEqual(state.posts, [{ id: "new-post", name: "新职务" }]);
+
+  const beforeDenials = requests.length;
+  await assert.rejects(
+    () => client.prepareLeaderChange({
+      organizationId: organizationId("leader-org"),
+      candidateStudentNo: "20218888",
+      newResponsiblePhone: "13800138000",
+      newResponsiblePolitical: "共青团员",
+      newPostUuid: "new-post",
+    }),
+    (error) => error.code === FriendsErrorCode.UpstreamBusiness,
+  );
+  for (const input of [
+    { newResponsiblePhone: "138001380" },
+    { newResponsiblePolitical: "" },
+    { newPostUuid: "unknown-post" },
+    { reason: "长".repeat(257) },
+  ]) {
+    await assert.rejects(
+      () => client.prepareLeaderChange({
+        organizationId: organizationId("leader-org"),
+        candidateStudentNo: "20210002",
+        newResponsiblePhone: "13800138000",
+        newResponsiblePolitical: "共青团员",
+        newPostUuid: "new-post",
+        ...input,
+      }),
+      (error) => error.code === FriendsErrorCode.InvalidInput,
+    );
+  }
+  managedMode = "manager";
+  await assert.rejects(
+    () => client.prepareLeaderChange({
+      organizationId: organizationId("leader-org"),
+      candidateStudentNo: "20210002",
+      newResponsiblePhone: "13800138000",
+      newResponsiblePolitical: "共青团员",
+      newPostUuid: "new-post",
+    }),
+    (error) => error.code === FriendsErrorCode.PermissionDenied,
+  );
+  managedMode = "principal";
+
+  application = {
+    uuid: "active-application",
+    newPostUuid: "new-post",
+    newResponsiblePerson: "20210002",
+    newResponsiblePhone: "13800138000",
+    newResponsiblePolitical: "共青团员",
+    organizationUuid: "leader-org",
+    postName: "旧职务",
+    reason: "",
+    responsiblePerson: "20210001",
+    responsiblePhone: "13900139000",
+    flowCurrMsg: "等待审核",
+    flowCurrNodeOperateRole: "FDY01",
+    flowCurrNodeState: 2,
+    flowNextNodeOperateRole: "FDY01",
+    flowOverallState: 1,
+    flowTemplateBranchNo: 1,
+    flowTemplateUuid: "flow-template",
+  };
+  const conflict = await client.getLeaderChangeState(organizationId("leader-org"));
+  assert.equal(conflict.application.id, "active-application");
+  assert.equal(conflict.application.canSubmit, false);
+  await assert.rejects(
+    () => client.prepareLeaderChange({
+      organizationId: organizationId("leader-org"),
+      candidateStudentNo: "20210002",
+      newResponsiblePhone: "13800138000",
+      newResponsiblePolitical: "共青团员",
+      newPostUuid: "new-post",
+    }),
+    (error) => error.code === FriendsErrorCode.UpstreamBusiness &&
+      error.recovery.applicationId === "active-application",
+  );
+  application = null;
+
+  const prepared = await client.prepareLeaderChange({
+    organizationId: organizationId("leader-org"),
+    candidateStudentNo: "20210002",
+    newResponsiblePhone: "13800138000",
+    newResponsiblePolitical: "共青团员",
+    newPostUuid: "new-post",
+    reason: "毕业交接",
+  });
+  assert.equal(prepared.submitted, false);
+  assert.equal(prepared.candidate.name, "新负责人");
+  assert.deepEqual(prepared.payload, {
+    newPostUuid: "new-post",
+    newResponsiblePerson: "20210002",
+    newResponsiblePhone: "13800138000",
+    newResponsiblePolitical: "共青团员",
+    organizationUuid: "leader-org",
+    postName: "旧职务",
+    reason: "毕业交接",
+    responsiblePerson: "20210001",
+    responsiblePhone: "13900139000",
+    uuid: "",
+  });
+  assert.equal(requests.some((request) => request.url.endsWith("/responsiblePersonChangeInfo/apply")), false);
+
+  await assert.rejects(() => client.prepareLeaderChange({ ...prepared.input, organizationId: organizationId("other-org") }), error => error.code === FriendsErrorCode.PermissionDenied);
+  application = { uuid: "wrong-org-application", organizationUuid: "other-org", flowCurrMsg: "" };
+  await assert.rejects(() => client.getLeaderChangeState(organizationId("leader-org")), error => error.code === FriendsErrorCode.PermissionDenied);
+  application = { uuid: "unknown-state", organizationUuid: "leader-org", flowCurrNodeState: 999 };
+  const unknownState = await client.getLeaderChangeState(organizationId("leader-org"));
+  assert.equal(unknownState.application.canSubmit, false);
+  assert.equal(unknownState.application.flow.currentNodeState, 999);
+  await assert.rejects(() => client.prepareLeaderChange({ ...prepared.input, organizationId: organizationId("leader-org") }), error => error.code === FriendsErrorCode.UpstreamBusiness);
+  application = null;
+  const intent = { via: "api", intent: "submit-organization-leader-change", confirm: true };
+  const beforeIntent = requests.length;
+  for (const invalidIntent of [undefined, { ...intent, via: "ego" }, { ...intent, confirm: false }]) {
+    await assert.rejects(
+      () => client.submitLeaderChange(prepared, invalidIntent),
+      (error) => error.code === FriendsErrorCode.InvalidInput,
+    );
+  }
+  assert.equal(requests.length, beforeIntent);
+
+  candidateMode = "stale";
+  await assert.rejects(
+    () => client.submitLeaderChange(prepared, intent),
+    (error) => error.code === FriendsErrorCode.UpstreamBusiness,
+  );
+  assert.equal(requests.some((request) => request.url.endsWith("/responsiblePersonChangeInfo/apply")), false);
+  candidateMode = "valid";
+
+  postMode = "denied";
+  await assert.rejects(() => client.submitLeaderChange(prepared, intent), error => error.code === FriendsErrorCode.UpstreamBusiness);
+  postMode = "ok";
+  const submitted = await client.submitLeaderChange(prepared, intent);
+  assert.equal(submitted.status, "submitted");
+  assert.equal(submitted.application.newResponsiblePerson, "20210002");
+  assert.equal(submitted.currentResponsiblePerson, "20210001");
+  assert.equal(submitted.responsiblePersonChanged, false);
+  const post = requests.find((request) => request.method === "POST" && request.url.endsWith("/responsiblePersonChangeInfo/apply"));
+  assert.deepEqual(post.body, prepared.payload);
+
+  for (const mode of ["lost", "timeout"]) {
+    application = null;
+    postMode = mode;
+    let postsBeforeLoss = requests.filter((request) => request.method === "POST" && request.url.endsWith("/responsiblePersonChangeInfo/apply")).length;
+    await assert.rejects(
+      () => client.submitLeaderChange(prepared, intent),
+      (error) => error.code === FriendsErrorCode.UnknownOutcome &&
+        error.retryable === false &&
+        error.recovery.serverAcknowledged === "unknown" &&
+        error.recovery.applicationReadback === "matched" &&
+        error.recovery.applicationId === "change-fixture" &&
+        requests.filter((request) => request.method === "POST" && request.url.endsWith("/responsiblePersonChangeInfo/apply")).length === postsBeforeLoss + 1,
+    );
+
+  }
+  application = null;
+  postMode = "readback-lost";
+  applicationMode = "ok";
+  let postsBeforeReadbackLoss = requests.filter((request) => request.method === "POST" && request.url.endsWith("/responsiblePersonChangeInfo/apply")).length;
+  await assert.rejects(
+    () => client.submitLeaderChange(prepared, intent),
+    (error) => error.code === FriendsErrorCode.UnknownOutcome &&
+      error.retryable === false &&
+      error.recovery.serverAcknowledged === true &&
+      error.recovery.applicationReadback === "unavailable" &&
+      requests.filter((request) => request.method === "POST" && request.url.endsWith("/responsiblePersonChangeInfo/apply")).length === postsBeforeReadbackLoss + 1,
+  );
+
+  application = null;
+  applicationMode = "ok";
+  postMode = "unchanged";
+  let postsBeforeBusinessRejection = requests.filter((request) => request.method === "POST" && request.url.endsWith("/responsiblePersonChangeInfo/apply")).length;
+  await assert.rejects(
+    () => client.submitLeaderChange(prepared, intent),
+    (error) => error.code === FriendsErrorCode.UnknownOutcome &&
+      error.recovery.serverAcknowledged === true &&
+      error.recovery.applicationReadback === "unmatched" &&
+      requests.filter((request) => request.method === "POST" && request.url.endsWith("/responsiblePersonChangeInfo/apply")).length === postsBeforeBusinessRejection + 1,
+  );
+});

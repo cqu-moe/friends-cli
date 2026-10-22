@@ -11,12 +11,14 @@ export type FriendsErrorCode = (typeof FriendsErrorCode)[keyof typeof FriendsErr
 
 export interface WriteRecovery {
   operation: string;
+  courseId?: string;
   activityId?: string;
   registrationId?: string;
   applicationId?: string;
-  courseId?: string;
   organizationId?: string;
   draftId?: string;
+  attachmentGroupUuids?: string[];
+  resourceIds?: string[];
   input?: unknown;
   completed?: string[];
   serverAcknowledged?: boolean | "unknown";
@@ -37,6 +39,8 @@ export interface WriteRecovery {
     resourceId: null;
     serverAcknowledged: "unknown";
   };
+  applicationReadback?: "matched" | "unmatched" | "unavailable";
+  submitRetries?: 0;
 }
 
 export class FriendsError extends Error {
