@@ -6,6 +6,7 @@ import {volunteerActivityReviewSchemas,registerVolunteerActivityReviewCommands} 
 import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
 import { courseOfferingSchemas, registerCourseOfferingCommands } from "./course-offering.js";
 import { Command } from "commander";
+import { registerSearchCommand, searchSchemas } from "./search.js";
 import { organizationActivityReviewSchemas, registerOrganizationActivityReviewCommands } from "./organization-activity-reviews.js";
 import {
   courseId,
@@ -44,6 +45,7 @@ import {organizationParticipationSchemas,registerOrganizationParticipationComman
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
+  ...searchSchemas,
   ...organizationActivitySchemas,
 
   ...organizationParticipationSchemas,
@@ -431,6 +433,8 @@ courses
 registerOrganizationParticipationCommands(program,{baseUrl:process.env.FRIENDS_BASE_URL??productionBaseUrl});
 registerOrganizationActivityReviewCommands(program, { baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl });
 
+
+registerSearchCommand(program, { baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl });
 
 registerCourseReviewCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 registerVolunteerActivityReviewCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});

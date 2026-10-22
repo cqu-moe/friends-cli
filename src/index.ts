@@ -784,3 +784,5 @@ export { createOrganizationActivityReviewClient, validateOrganizationActivityRev
 export type { OrganizationActivityReviewKind, OrganizationOfferingReviewQuery, OrganizationRegistrationReviewQuery, OrganizationOfferingReviewInput, OrganizationRegistrationReviewInput, PreparedOrganizationActivityReview, OrganizationActivityReviewClientOptions } from "./organization-activity-reviews.js";
 
 export {createCourseReviewClient, validateCourseReviewInput, type CourseReviewType, type CourseReviewInput, type PreparedCourseReview} from './course-reviews.js';
+
+export * from "./search.js";
