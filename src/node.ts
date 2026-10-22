@@ -59,12 +59,12 @@ function parseToken(value: unknown): string {
   return "";
 }
 
-async function runEgo(options: {
+async function runEgoCommand(options: {
   script: string;
   command: string;
   timeoutMs: number;
-  missingSessionMessage?: string;
-}): Promise<BrowserOutput> {
+  marker: string;
+}): Promise<Record<string, unknown>> {
   const child = spawn(options.command, ["nodejs"], { stdio: ["pipe", "pipe", "pipe"] });
   let stdout = "";
   let stderr = "";
@@ -93,27 +93,36 @@ async function runEgo(options: {
   if (exitCode !== 0) {
     throw safeError("The Ego friends login bridge failed");
   }
-  const marker = "FRIENDS_CLI_EGO_SESSION:";
+  const marker = options.marker;
   const lines = `${stdout}\n${stderr}`.split("\n").filter(line => line.startsWith(marker));
   const lastLine = lines.length === 1 ? lines[0].slice(marker.length) : undefined;
-  if (lastLine === undefined && options.missingSessionMessage !== undefined) {
-    throw safeError(options.missingSessionMessage);
-  }
+  if (lastLine === undefined) return {};
   try {
-    const parsed = lastLine === undefined ? null : JSON.parse(lastLine) as Record<string, unknown>;
-    if (parsed?.error === "NO_EXISTING_FRIENDS_SESSION") {
-      throw safeError(options.missingSessionMessage ?? "No existing Ego friends session is ready");
-    }
-    const token = parseToken(parsed?.token);
-    const userLevel = parsed?.userLevel;
-    if (
-      typeof parsed === "object" && parsed !== null &&
-      token !== "" && typeof userLevel === "string" && userLevel !== ""
-    ) {
-      return { token, userLevel };
-    }
+    return JSON.parse(lastLine) as Record<string, unknown>;
   } catch {
-    // Use the safe generic error below.
+    throw safeError("The Ego browser bridge returned invalid output");
+  }
+}
+
+async function runEgo(options: {
+  script: string;
+  command: string;
+  timeoutMs: number;
+  missingSessionMessage?: string;
+}): Promise<BrowserOutput> {
+  const parsed = await runEgoCommand({
+    script: options.script,
+    command: options.command,
+    timeoutMs: options.timeoutMs,
+    marker: "FRIENDS_CLI_EGO_SESSION:",
+  });
+  if (parsed.error === "NO_EXISTING_FRIENDS_SESSION") {
+    throw safeError(options.missingSessionMessage ?? "No existing Ego friends session is ready");
+  }
+  const token = parseToken(parsed.token);
+  const userLevel = parsed.userLevel;
+  if (token !== "" && typeof userLevel === "string" && userLevel !== "") {
+    return { token, userLevel };
   }
   throw safeError("The Ego friends login bridge returned an invalid session");
 }
@@ -255,6 +264,129 @@ export async function readVerifiedEgoSession(options: {
     userLevel: activated.context.levelNo,
     account: activated.account,
     context: activated.context,
+  };
+}
+
+export interface CourseRegistrationEgoPreparation {
+  operation: string;
+  execution: "ego-visible-prepare";
+  submitted: false;
+  status: "awaiting-user";
+  taskSpaceId: number;
+  page: string;
+  target:
+    | { kind: "course"; courseId: string; route: string }
+    | { kind: "registration"; registrationId: string; courseName: string; route: string };
+  userAction: string;
+  finalSubmissionBy: "human";
+  automaticSubmit: false;
+  remoteFinalWrites: 0;
+}
+
+export async function prepareCourseRegistrationInEgo(options: {
+  operation: "apply" | "withdraw" | "exit";
+  taskSpaceId: number;
+  page?: string;
+  timeoutMs?: number;
+  command?: string;
+  courseId?: string;
+  registrationId?: string;
+  courseName: string;
+}): Promise<CourseRegistrationEgoPreparation> {
+  if (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1) {
+    throw safeError("Invalid Ego task space", FriendsErrorCode.InvalidInput);
+  }
+  const page = options.page ?? "p1";
+  if (!/^p[1-9][0-9]*$/.test(page)) {
+    throw safeError("Invalid Ego page label", FriendsErrorCode.InvalidInput);
+  }
+  const userWaitMs = options.timeoutMs ?? 30_000;
+  if (!Number.isSafeInteger(userWaitMs) || userWaitMs < 1) {
+    throw safeError("Invalid Ego timeout", FriendsErrorCode.InvalidInput);
+  }
+  if (options.courseName.trim() === "") {
+    throw safeError("A non-empty course name is required", FriendsErrorCode.InvalidInput);
+  }
+  if (options.operation === "apply" && options.courseId === undefined) {
+    throw safeError("courseId is required", FriendsErrorCode.InvalidInput);
+  }
+  if (options.operation !== "apply" && options.registrationId === undefined) {
+    throw safeError("registrationId is required", FriendsErrorCode.InvalidInput);
+  }
+
+  const applyUrl = options.courseId === undefined
+    ? null
+    : `https://friends.cqu.edu.cn/mobile/course/stuCourseDetail?uuid=${encodeURIComponent(options.courseId)}&type=Apply`;
+  const listUrl = "https://friends.cqu.edu.cn/mobile/course/stuCourseQuery";
+  const route = applyUrl ?? listUrl;
+  const actionText = options.operation === "withdraw" ? "撤销" : "退出报名";
+  const script = `
+const task = await taskSpace(${options.taskSpaceId});
+const page = task.page(${JSON.stringify(page)});
+await page.goto(${JSON.stringify(route)});
+await page.waitForLoadState("load");
+await page.waitForSelector(".app-container", { state: "visible", timeout: ${userWaitMs} });
+${
+  options.operation === "apply"
+    ? `await page.waitForSelector(".form-container, .footer", { state: "visible", timeout: ${userWaitMs} });`
+    : `await page.fill(".van-search input", ${JSON.stringify(options.courseName)});
+await page.click("text=搜索");
+await page.waitForFunction((courseName) => document.body.innerText.includes(courseName), ${JSON.stringify(options.courseName)}, { timeout: ${userWaitMs} });
+const actionSelector = await page.evaluate(({ courseName, actionText }) => {
+  const card = [...document.querySelectorAll(".list-group")].find((node) => node.textContent?.includes(courseName));
+  if (!card) return null;
+  const target = [...card.querySelectorAll("button, [role=button], .list-action *")]
+    .find((node) => node.textContent?.trim() === actionText);
+  if (!target) return null;
+  target.setAttribute("data-friends-cli-action", "prepared");
+  return "[data-friends-cli-action=prepared]";
+}, { courseName: ${JSON.stringify(options.courseName)}, actionText: ${JSON.stringify(actionText)} });
+if (!actionSelector) {
+  console.log("FRIENDS_CLI_EGO_RESULT:" + JSON.stringify({ error: "COURSE_ACTION_NOT_FOUND" }));
+} else {
+  await page.click(actionSelector, { label: ${JSON.stringify(`open ${options.operation} review`)} });
+  await page.waitForSelector(".van-dialog", { state: "visible", timeout: ${userWaitMs} });
+  console.log("FRIENDS_CLI_EGO_RESULT:" + JSON.stringify({ ok: true }));
+}`
+}
+${
+  options.operation === "apply"
+    ? `console.log("FRIENDS_CLI_EGO_RESULT:" + JSON.stringify({ ok: true }));`
+    : ""
+}
+await task.handOff();
+`;
+  const output = await runEgoCommand({
+    script,
+    command: options.command ?? "ego-browser",
+    timeoutMs: userWaitMs + 30_000,
+    marker: "FRIENDS_CLI_EGO_RESULT:",
+  });
+  if (output.error === "COURSE_ACTION_NOT_FOUND") {
+    throw safeError(
+      "The course action was not visible in the Ego page; no write was attempted",
+      FriendsErrorCode.UpstreamBusiness,
+    );
+  }
+  if (output.ok !== true) {
+    throw safeError("The Ego course preparation bridge failed");
+  }
+  return {
+    operation: `courses.registrations.${options.operation}.prepare`,
+    execution: "ego-visible-prepare",
+    submitted: false,
+    status: "awaiting-user",
+    taskSpaceId: options.taskSpaceId,
+    page,
+    target: options.operation === "apply"
+      ? { kind: "course", courseId: options.courseId ?? "", route }
+      : { kind: "registration", registrationId: options.registrationId ?? "", courseName: options.courseName, route },
+    userAction: options.operation === "apply"
+      ? "Review and complete the visible course form, then personally click the final apply button"
+      : `Review the visible ${actionText} confirmation, edit or cancel if needed, and personally make the final decision`,
+    finalSubmissionBy: "human",
+    automaticSubmit: false,
+    remoteFinalWrites: 0,
   };
 }
 

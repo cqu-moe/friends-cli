@@ -27,9 +27,10 @@ friends courses list --via ego --ego-task-space 12 --ego-page p1 --json
 friends courses registrations list --page 1 --page-size 10 --keyword 周周艺 --json
 friends courses registrations show <registrationUuid> --json
 friends courses registrations apply <courseUuid> --dry-run --json
-friends courses registrations apply <courseUuid> --confirm apply --json
-friends courses registrations withdraw <registrationUuid> --confirm withdraw --json
-friends courses registrations exit <registrationUuid> --confirm exit --json
+friends courses registrations apply <courseUuid> --via api --confirm apply --json
+friends courses registrations withdraw <registrationUuid> --via api --confirm withdraw --json
+friends courses registrations exit <registrationUuid> --via api --confirm exit --json
+friends courses registrations apply <courseUuid> --via ego --ego-task-space 12 --ego-page p1 --confirm apply --json
 friends drafts activities --via ego --ego-task-space 16 --ego-page p1 --json
 friends drafts create --activity-id <activityUuid> --json
 friends drafts edit <draftId> --expected-revision 0 --input patch.json --json
@@ -67,11 +68,11 @@ await courses.list({ keyword: "周周艺" });
 
 `createCourseParticipationClient` 绑定已核验的学校账号/角色/身份单位。个人记录只通过 `apply/my-applied-page-list` 分页读取，并用课程内 `studentApplied` 投影报名记录 UUID 与学校返回的审批状态；未知审批状态保留原始标量和 `known: false`，不把课程开办状态映射成报名审批结果。
 
-报名前 `prepareApply` 只读取课程详情，生成当前前端已核实的 `student-apply/apply` payload，并返回 `submitted: false`。无问卷课程才能自动准备；非空问卷必须走人工审阅流程。课程返回角色时必须显式传入详情中的 `roleId`，CLI 不会默认选择唯一角色，也不会猜测角色名称、学时或积分。dry-run 不调用 `student-apply/can-apply/{courseId}`，因为当前生产页面把该 GET 的成功响应当作“报名成功”，副作用不明。
+报名前 `inspectApply` 只读取课程详情并返回课程状态、问卷定义和是否需要角色，不生成可提交问卷 payload。`prepareApply` 在同一详情读取上生成当前前端已核实的 `student-apply/apply` payload，并返回 `submitted: false`；CLI 可用 `--input <file|->` 提供问卷答案。已核实非附件题型为单选、多选、文本、数字和日期，选答项可省略并按前端 payload 置空；图片/附件题的上传与分组生命周期未核实，当前精确拒绝。课程返回角色时 API 必须显式传入详情中的 `roleId`，CLI 不会默认选择唯一角色，也不会猜测角色名称、学时或积分。dry-run 不调用 `student-apply/can-apply/{courseId}`，因为当前生产页面把该 GET 的成功响应当作“报名成功”，副作用不明。
 
-API 写入必须分别使用字面确认：报名 `--confirm apply`、撤销申请 `--confirm withdraw`、退出已接受报名 `--confirm exit`。当前前端把 `GET student-apply/{registrationId}` 用作确认后的撤销动作，因此 CLI schema 将它标记为业务写入，而不是只读详情。所有写入响应丢失都返回退出码 7 / `UNKNOWN_OUTCOME`，仅执行个人记录只读回查，保留课程或报名 ID，不自动重试、跨路径续交或回滚。
+API 写入必须同时提供执行方式和字面确认：`--via api` 加报名 `--confirm apply`、撤销申请 `--confirm withdraw`、退出已接受报名 `--confirm exit`。当前前端把 `GET student-apply/{registrationId}` 用作确认后的撤销动作，因此 CLI schema 将它标记为业务写入，而不是只读详情。三类敏感写入都会在最终请求前重新核对账号与身份单位；写入响应丢失返回退出码 7 / `UNKNOWN_OUTCOME`，仅执行个人记录只读回查，保留课程或报名 ID，不自动重试、跨路径续交或回滚。学校已明确返回 `code:"0"` 时，即使后续只读回查失败，也保留 `serverAck` 并标记 `readback:"unavailable"`，不把确定成功误报为可重试网络错误。
 
-`courses registrations list/show` 与 `apply --dry-run` 支持 `--via api|ego` 并复用不导航的 Ego 查询会话。三类写入只支持 `--via api`；Ego 最终提交必须由用户在真实页面亲自完成，CLI 拒绝 `--via ego` 写入、隐藏 API、`--yes` 或其他绕过确认的方式。
+`courses registrations list/show` 与 `apply --dry-run` 支持 `--via api|ego` 并复用不导航的 Ego 查询会话。三类正式写入支持显式 `--via api` 或 `--via ego`：API 路径执行一次确认写入；Ego 路径只导航到可见报名表单或撤销/退出确认层并 `handOff`，返回 `submitted:false`、`status:"awaiting-user"`、`finalSubmissionBy:"human"` 和 `remoteFinalWrites:0`。CLI 不注入或代答问卷、不选择未核实角色、不点击最终确认、不调用隐藏 API，也不提供 `--yes` 绕过；用户亲自完成或取消最终动作。
 
 ## 志愿认证草稿
 

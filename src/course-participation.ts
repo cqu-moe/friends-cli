@@ -31,6 +31,43 @@ export interface CourseRegistrationSummary {
   } | null;
 }
 
+export type CourseQuestionnaireItemType =
+  | "CHOICE"
+  | "MULTIPLE_CHOICE"
+  | "TEXT"
+  | "NUMBER"
+  | "DATE"
+  | "PICTURE"
+  | "MULTIPLE_PICTURE"
+  | "FILE"
+  | "MULTIPLE_FILE";
+
+export interface CourseQuestionnaireDefinition {
+  id: string;
+  title: string;
+  itemType: CourseQuestionnaireItemType;
+  required: boolean;
+  options: { id: string; itemId: string | null; name: string }[];
+}
+
+export type CourseQuestionnaireAnswerInput =
+  | { questionId: string; choiceOptionId: string }
+  | { questionId: string; choiceOptionIds: string[] }
+  | { questionId: string; text: string };
+
+export interface CourseQuestionnaireResult {
+  curriculumId: string;
+  attachmentGroupUuid: string | null;
+  inputContent: string;
+  itemType: CourseQuestionnaireItemType;
+  itemUuid: string;
+  optionUuid?: string;
+  uuid: string;
+  studentNo: string;
+  title: string;
+  multipartChoice: { optionUuid: string; optionName: string }[] | null;
+}
+
 export interface CourseRegistrationPage {
   items: CourseRegistrationSummary[];
   page: number;
@@ -51,13 +88,23 @@ export interface CourseParticipationTransport {
   request(path: string, init: RequestInit): Promise<unknown>;
 }
 
+export interface CourseParticipationDependencies {
+  request: CourseParticipationTransport["request"];
+  reverifySession: () => Promise<unknown>;
+}
+
 export interface CourseParticipationClient {
   listMyRegistrations(input?: CourseRegistrationListInput): Promise<CourseRegistrationPage>;
   getMyRegistration(registrationIdValue: string): Promise<CourseRegistrationSummary>;
-  prepareApply(courseIdValue: string, input?: { roleId?: string }): Promise<PreparedCourseApply>;
+  inspectApply(courseIdValue: string): Promise<PreparedCourseApply>;
+  prepareApply(courseIdValue: string, input?: {
+    roleId?: string;
+    questionnaire?: CourseQuestionnaireAnswerInput[];
+  }): Promise<PreparedCourseApply>;
   apply(input: {
     courseId: string;
     roleId?: string;
+    questionnaire?: CourseQuestionnaireAnswerInput[];
     confirm: "apply";
   }): Promise<CourseApplyResult>;
   withdraw(input: { registrationId: string; confirm: "withdraw" }): Promise<CourseRegistrationWriteResult>;
@@ -66,14 +113,18 @@ export interface CourseParticipationClient {
 
 export interface CourseApplyResult {
   submitted: true;
+  serverAck: { accepted: true; message: string | null };
   message: string | null;
+  readback: { status: "verified" } | { status: "unavailable" };
   registration: CourseRegistrationSummary["registration"];
 }
 
 export interface CourseRegistrationWriteResult {
   submitted: true;
+  serverAck: { accepted: true; message: string | null };
   message: string | null;
-  stillListed: boolean;
+  readback: { status: "verified" } | { status: "unavailable" };
+  stillListed: boolean | null;
 }
 
 export interface PreparedCourseApply {
@@ -85,9 +136,10 @@ export interface PreparedCourseApply {
     deadline: string | null;
     isEnroll: boolean | null;
   };
+  rolesRequired: boolean;
   payload: {
     curriculumId: string;
-    questionnaireResult: null;
+    questionnaireResult: CourseQuestionnaireResult[] | null;
     studentNo: string;
     uuid: null;
     roleId?: string;
@@ -95,6 +147,7 @@ export interface PreparedCourseApply {
     roleClassHour?: number;
     roleIntegral?: number;
   };
+  questionnaires: CourseQuestionnaireDefinition[];
 }
 
 type JsonObject = Record<string, unknown>;
@@ -122,6 +175,180 @@ function scalar(value: unknown): string | number | boolean | null {
     return value;
   }
   return null;
+}
+
+const questionnaireItemTypes = new Set<CourseQuestionnaireItemType>([
+  "CHOICE",
+  "MULTIPLE_CHOICE",
+  "TEXT",
+  "NUMBER",
+  "DATE",
+  "PICTURE",
+  "MULTIPLE_PICTURE",
+  "FILE",
+  "MULTIPLE_FILE",
+]);
+
+function questionnaireDefinitions(value: unknown): CourseQuestionnaireDefinition[] {
+  if (!Array.isArray(value)) {
+    throw businessError("The course questionnaire contract is unknown");
+  }
+  return value.map((rawItem) => {
+    const raw = object(rawItem);
+    const id = text(raw?.uuid);
+    const title = text(raw?.title);
+    const itemType = text(raw?.itemType);
+    if (raw === null || id === null || title === null ||
+      itemType === null || !questionnaireItemTypes.has(itemType as CourseQuestionnaireItemType) ||
+      (raw.isMandatory !== undefined && typeof raw.isMandatory !== "boolean")) {
+      throw businessError("The course questionnaire contract is unknown");
+    }
+    const required = raw.isMandatory === true;
+    if (!Array.isArray(raw.options)) {
+      if (itemType === "CHOICE" || itemType === "MULTIPLE_CHOICE") {
+        throw businessError("The course questionnaire option contract is unknown");
+      }
+      return { id, title, itemType: itemType as CourseQuestionnaireItemType, required, options: [] };
+    }
+    return {
+      id,
+      title,
+      itemType: itemType as CourseQuestionnaireItemType,
+      required,
+      options: raw.options.map((rawOption) => {
+        const option = object(rawOption);
+        const optionId = text(option?.uuid);
+        const optionName = text(option?.optionName);
+        if (option === null || optionId === null || optionName === null) {
+          throw businessError("The course questionnaire option contract is unknown");
+        }
+        return { id: optionId, itemId: text(option.itemUuid), name: optionName };
+      }),
+    };
+  });
+}
+
+function questionText(input: CourseQuestionnaireAnswerInput): string | null {
+  return "text" in input && typeof input.text === "string" ? input.text : null;
+}
+
+function validateQuestionnaireInput(input: unknown): CourseQuestionnaireAnswerInput[] {
+  if (!Array.isArray(input)) invalid("questionnaire must be an array of verified answers");
+  return input.map((raw) => {
+    const answer = object(raw);
+    if (answer === null || typeof answer.questionId !== "string" || answer.questionId === "") {
+      invalid("Each questionnaire answer requires questionId");
+    }
+    if (answer.choiceOptionId !== undefined) {
+      if (typeof answer.choiceOptionId !== "string" || answer.choiceOptionId === "") {
+        invalid("choiceOptionId must be a non-empty string");
+      }
+      return { questionId: answer.questionId, choiceOptionId: answer.choiceOptionId };
+    }
+    if (answer.choiceOptionIds !== undefined) {
+      if (!Array.isArray(answer.choiceOptionIds) ||
+        answer.choiceOptionIds.some((id) => typeof id !== "string" || id === "")) {
+        invalid("choiceOptionIds must be an array of non-empty strings");
+      }
+      return { questionId: answer.questionId, choiceOptionIds: answer.choiceOptionIds as string[] };
+    }
+    if (answer.text !== undefined) {
+      if (typeof answer.text !== "string") invalid("questionnaire text must be a string");
+      return { questionId: answer.questionId, text: answer.text };
+    }
+    invalid("Each questionnaire answer requires choiceOptionId, choiceOptionIds, or text");
+  });
+}
+
+function buildQuestionnaireResult(
+  courseId: string,
+  definitions: CourseQuestionnaireDefinition[],
+  input: unknown,
+  studentNo: string,
+): CourseQuestionnaireResult[] | null {
+  if (definitions.length === 0) {
+    if (input !== undefined) invalid("This course has no questionnaire");
+    return null;
+  }
+  const answers = validateQuestionnaireInput(input);
+  const knownQuestionIds = new Set(definitions.map((question) => question.id));
+  const unknownAnswer = answers.find((answer) => !knownQuestionIds.has(answer.questionId));
+  if (unknownAnswer !== undefined) {
+    invalid("questionnaire contains a questionId not returned by course detail");
+  }
+  const questionIds = answers.map((answer) => answer.questionId);
+  if (new Set(questionIds).size !== questionIds.length) {
+    invalid("Each course questionnaire question may be answered only once");
+  }
+  return definitions.map((question) => {
+    const answer = answers.find((candidate) => candidate.questionId === question.id);
+    const base = {
+      curriculumId: courseId,
+      attachmentGroupUuid: null,
+      inputContent: "",
+      itemType: question.itemType,
+      itemUuid: question.id,
+      uuid: question.id,
+      studentNo,
+      title: question.title,
+      multipartChoice: null,
+    };
+    if (answer === undefined) {
+      if (!question.required) {
+        if (question.itemType === "CHOICE") {
+          return { ...base, itemUuid: question.options[0]?.itemId ?? "" };
+        }
+        if (question.itemType === "MULTIPLE_CHOICE") return { ...base, multipartChoice: [] };
+        return base;
+      }
+      invalid(`A questionnaire answer is required for "${question.title}"`);
+    }
+    if (answer.questionId !== question.id) throw new Error("unreachable");
+    if (question.itemType === "CHOICE") {
+      if (!("choiceOptionId" in answer)) {
+        invalid(`Question "${question.title}" requires choiceOptionId`);
+      }
+      const option = question.options.find((candidate) => candidate.id === answer.choiceOptionId);
+      if (option === undefined || option.itemId === null) {
+        invalid(`choiceOptionId was not returned by course detail for "${question.title}"`);
+      }
+      return { ...base, itemUuid: option.itemId, optionUuid: option.id };
+    }
+    if (question.itemType === "MULTIPLE_CHOICE") {
+      if (!("choiceOptionIds" in answer)) {
+        invalid(`Question "${question.title}" requires choiceOptionIds`);
+      }
+      const options = answer.choiceOptionIds.map((id) => {
+        const option = question.options.find((candidate) => candidate.id === id);
+        if (option === undefined) invalid(`choiceOptionIds contains an option not returned for "${question.title}"`);
+        return { optionUuid: option.id, optionName: option.name };
+      });
+      if (options.length === 0) invalid(`Question "${question.title}" requires at least one option`);
+      return { ...base, multipartChoice: options };
+    }
+    if (question.itemType === "PICTURE" || question.itemType === "MULTIPLE_PICTURE" ||
+      question.itemType === "FILE" || question.itemType === "MULTIPLE_FILE") {
+      throw businessError(
+        `Questionnaire attachment type ${question.itemType} requires the reviewed school upload flow; its upload and group lifecycle are not verified`,
+      );
+    }
+    const value = questionText(answer);
+    if (value === null || value.trim() === "") invalid(`Question "${question.title}" requires text`);
+    const trimmed = value.trim();
+    if (question.itemType === "NUMBER" && (!/^[1-9][0-9]{0,3}$/.test(trimmed) || Number(trimmed) > 9999)) {
+      invalid(`Question "${question.title}" requires an integer from 1 through 9999`);
+    }
+    if (question.itemType === "TEXT" && trimmed.length > 200) {
+      invalid(`Question "${question.title}" must be at most 200 characters`);
+    }
+    if (
+      question.itemType === "DATE" &&
+      (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(trimmed) || Number.isNaN(new Date(trimmed.replace(/-/g, "/")).getTime()))
+    ) {
+      invalid(`Question "${question.title}" requires YYYY-MM-DD HH:mm`);
+    }
+    return { ...base, inputContent: trimmed };
+  });
 }
 
 export function courseRegistrationId(value: string): CourseRegistrationId {
@@ -197,12 +424,15 @@ function businessError(message: string): FriendsError {
 
 export function createCourseParticipationClient(
   session: CourseParticipationSession,
-  transport: CourseParticipationTransport,
+  dependencies: CourseParticipationDependencies,
 ): CourseParticipationClient {
   if (!object(session)) invalid("A verified course session is required");
-  if (!object(transport) || typeof transport.request !== "function") {
-    invalid("A curriculum API transport is required");
+  if (!object(dependencies) || typeof dependencies.request !== "function" ||
+    typeof dependencies.reverifySession !== "function") {
+    invalid("A curriculum API transport and write reverification are required");
   }
+  const transport = dependencies;
+  const reverifySession = dependencies.reverifySession;
 
   async function findRegistrationByCourse(courseId: string) {
     let page = 1;
@@ -245,6 +475,7 @@ export function createCourseParticipationClient(
     if (existing === null) {
       throw businessError("Course registration ID was not found in personal records");
     }
+    await reverifySession();
     const path = operation === "withdraw"
       ? `/zovecenter-saip-ek-app-curriculum/mob/student-apply/${encodeURIComponent(id)}`
       : `/zovecenter-saip-ek-app-curriculum/mob/student-apply/quit/${encodeURIComponent(id)}`;
@@ -274,8 +505,71 @@ export function createCourseParticipationClient(
         },
       });
     }
-    const stillListed = (await findRegistrationById(id)) !== null;
-    return { submitted: true, message: text(envelope?.message), stillListed };
+    let stillListed: boolean | null;
+    let readback: CourseRegistrationWriteResult["readback"] = { status: "verified" };
+    try {
+      stillListed = (await findRegistrationById(id)) !== null;
+    } catch {
+      stillListed = null;
+      readback = { status: "unavailable" };
+    }
+    const message = text(envelope?.message);
+    return {
+      submitted: true,
+      serverAck: { accepted: true, message },
+      message,
+      readback,
+      stillListed,
+    };
+  }
+
+  async function loadApply(courseIdValue: string) {
+    const id = participationCourseId(courseIdValue);
+    const envelope = object(await transport.request(
+      `/zovecenter-saip-ek-app-curriculum/mob/apply/${encodeURIComponent(id)}`,
+      { method: "GET" },
+    ));
+    const raw = object(envelope?.data);
+    if (!raw || text(raw.uuid) !== id) {
+      throw new FriendsError({
+        code: FriendsErrorCode.NetworkProtocol,
+        message: "Unexpected course detail envelope",
+      });
+    }
+    if (raw.studentApplied !== undefined && raw.studentApplied !== null) {
+      throw businessError("A course registration already exists for this course");
+    }
+    if (raw.isEnroll === false) {
+      throw businessError("The school course response says enrollment is not open");
+    }
+    const questionnaires = questionnaireDefinitions(raw.questionnaires);
+    if (!Array.isArray(raw.roles)) {
+      throw businessError("The course role contract is unknown");
+    }
+    return {
+      id,
+      raw,
+      roles: raw.roles as unknown[],
+      questionnaires,
+      preparation: {
+        submitted: false,
+        course: {
+          id,
+          name: text(raw.curriculumName),
+          openTime: text(raw.openTime),
+          deadline: text(raw.deadline),
+          isEnroll: raw.isEnroll === true || raw.isEnroll === false ? raw.isEnroll : null,
+        },
+        rolesRequired: (raw.roles as unknown[]).length > 0,
+        payload: {
+          curriculumId: id,
+          questionnaireResult: null,
+          studentNo: session.account.userNo,
+          uuid: null,
+        },
+        questionnaires,
+      } satisfies PreparedCourseApply,
+    };
   }
 
   const participationClient = {
@@ -339,52 +633,32 @@ export function createCourseParticipationClient(
       }
       return found;
     },
+    async inspectApply(courseIdValue: string): Promise<PreparedCourseApply> {
+      return loadApply(courseIdValue).then((loaded) => loaded.preparation);
+    },
     async prepareApply(
       courseIdValue: string,
-      input: { roleId?: string } = {},
+      input: { roleId?: string; questionnaire?: CourseQuestionnaireAnswerInput[] } = {},
     ): Promise<PreparedCourseApply> {
-      const id = participationCourseId(courseIdValue);
       if (!object(input)) invalid("Expected course apply preparation input");
       if (input.roleId !== undefined && typeof input.roleId !== "string") {
         invalid("roleId must be a string");
       }
-      const envelope = object(await transport.request(
-        `/zovecenter-saip-ek-app-curriculum/mob/apply/${encodeURIComponent(id)}`,
-        { method: "GET" },
-      ));
-      const raw = object(envelope?.data);
-      if (!raw || text(raw.uuid) !== id) {
-        throw new FriendsError({
-          code: FriendsErrorCode.NetworkProtocol,
-          message: "Unexpected course detail envelope",
-        });
-      }
-      if (raw.studentApplied !== undefined && raw.studentApplied !== null) {
-        throw businessError("A course registration already exists for this course");
-      }
-      if (raw.isEnroll === false) {
-        throw businessError("The school course response says enrollment is not open");
-      }
-      if (!Array.isArray(raw.questionnaires)) {
-        throw businessError("The course questionnaire contract is unknown");
-      }
-      if (raw.questionnaires.length > 0) {
-        throw businessError("This course has a questionnaire; submit it through the reviewed school flow");
-      }
-      if (!Array.isArray(raw.roles)) {
-        throw businessError("The course role contract is unknown");
-      }
+      const loaded = await loadApply(courseIdValue);
       const payload: PreparedCourseApply["payload"] = {
-        curriculumId: id,
-        questionnaireResult: null,
-        studentNo: session.account.userNo,
-        uuid: null,
+        ...loaded.preparation.payload,
+        questionnaireResult: buildQuestionnaireResult(
+          loaded.id,
+          loaded.questionnaires,
+          input.questionnaire,
+          session.account.userNo,
+        ),
       };
-      if (raw.roles.length > 0 || input.roleId !== undefined) {
+      if (loaded.roles.length > 0 || input.roleId !== undefined) {
         if (input.roleId === undefined) {
           invalid("This course requires an explicit roleId from course detail");
         }
-        const rawRole = raw.roles
+        const rawRole = loaded.roles
           .map((item) => object(item))
           .find((role) => text(role?.uuid) === input.roleId);
         if (rawRole === undefined || rawRole === null) {
@@ -401,28 +675,21 @@ export function createCourseParticipationClient(
         payload.roleClassHour = classHour;
         payload.roleIntegral = integral;
       }
-      return {
-        submitted: false,
-        course: {
-          id,
-          name: text(raw.curriculumName),
-          openTime: text(raw.openTime),
-          deadline: text(raw.deadline),
-          isEnroll: raw.isEnroll === true || raw.isEnroll === false ? raw.isEnroll : null,
-        },
-        payload,
-      };
+      return { ...loaded.preparation, payload };
     },
     async apply(input: {
       courseId: string;
       roleId?: string;
+      questionnaire?: CourseQuestionnaireAnswerInput[];
       confirm: "apply";
     }): Promise<CourseApplyResult> {
       if (!object(input)) invalid("Expected course apply input");
       if (input.confirm !== "apply") invalid("confirm must be exactly \"apply\"");
       const prepared = await participationClient.prepareApply(input.courseId, {
         roleId: input.roleId,
+        questionnaire: input.questionnaire,
       });
+      await reverifySession();
       let envelope: JsonObject | null;
       try {
         envelope = object(await transport.request(
@@ -453,10 +720,21 @@ export function createCourseParticipationClient(
           },
         });
       }
-      const registration = await findRegistrationByCourse(input.courseId);
+      let registration: CourseRegistrationSummary["registration"] = null;
+      let readback: CourseApplyResult["readback"] = { status: "verified" };
+      try {
+        registration = await findRegistrationByCourse(input.courseId);
+        if (registration === null) readback = { status: "unavailable" };
+      } catch {
+        registration = null;
+        readback = { status: "unavailable" };
+      }
+      const message = text(envelope?.message);
       return {
         submitted: true,
-        message: text(envelope?.message),
+        serverAck: { accepted: true, message },
+        message,
+        readback,
         registration,
       };
     },

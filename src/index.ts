@@ -13,12 +13,17 @@ export {
 } from "./course-participation.js";
 export type {
   CourseParticipationClient,
+  CourseParticipationDependencies,
   CourseParticipationSession,
   CourseRegistrationId,
   CourseRegistrationListInput,
   CourseRegistrationPage,
   CourseRegistrationState,
   CourseRegistrationSummary,
+  CourseQuestionnaireAnswerInput,
+  CourseQuestionnaireDefinition,
+  CourseQuestionnaireItemType,
+  CourseQuestionnaireResult,
 } from "./course-participation.js";
 
 declare const courseIdBrand: unique symbol;
@@ -606,6 +611,15 @@ export function createFriendsSdk(options: {
           fetchImpl,
           timeoutMs,
         ),
+        reverifySession: () => sdk.activateLocalContext({
+          token: session.token,
+          userLevel: session.userLevel,
+          expectedAccount: session.account.userNo,
+          selector: {
+            levelNo: session.context.levelNo,
+            unitNo: session.context.unit.unitNo,
+          },
+        }),
       });
     },
   };
