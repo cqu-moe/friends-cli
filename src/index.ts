@@ -8,9 +8,25 @@ export { FriendsError, FriendsErrorCode, exitCodeFor } from "./errors.js";
 export type { WriteRecovery } from "./errors.js";
 export * from "./drafts.js";
 export * from "./draft-source.js";
-export { organizationId, validateOrganizationMemberListInput } from "./organizations.js";
+export {
+  organizationId,
+  organizationApplicationId,
+  validateOrganizationMemberListInput,
+  validateOrganizationApplicationListInput,
+} from "./organizations.js";
 export type {
   EditableOrganizationProfileField,
+  OrganizationApplicationDetail,
+  OrganizationApplicationId,
+  OrganizationApplicationListInput,
+  OrganizationApplicationPage,
+  OrganizationApplicationRelation,
+  OrganizationApplicationSummary,
+  OrganizationApplicationType,
+  OrganizationApplicationDecision,
+  PreparedOrganizationApplicationDecision,
+  DecidedOrganizationApplication,
+  OrganizationApplicationDecisionIntent,
   OrganizationAccess,
   OrganizationClient,
   OrganizationId,

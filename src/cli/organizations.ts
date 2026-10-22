@@ -5,9 +5,13 @@ import {
   FriendsError,
   FriendsErrorCode,
   organizationId,
+  organizationApplicationId,
   type OrganizationProfileChanges,
 } from "../index.js";
-import { prepareOrganizationProfileInEgo } from "../node.js";
+import {
+  prepareOrganizationApplicationDecisionInEgo,
+  prepareOrganizationProfileInEgo,
+} from "../node.js";
 import { resolveQuerySession } from "./session.js";
 
 export const organizationSchemas = {
@@ -106,6 +110,92 @@ export const organizationSchemas = {
     submittedViaEgo: "never",
     verifiedWith: "public-source; controlled-api",
   },
+  "organizations.approvals.list": {
+    operation: "organizations.approvals.list",
+    permission: "organization principal or manager context returned by the school API",
+    phases: ["query"],
+    input: {
+      via: { type: "api or ego", default: "api" },
+      egoTaskSpace: { type: "integer", required: "with --via ego" },
+      egoPage: { type: "string", default: "p1" },
+      organizationId: { type: "organization UUID", required: true },
+      type: { type: "join or exit", required: true },
+      page: { type: "integer", minimum: 1, default: 1 },
+      pageSize: { type: "integer", minimum: 1, default: 10 },
+      keyword: { type: "string", upstreamField: "key" },
+    },
+    output: "one page of necessary join/exit application projections",
+    readonly: true,
+    supportedVia: ["api", "ego"],
+    requestMode: "direct-api",
+    verifiedWith: "public-source; controlled-api",
+  },
+  "organizations.approvals.show": {
+    operation: "organizations.approvals.show",
+    permission: "organization principal or manager context returned by the school API",
+    phases: ["query"],
+    input: {
+      via: { type: "api or ego", default: "api" },
+      egoTaskSpace: { type: "integer", required: "with --via ego" },
+      egoPage: { type: "string", default: "p1" },
+      applicationId: { type: "organization application UUID", required: true },
+      type: { type: "join or exit", required: true },
+    },
+    output: "application projection plus the first current join-exit relation",
+    readonly: true,
+    supportedVia: ["api", "ego"],
+    requestMode: "direct-api",
+    verifiedWith: "public-source; controlled-api",
+  },
+  "organizations.approvals.prepare": {
+    operation: "organizations.approvals.prepare",
+    permission: "organization principal or manager context returned by the school API",
+    phases: ["visible-prepare"],
+    input: {
+      via: { type: "ego", required: true },
+      egoTaskSpace: { type: "integer", required: true },
+      egoPage: { type: "string", default: "p1" },
+      organizationId: { type: "organization UUID", required: true },
+      applicationId: { type: "organization application UUID", required: true },
+      type: { type: "join or exit", required: true },
+      decision: { type: "approve or reject", required: true },
+      message: { type: "string, maximumLength 100, required" },
+      time: { type: "yyyy-MM-dd, required" },
+    },
+    output: "an open review dialog handed to the user; submitted is always false",
+    readonly: false,
+    remoteReadonly: true,
+    sideEffect: "opens the production review dialog and fills only an empty opinion field, then hands off",
+    supportedVia: ["ego-visible-prepare"],
+    requestMode: "visible-ego-prepare",
+    verifiedWith: "public-source; controlled-ego",
+  },
+  "organizations.approvals.decide": {
+    operation: "organizations.approvals.decide",
+    permission: "organization principal or manager context returned by the school API",
+    phases: ["validate", "api-write", "readback"],
+    input: {
+      via: { type: "api", required: true },
+      organizationId: { type: "organization UUID", required: true },
+      applicationId: { type: "organization application UUID", required: true },
+      type: { type: "join or exit", required: true },
+      decision: { type: "approve or reject", required: true },
+      message: { type: "string, maximumLength 100, required" },
+      time: { type: "yyyy-MM-dd, required" },
+      input: { type: "JSON file or stdin containing only message and time" },
+      dryRun: { type: "boolean" },
+      yes: { type: "boolean" },
+    },
+    output: "confirmed decision plus pending-state and relation readback",
+    readonly: false,
+    remoteReadonly: false,
+    confirmation: "requires independent --via api and --yes",
+    sideEffect: "one confirmed approval POST followed by read-only pending and relation checks; never retries POST",
+    supportedVia: ["api"],
+    requestMode: "api-write",
+    submittedViaEgo: "never",
+    verifiedWith: "public-source; controlled-api",
+  },
 } as const;
 
 const maximumInputBytes = 1024 * 1024;
@@ -174,6 +264,36 @@ function collectChanges(
     }
   }
   return changes;
+}
+
+function collectDecisionFields(
+  options: Record<string, string | boolean | undefined>,
+  inputValue: unknown,
+): { message?: string; time?: string } {
+  if (inputValue !== undefined) {
+    if (typeof inputValue !== "object" || inputValue === null || Array.isArray(inputValue)) {
+      invalid("Organization application decision input must be an object");
+    }
+    for (const key of Object.keys(inputValue)) {
+      if (!["message", "time"].includes(key)) {
+        invalid(`Unknown organization application decision field: ${key}`);
+      }
+    }
+  }
+  const rawInput = inputValue as Record<string, unknown> | undefined;
+  const result: { message?: string; time?: string } = {};
+  for (const key of ["message", "time"] as const) {
+    const flagValue = options[key];
+    const inputValueField = rawInput?.[key];
+    if (flagValue !== undefined) {
+      if (typeof flagValue !== "string") invalid(`--${key} must be a string`);
+      result[key] = flagValue;
+    } else if (inputValueField !== undefined) {
+      if (typeof inputValueField !== "string") invalid(`${key} must be a string`);
+      result[key] = inputValueField;
+    }
+  }
+  return result;
 }
 
 function positiveInteger(value: string, name: string): number {
@@ -322,6 +442,206 @@ export function registerOrganizationCommands(program: Command, options: { baseUr
         via: "api",
         requestMode: "api-write",
         verification: { serverReadback: true, putRetries: 0 },
+      });
+    });
+
+  const approvals = organizations.command("approvals").description("organization application reviews");
+
+  queryOptions(approvals.command("list"))
+    .description("List one page of join or exit applications")
+    .argument("<organizationId>", "organization UUID")
+    .requiredOption("--type <type>", "join or exit application")
+    .option("--page <number>", "result page", "1")
+    .option("--page-size <number>", "results per page", "10")
+    .option("--keyword <value>", "student name or number keyword")
+    .option("--json", "print stable JSON", true)
+    .action(async (organizationIdValue: string, commandOptions: Record<string, string | undefined>) => {
+      if (commandOptions.type !== "join" && commandOptions.type !== "exit") {
+        invalid("--type must be join or exit");
+      }
+      const { source, client } = await context(commandOptions);
+      const items = await client.listApplications(organizationId(organizationIdValue), commandOptions.type, {
+        page: positiveInteger(String(commandOptions.page), "page"),
+        pageSize: positiveInteger(String(commandOptions.pageSize), "page-size"),
+        keyword: commandOptions.keyword,
+      });
+      output(items, directApiMeta("organizations.approvals.list", source.entry));
+    });
+
+  queryOptions(approvals.command("show"))
+    .description("Show one application and its current relation")
+    .argument("<applicationId>", "organization application UUID")
+    .requiredOption("--type <type>", "join or exit application")
+    .option("--json", "print stable JSON", true)
+    .action(async (applicationIdValue: string, commandOptions: Record<string, string | undefined>) => {
+      if (commandOptions.type !== "join" && commandOptions.type !== "exit") {
+        invalid("--type must be join or exit");
+      }
+      const { source, client } = await context(commandOptions);
+      const detail = await client.getApplication(
+        commandOptions.type,
+        organizationApplicationId(applicationIdValue),
+      );
+      output(detail, directApiMeta("organizations.approvals.show", source.entry));
+    });
+
+  queryOptions(approvals.command("prepare"))
+    .description("Open one review decision in Ego and hand it to the user")
+    .argument("<organizationId>", "organization UUID")
+    .argument("<applicationId>", "organization application UUID")
+    .requiredOption("--type <type>", "join or exit application")
+    .requiredOption("--decision <decision>", "approve or reject")
+    .option("--message <text>", "review opinion to fill only when the field is empty")
+    .option("--time <date>", "review date recorded for API preparation; Ego date remains human-reviewable")
+    .option("--input <file|->", "JSON file or stdin containing message and time")
+    .option("--yes", "rejected because Ego preparation never submits")
+    .option("--json", "print stable JSON", true)
+    .action(async (
+      organizationIdValue: string,
+      applicationIdValue: string,
+      commandOptions: Record<string, string | boolean | undefined>,
+    ) => {
+      if (commandOptions.via !== "ego") {
+        invalid("Organization application preparation requires --via ego");
+      }
+      if (commandOptions.yes === true) {
+        invalid("Ego preparation never authorizes or performs final submission");
+      }
+      if (commandOptions.type !== "join" && commandOptions.type !== "exit") {
+        invalid("--type must be join or exit");
+      }
+      if (commandOptions.decision !== "approve" && commandOptions.decision !== "reject") {
+        invalid("--decision must be approve or reject");
+      }
+      const taskSpaceId = Number(commandOptions.egoTaskSpace);
+      if (!Number.isSafeInteger(taskSpaceId) || taskSpaceId < 1) {
+        invalid("--ego-task-space must be a positive integer");
+      }
+      const fields = collectDecisionFields(
+        commandOptions,
+        commandOptions.input === undefined ? undefined : await readInput(String(commandOptions.input)),
+      );
+      if (fields.message === undefined) invalid("--message or input.message is required");
+      if (fields.time === undefined) invalid("--time or input.time is required");
+      const applicationType = commandOptions.type as "join" | "exit";
+      const applicationDecision = commandOptions.decision as "approve" | "reject";
+      const { source, client } = await context(commandOptions as Record<string, string | undefined>);
+      const prepared = await client.prepareApplicationDecision({
+        organizationId: organizationId(organizationIdValue),
+        applicationId: organizationApplicationId(applicationIdValue),
+        type: applicationType,
+        decision: applicationDecision,
+        message: fields.message,
+        time: fields.time,
+      });
+      const path = applicationType === "join"
+        ? "/mobile/groupManage/studentApprovalJoinDetail"
+        : "/mobile/groupManage/studentApprovalExitDetail";
+      const route = `${path}?${new URLSearchParams({ uuid: prepared.applicationId }).toString()}`;
+      const ego = await prepareOrganizationApplicationDecisionInEgo({
+        taskSpaceId,
+        page: commandOptions.egoPage as string | undefined,
+        route,
+        applicationId: prepared.applicationId,
+        type: applicationType,
+        decision: applicationDecision,
+        message: fields.message,
+      });
+      output(
+        {
+          status: "awaiting-user",
+          submitted: false,
+          organizationId: prepared.organizationId,
+          applicationId: prepared.applicationId,
+          type: prepared.type,
+          decision: prepared.decision,
+          message: prepared.message,
+          time: prepared.time,
+          relation: prepared.relation,
+          ego,
+        },
+        {
+          operation: "organizations.approvals.prepare",
+          via: source.entry,
+          requestMode: "visible-ego-prepare",
+          verification: {
+            organizationContract: "public-source+controlled-api",
+            finalSubmission: "user-only",
+          },
+        },
+      );
+    });
+
+  approvals.command("decide")
+    .description("Preview or confirm one join/exit application decision")
+    .argument("<organizationId>", "organization UUID")
+    .argument("<applicationId>", "organization application UUID")
+    .requiredOption("--type <type>", "join or exit application")
+    .requiredOption("--decision <decision>", "approve or reject")
+    .requiredOption("--via <source>", "independent API write intent")
+    .option("--message <text>", "review opinion")
+    .option("--time <date>", "review date in yyyy-MM-dd format")
+    .option("--input <file|->", "JSON file or stdin containing message and time")
+    .option("--dry-run", "validate and read school state without a write")
+    .option("--yes", "confirm one organization application decision")
+    .option("--json", "print stable JSON", true)
+    .action(async (
+      organizationIdValue: string,
+      applicationIdValue: string,
+      commandOptions: Record<string, string | boolean | undefined>,
+    ) => {
+      if (commandOptions.type !== "join" && commandOptions.type !== "exit") {
+        invalid("--type must be join or exit");
+      }
+      if (commandOptions.decision !== "approve" && commandOptions.decision !== "reject") {
+        invalid("--decision must be approve or reject");
+      }
+      if (commandOptions.via !== "api") {
+        invalid("Organization application decisions require --via api");
+      }
+      if (commandOptions.dryRun === true && commandOptions.yes === true) {
+        invalid("Use either --dry-run or --yes, not both");
+      }
+      if (commandOptions.dryRun !== true && commandOptions.yes !== true) {
+        invalid("Organization application decisions require --yes unless --dry-run is used");
+      }
+      const fields = collectDecisionFields(
+        commandOptions,
+        commandOptions.input === undefined ? undefined : await readInput(String(commandOptions.input)),
+      );
+      if (fields.message === undefined) invalid("--message or input.message is required");
+      if (fields.time === undefined) invalid("--time or input.time is required");
+      const applicationType = commandOptions.type as "join" | "exit";
+      const applicationDecision = commandOptions.decision as "approve" | "reject";
+      const input = {
+        organizationId: organizationId(organizationIdValue),
+        applicationId: organizationApplicationId(applicationIdValue),
+        type: applicationType,
+        decision: applicationDecision,
+        message: fields.message,
+        time: fields.time,
+      };
+      const { client } = await context({ via: "api" });
+      const prepared = await client.prepareApplicationDecision(input);
+      if (commandOptions.dryRun === true) {
+        output(prepared, {
+          operation: "organizations.approvals.decide",
+          via: "api",
+          requestMode: "dry-run",
+          verification: { remoteWrites: 0 },
+        });
+        return;
+      }
+      const decided = await client.decideApplication(prepared, {
+        via: "api",
+        intent: "decide-organization-application",
+        confirm: true,
+      });
+      output(decided, {
+        operation: "organizations.approvals.decide",
+        via: "api",
+        requestMode: "api-write",
+        verification: { pendingReadback: true, relationReadback: true, postRetries: 0 },
       });
     });
 

@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createFriendsSdk, type LoginContext } from "./index.js";
 import { FriendsError, FriendsErrorCode } from "./errors.js";
+import { organizationApplicationId } from "./organizations.js";
 
 export * from "./draft-store.js";
 
@@ -284,6 +285,188 @@ console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({
     // Return the generic bridge failure below.
   }
   throw safeError("The Ego organization profile preparation did not return its route");
+}
+
+export async function prepareOrganizationApplicationDecisionInEgo(options: {
+  taskSpaceId: number;
+  page?: string;
+  route: string;
+  applicationId: string;
+  type: "join" | "exit";
+  decision: "approve" | "reject";
+  message: string;
+  timeoutMs?: number;
+  command?: string;
+}): Promise<{
+  route: string;
+  navigated: boolean;
+  decisionAction: "opened-from-snapshot-ref" | "already-open";
+  messageAction: "filled" | "already-matching" | "human-value-preserved";
+  timeAction: "left-for-human-review";
+  externalWriteActions: 0;
+  finalSubmitActions: 0;
+}> {
+  if (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1) {
+    throw safeError("Invalid Ego task space", FriendsErrorCode.InvalidInput);
+  }
+  const page = options.page ?? "p1";
+  if (!/^p[1-9][0-9]*$/.test(page)) {
+    throw safeError("Invalid Ego page label", FriendsErrorCode.InvalidInput);
+  }
+  const userWaitMs = options.timeoutMs ?? 300_000;
+  if (!Number.isSafeInteger(userWaitMs) || userWaitMs < 1) {
+    throw safeError("Invalid Ego timeout", FriendsErrorCode.InvalidInput);
+  }
+  if ((options.type !== "join" && options.type !== "exit") ||
+      (options.decision !== "approve" && options.decision !== "reject") ||
+      typeof options.message !== "string" || options.message.trim() === "" || options.message.length > 100) {
+    throw safeError("Invalid organization application decision preparation", FriendsErrorCode.InvalidInput);
+  }
+  const expectedPath = options.type === "join"
+    ? "/mobile/groupManage/studentApprovalJoinDetail"
+    : "/mobile/groupManage/studentApprovalExitDetail";
+  const applicationIdValue = organizationApplicationId(options.applicationId);
+  const expectedRoute = `${expectedPath}?uuid=${encodeURIComponent(applicationIdValue)}`;
+  if (options.route !== expectedRoute) {
+    throw safeError("Invalid organization application detail route", FriendsErrorCode.InvalidInput);
+  }
+  const targetUrl = `https://friends.cqu.edu.cn${options.route}`;
+  const decisionLabel = options.decision === "approve" ? "通过" : "拒绝";
+  const decisionTitle = options.decision === "approve" ? "审批通过" : "审批拒绝";
+  const script = `
+const task = await taskSpace(${options.taskSpaceId});
+const page = task.page(${JSON.stringify(page)});
+const targetUrl = ${JSON.stringify(targetUrl)};
+const currentUrl = await page.url();
+function sameDetailRoute(value) {
+  try {
+    const current = new URL(value);
+    const target = new URL(targetUrl);
+    return current.pathname === target.pathname &&
+      current.searchParams.get("uuid") === target.searchParams.get("uuid");
+  } catch {
+    return false;
+  }
+}
+const humanInput = await page.evaluate(() => ({
+  nonempty: Array.from(document.querySelectorAll("input,textarea")).filter((field) => {
+    const rect = field.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && !field.disabled && !field.readOnly && field.value.trim() !== "";
+  }).length
+}));
+const navigated = !sameDetailRoute(currentUrl);
+if (navigated && humanInput.nonempty > 0) {
+  throw new Error("The current Ego page has unsaved human input; open the application detail in another page");
+}
+if (navigated) await page.goto(targetUrl);
+await page.waitForLoadState("load");
+await page.waitForFunction(() => document.body.innerText.includes("通过") && document.body.innerText.includes("拒绝"), undefined, { timeout: 15000 });
+const snapshot = await page.snapshot({ scope: "full_page" });
+async function visibleMessageState() {
+  return page.evaluate(() => ({
+    count: Array.from(document.querySelectorAll("textarea")).filter((field) => {
+      const rect = field.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && !field.disabled && !field.readOnly;
+    }).length,
+    values: Array.from(document.querySelectorAll("textarea")).filter((field) => {
+      const rect = field.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && !field.disabled && !field.readOnly;
+    }).map((field) => field.value)
+  }));
+}
+const beforeDialog = await visibleMessageState();
+let decisionAction;
+if (beforeDialog.count === 0) {
+  const actionLine = snapshot.split("\\n").find((line) =>
+    line.includes(${JSON.stringify(decisionLabel)}) && /@\\d+/.test(line)
+  );
+  if (!actionLine) throw new Error("Organization approval action was not found in the page snapshot");
+  await page.click(actionLine.match(/@\\d+/)[0], { label: "open review dialog" });
+  await page.waitForFunction((title) => document.body.innerText.includes(title), ${JSON.stringify(decisionTitle)}, { timeout: 15000 });
+  decisionAction = "opened-from-snapshot-ref";
+} else if (beforeDialog.count === 1) {
+  decisionAction = "already-open";
+} else {
+  throw new Error("Multiple organization approval textareas are visible");
+}
+const titleMatches = await page.evaluate((title) => document.body.innerText.includes(title), ${JSON.stringify(decisionTitle)});
+if (!titleMatches) throw new Error("The open review dialog does not match the requested decision");
+const visible = await visibleMessageState();
+if (visible.count !== 1) throw new Error("Exactly one organization approval textarea must be visible");
+await page.evaluate(() => {
+  const fields = Array.from(document.querySelectorAll("textarea")).filter((field) => {
+    const rect = field.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && !field.disabled && !field.readOnly;
+  });
+  if (fields.length !== 1) throw new Error("Expected one visible organization approval textarea");
+  fields[0].setAttribute("data-friends-cli-approval-message", "");
+  return null;
+});
+const currentValue = visible.values[0];
+const requestedMessage = ${JSON.stringify(options.message.trim())};
+let messageAction;
+if (currentValue !== "" && currentValue === requestedMessage) {
+  messageAction = "already-matching";
+} else if (currentValue !== "") {
+  messageAction = "human-value-preserved";
+} else {
+  await page.fill("textarea[data-friends-cli-approval-message]", requestedMessage);
+  await page.waitForFunction((expected) => {
+    const fields = Array.from(document.querySelectorAll("textarea"));
+    return fields.length === 1 && fields[0].value === expected;
+  }, requestedMessage, { timeout: 15000 });
+  messageAction = "filled";
+}
+await task.handOff();
+console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({
+  route: ${JSON.stringify(options.route)},
+  navigated,
+  decisionAction,
+  messageAction,
+  timeAction: "left-for-human-review",
+  externalWriteActions: 0,
+  finalSubmitActions: 0
+}));
+`;
+  const output = await runEgoProcess({
+    script,
+    command: options.command ?? "ego-browser",
+    timeoutMs: userWaitMs + 30_000,
+  });
+  try {
+    const parsed = singleMarker(output, "FRIENDS_CLI_EGO_PREPARED:") as {
+      route?: unknown;
+      navigated?: unknown;
+      decisionAction?: unknown;
+      messageAction?: unknown;
+      timeAction?: unknown;
+      externalWriteActions?: unknown;
+      finalSubmitActions?: unknown;
+    } | null;
+    if (
+      parsed?.route === options.route &&
+      typeof parsed.navigated === "boolean" &&
+      (parsed.decisionAction === "opened-from-snapshot-ref" || parsed.decisionAction === "already-open") &&
+      (parsed.messageAction === "filled" || parsed.messageAction === "already-matching" ||
+        parsed.messageAction === "human-value-preserved") &&
+      parsed.timeAction === "left-for-human-review" &&
+      parsed.externalWriteActions === 0 &&
+      parsed.finalSubmitActions === 0
+    ) {
+      return {
+        route: parsed.route,
+        navigated: parsed.navigated,
+        decisionAction: parsed.decisionAction,
+        messageAction: parsed.messageAction,
+        timeAction: "left-for-human-review",
+        externalWriteActions: 0,
+        finalSubmitActions: 0,
+      };
+    }
+  } catch {
+    // Use the generic bridge failure below.
+  }
+  throw safeError("The Ego organization application preparation did not return its route");
 }
 
 export async function readEgoSession(options: {
