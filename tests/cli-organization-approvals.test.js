@@ -343,6 +343,15 @@ test("real CLI queries, previews, and confirms organization application decision
     await assert.rejects(() => prepareOrganizationApplicationDecisionInEgo(directOptions),
       error => error.code === FriendsErrorCode.UpstreamBusiness);
     readbackPhase = false;
+    const outerEgo = await egoFixture("outer-conflict");
+    await assert.rejects(() => prepareOrganizationApplicationDecisionInEgo({ ...directOptions, command: join(outerEgo.root, "ego-browser") }),
+      error => error.code === FriendsErrorCode.UnknownOutcome);
+    const outer = JSON.parse(await readFile(outerEgo.evidencePath, "utf8"));
+    assert.equal(outer.outerMessage, "外层人工意见");
+    assert.deepEqual(outer.clickSelectors, []);
+    assert.deepEqual(outer.fillSelectors, []);
+    assert.equal(outer.externalWrites, 0);
+    await rm(outerEgo.root, { recursive: true, force: true });
     const lostEgo = await egoFixture("lost-result");
     await assert.rejects(() => prepareOrganizationApplicationDecisionInEgo({ ...directOptions, command: join(lostEgo.root, "ego-browser") }),
       error => error.code === FriendsErrorCode.UnknownOutcome && !error.retryable &&
@@ -364,15 +373,15 @@ test("real CLI queries, previews, and confirms organization application decision
   ], { env: cleanEgo.env })).stdout);
   assert.equal(preparedInEgo.data.status, "awaiting-user");
   assert.equal(preparedInEgo.data.submitted, false);
-  assert.equal(preparedInEgo.data.ego.decisionAction, "opened-from-snapshot-ref");
+  assert.equal(preparedInEgo.data.ego.decisionAction, "opened-visible-control");
   assert.equal(preparedInEgo.data.ego.messageAction, "filled");
   assert.equal(preparedInEgo.data.ego.submitted, false);
   const cleanEvidence = JSON.parse(await readFile(cleanEgo.evidencePath, "utf8"));
   assert.equal(cleanEvidence.gotoCount, 1);
   assert.equal(cleanEvidence.snapshotCount >= 1, true);
   assert.equal(cleanEvidence.clickSelectors.length, 1);
-  assert.notEqual(cleanEvidence.clickSelectors[0], "@7");
-  assert.equal(cleanEvidence.fillSelectors.length, 1);
+  assert.deepEqual(cleanEvidence.clickSelectors, ["loc=css:.action-bar .action-bar-item.c-success"]);
+  assert.deepEqual(cleanEvidence.fillSelectors, ['loc=css:.van-popup .dialog-box textarea[name="msg"]']);
   assert.equal(cleanEvidence.attributeMutations, 0);
   assert.equal(cleanEvidence.specialSkill, "保留人的特长");
   assert.equal(cleanEvidence.phone, "13900000001");
@@ -402,6 +411,21 @@ test("real CLI queries, previews, and confirms organization application decision
   assert.equal(dirtyEvidence.finalMessage, "用户正在审核的意见");
   assert.equal(dirtyEvidence.externalWrites, 0);
   assert.equal(dirtyEvidence.finalSubmitActions, 0);
+  const exitEgo = await egoFixture("exit-reject");
+  const exitPrepared = JSON.parse((await run([
+    "organizations", "approvals", "prepare", "org-cli", "exit-cli", "--type", "exit",
+    "--decision", "reject", "--via", "ego", "--ego-task-space", "16",
+    "--message", "Ego拒绝退出", "--time", "2026-10-22", "--json",
+  ], { env: exitEgo.env })).stdout);
+  assert.equal(exitPrepared.data.submitted, false);
+  assert.equal(exitPrepared.data.applicationId, "exit-cli");
+  const exitEvidence = JSON.parse(await readFile(exitEgo.evidencePath, "utf8"));
+  assert.equal(exitEvidence.dialogTitle, "审批拒绝");
+  assert.equal(exitEvidence.finalMessage, "Ego拒绝退出");
+  assert.deepEqual(exitEvidence.clickSelectors, ["loc=css:.action-bar .action-bar-item.c-jujue"]);
+  assert.equal(exitEvidence.externalWrites, 0);
+  assert.equal(exitEvidence.finalSubmitActions, 0);
+  await rm(exitEgo.root, { recursive: true, force: true });
   const otherEgo = await egoFixture("other");
   await assert.rejects(() => run([
     "organizations", "approvals", "prepare", "org-cli", "join-cli", "--type", "join",

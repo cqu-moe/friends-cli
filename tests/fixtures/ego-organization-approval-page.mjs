@@ -6,7 +6,7 @@ const mode = process.env.EGO_ORGANIZATION_APPROVAL_FIXTURE_MODE ?? "clean";
 const scriptPath = process.env.EGO_ORGANIZATION_APPROVAL_SCRIPT_PATH;
 const evidencePath = process.env.EGO_ORGANIZATION_APPROVAL_EVIDENCE_PATH;
 const origin = new URL(process.env.FRIENDS_BASE_URL).origin;
-const route = "/mobile/groupManage/studentApprovalJoinDetail?uuid=join-cli";
+const route = mode === "exit-reject" ? "/mobile/groupManage/studentApprovalExitDetail?uuid=exit-cli" : "/mobile/groupManage/studentApprovalJoinDetail?uuid=join-cli";
 const evidence = { mode, gotoCount: 0, snapshotCount: 0, clickSelectors: [], fillSelectors: [],
   inputEvents: 0, changeEvents: 0, externalWrites: 0, finalSubmitActions: 0, attributeMutations: 0, handedOff: false };
 const initialRoute = mode === "clean" ? "/mobile/groupManage/studentApprovalJoinList" : mode === "other" ? route.replace("join-cli", "other-cli") : route;
@@ -23,10 +23,10 @@ function render(path) {
   document.open();
   document.write(`<!doctype html><style>.dialog { display:none } .dialog.open { display:block }</style>
     <h1>申请详情</h1><textarea name="specialSkill">保留人的特长</textarea><input name="phone" value="13900000001">
-    <button class="approve">通过</button><button class="reject">拒绝</button>
-    <section class="dialog${mode === "dirty" ? " open" : ""}"><h2>审批通过</h2>
-      <input name="time" value="2026-10-22"><textarea name="msg">${mode === "dirty" ? "用户正在审核的意见" : ""}</textarea>
-      <button class="final">确认</button></section>`);
+    <div class="action-bar"><div class="approve action-bar-item b-r c-success"><i></i><span>&nbsp;通过</span></div><div class="reject action-bar-item c-jujue"><i></i><span>&nbsp;拒绝</span></div></div>
+    <section class="van-popup dialog${mode === "dirty" ? " open" : ""}"><div class="dialog-box"><div class="title">审批通过</div>
+      <input name="time" value="2026-10-22"><textarea name="msg" placeholder="请输入审批意见">${mode === "dirty" ? "用户正在审核的意见" : ""}</textarea>
+      <div class="option-btns"><div class="btn b-r"><span>取消</span></div><div class="btn final"><span>确认</span></div></div></div></section>`);
   if (mode === "clean" && path !== route) document.body.innerHTML = "<h1>申请列表</h1>";
   document.close();
   Object.defineProperty(frame.HTMLElement.prototype, "innerText", { get() { return this.textContent; } });
@@ -42,7 +42,7 @@ function render(path) {
   for (const button of document.querySelectorAll(".approve,.reject")) {
     button.addEventListener("click", () => {
       document.querySelector(".dialog").classList.add("open");
-      document.querySelector("h2").textContent = button.textContent === "通过" ? "审批通过" : "审批拒绝";
+      document.querySelector(".title").textContent = button.textContent.trim() === "通过" ? "审批通过" : "审批拒绝";
     });
   }
   for (const field of document.querySelectorAll("input,textarea")) {
@@ -57,6 +57,14 @@ function visible(element) {
   return true;
 }
 render(initialRoute);
+window.Element.prototype.getBoundingClientRect = function() { return { width: 320, height: 48 }; };
+if (mode === "outer-conflict") {
+  const outer = window.document.createElement("div");
+  outer.innerHTML = '<div class="action-bar"><div class="action-bar-item c-success">通过</div></div><div class="van-popup"><div class="dialog-box"><textarea name="msg">外层人工意见</textarea></div></div>';
+  outer.querySelector(".c-success").addEventListener("click", () => evidence.externalWrites++);
+  outer.querySelector("textarea").addEventListener("input", () => evidence.externalWrites++);
+  window.document.body.append(outer);
+}
 let references = new Map();
 let nextRef = 31;
 function active() { if (evidence.handedOff) throw new Error("Browser operation after handoff"); }
@@ -84,26 +92,37 @@ const page = {
     evidence.snapshotCount++;
     references = new Map();
     const lines = ['iframe [ref=' + nextRef++ + ']'];
-    for (const element of iframe.contentDocument.querySelectorAll("button,input,textarea")) {
+    for (const element of iframe.contentDocument.querySelectorAll(".action-bar-item,.option-btns .btn,input,textarea")) {
       if (!visible(element)) continue;
+      if (element.matches(".action-bar-item,.option-btns .btn")) {
+        lines.push('  container', '    text "' + element.textContent.trim() + '"');
+        continue;
+      }
       const ref = nextRef++;
       references.set("@" + ref, element);
-      const role = element.tagName === "BUTTON" ? "button" : "textbox";
-      const name = element.tagName === "BUTTON" ? element.textContent : element.name === "msg" ? "审批意见" : element.name;
-      lines.push('  ' + role + ' [ref=' + ref + ']', '    ' + name);
+      const name = element.name === "msg" ? "审批意见" : element.name;
+      lines.push('  textbox "' + name + '" [ref=' + ref + ' loc=css:' + element.tagName.toLowerCase() + '[name=' + element.name + ']]', '    text "请输入审批意见"');
     }
     return lines.join("\n");
   },
   async click(selector) {
     active();
-    const element = references.get(selector);
+    const outer = selector.startsWith("@") ? [] : [...window.document.querySelectorAll(selector.replace(/^loc=css:/, ""))].filter(visible);
+    const elements = selector.startsWith("@") ? [references.get(selector)].filter(Boolean) :
+      outer.length > 0 ? outer : [...iframe.contentDocument.querySelectorAll(selector.replace(/^loc=css:/, ""))].filter(visible);
+    if (elements.length !== 1) throw new Error("Expected one visible control: " + selector);
+    const element = elements[0];
     if (!element || !visible(element)) throw new Error("Unknown/stale snapshot ref " + selector);
     evidence.clickSelectors.push(selector);
     element.click();
   },
   async fill(selector, value) {
     active();
-    const element = references.get(selector);
+    const outer = selector.startsWith("@") ? [] : [...window.document.querySelectorAll(selector.replace(/^loc=css:/, ""))].filter(visible);
+    const elements = selector.startsWith("@") ? [references.get(selector)].filter(Boolean) :
+      outer.length > 0 ? outer : [...iframe.contentDocument.querySelectorAll(selector.replace(/^loc=css:/, ""))].filter(visible);
+    if (elements.length !== 1) throw new Error("Expected one visible control: " + selector);
+    const element = elements[0];
     if (!element || !visible(element) || element.disabled || element.readOnly) throw new Error("Unknown/stale field ref " + selector);
     evidence.fillSelectors.push(selector);
     element.value = value;
@@ -125,11 +144,12 @@ try {
   console.log = originalLog;
   const document = iframe.contentDocument;
   await writeFile(evidencePath, JSON.stringify({ ...evidence,
+    outerMessage: window.document.querySelector('textarea[name="msg"]')?.value,
     finalMessage: document.querySelector('[name="msg"]')?.value,
     specialSkill: document.querySelector('[name="specialSkill"]')?.value,
     phone: document.querySelector('[name="phone"]')?.value,
     dialogOpen: document.querySelector(".dialog")?.classList.contains("open"),
-    dialogTitle: document.querySelector("h2")?.textContent,
+    dialogTitle: document.querySelector(".title")?.textContent,
   }) + "\n");
   window.close();
 }
