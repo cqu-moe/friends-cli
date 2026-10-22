@@ -1,0 +1,39 @@
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {mkdir,writeFile,readFile} from 'node:fs/promises';
+import {join,resolve} from 'node:path';
+import {setupCertification} from './fixtures/certification-setup.mjs';
+const exec=promisify(execFile),cli=resolve('dist/cli/main.js');
+const run=(args,env)=>exec(process.execPath,[cli,...args],{env,timeout:20000});
+test('real CLI executes SDK Ego preparation and rejects every final-submit bypass',async t=>{
+ const f=await setupCertification(t);await mkdir(f.env.FRIENDS_DRAFT_HOME,{mode:0o700});
+ const draftPath=join(f.env.FRIENDS_DRAFT_HOME,'draft-1.json');await writeFile(draftPath,JSON.stringify(f.options.draft),{mode:0o600});
+ const before=await readFile(draftPath,'utf8');
+ const help=await run(['drafts','prepare','--help'],f.env);assert.match(help.stdout,/dry-run/);
+ const schema=JSON.parse((await run(['schema','drafts.prepare'],f.env)).stdout);assert.equal(schema.data.operation,'drafts.prepare');
+ const preview=JSON.parse((await run(['drafts','prepare','draft-1','--via','ego','--ego-task-space','7','--ego-page','p2','--dry-run'],f.env)).stdout);
+ assert.equal(preview.data.submitted,false);assert.equal((await f.observed()).clicks.length,0);
+ const prepared=await run(['drafts','prepare','draft-1','--via','ego','--ego-task-space','7','--ego-page','p2'],f.env);
+ const result=JSON.parse(prepared.stdout);assert.equal(prepared.stderr,'');assert.equal(result.schemaVersion,1);assert.equal(result.ok,true);assert.equal(result.data.status,'awaiting-user');assert.equal(result.data.submitted,false);assert.equal(result.data.handoff,'completed');assert.deepEqual(result.data.page.selectedStudentNos,['20210001','20210002']);assert.equal(prepared.stdout.includes('ego-fixture-token'),false);
+ const observed=await f.observed();assert.equal(observed.submits,0);assert.equal(observed.navigations,0);assert.equal(observed.handoffs,1);
+ const requestCount=f.requests.length;
+ for(const suffix of [[],['--yes'],['--retry','--api-fallback']])await assert.rejects(()=>run(['drafts','submit','draft-1','--via','ego','--ego-task-space','7',...suffix],f.env),e=>{assert.equal(e.code,2);assert.equal(JSON.parse(e.stdout).error.code,'INVALID_INPUT');return true;});
+ assert.equal(f.requests.length,requestCount);assert.equal(await readFile(draftPath,'utf8'),before);
+ assert.equal(f.requests.some(req=>req.url.endsWith('/school-activity-attestation-apply/apply')),false);
+});
+
+test('CLI preserves partial preparation evidence and exits 7 without a final submit',async t=>{
+ const f=await setupCertification(t,{readonlyHours:true});
+ await mkdir(f.env.FRIENDS_DRAFT_HOME,{mode:0o700});
+ await writeFile(join(f.env.FRIENDS_DRAFT_HOME,'draft-1.json'),JSON.stringify(f.options.draft),{mode:0o600});
+ await assert.rejects(()=>run(['drafts','prepare','draft-1','--via','ego','--ego-task-space','7','--ego-page','p2'],f.env),e=>{
+  assert.equal(e.code,7);const result=JSON.parse(e.stdout);
+  assert.equal(result.schemaVersion,1);assert.equal(result.error.code,'UNKNOWN_OUTCOME');
+  assert.equal(result.error.retryable,false);assert.equal(result.error.recovery.draftId,'draft-1');
+  assert.equal(result.error.recovery.pageLabel,'p2');assert.equal(result.error.recovery.inProgress,'set-person:20210001');
+  assert.equal(e.stdout.includes('ego-fixture-token'),false);return true;
+ });
+ const observed=await f.observed();assert.equal(observed.submits,0);assert.equal(observed.handoffs,1);assert.equal(observed.fills.length,0);
+});

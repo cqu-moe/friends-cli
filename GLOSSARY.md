@@ -1,0 +1,41 @@
+# 第二课堂
+
+本项目涉及课程、志愿服务、组织活动和组织管理。相同中文词在不同流程中可能指不同对象，以下术语用于区分。
+
+## Language
+
+**课程（Course）**：二课平台中按课程流程开办、报名和认证的学习或实践项目。
+_Avoid_：将所有二课活动统称为课程
+
+**志愿服务活动（Volunteer activity）**：按志愿服务流程管理参与人员与服务时长的活动；其校内活动属于志愿服务业务。
+_Avoid_：组织活动
+
+**组织活动（Organization activity）**：平台“组织活动管理”模块中的活动，与志愿服务活动和课程分别管理。
+_Avoid_：用校内活动泛指所有组织活动
+
+**开办申请（Offering application）**：发起人提出举办课程或活动的申请。
+_Avoid_：报名
+
+**报名（Registration）**：参与者申请参加一项课程或活动所形成的记录。
+_Avoid_：开办申请、认证
+
+**报名审批（Registration review）**：管理者对参与者的报名申请作出决定。
+_Avoid_：活动开办审批、认证审批
+
+**认证申请（Certification application）**：申请认定活动或课程的完成结果、参与记录或志愿服务时长的材料与记录。
+_Avoid_：报名、开办申请
+
+**认证草稿（Certification draft）**：尚未正式提交的认证人员、结果和材料整理记录；草稿保存不表示学校已接收或批准认证。
+_Avoid_：已提交认证、已认定时长
+
+**组织管理（Organization management）**：平台“团组织管理”入口下的组织资料、成员关系、加入/退出审批及负责人变更申请等业务。
+_Avoid_：团员管理
+
+**团员管理（League member management）**：团员入团、注册、评议等团员身份业务，与组织及其成员关系管理分开。
+_Avoid_：组织管理
+
+**组织负责人（Organization responsible person）**：学校组织资料 `responsiblePerson` 指向的当前负责人；组织管理员不因此自动获得负责人变更申请权限。
+_Avoid_：把管理员、候选人或已提交申请的新负责人当作当前负责人
+
+**负责人变更申请（Responsible-person change application）**：通过 `responsiblePersonChangeInfo` 提交并查询的组织负责人变更流程。申请提交、学校审批结果与组织资料中的实际负责人分别读取，不能互相推定；与组织加入/退出审批分开。
+_Avoid_：个人加入组织申请、直接改负责人

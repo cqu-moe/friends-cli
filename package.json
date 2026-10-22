@@ -1,0 +1,53 @@
+{
+  "name": "@cqu-moe/friends-cli",
+  "version": "0.1.0",
+  "description": "Local CLI and SDK for the CQU Second Classroom platform",
+  "type": "module",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "friends": "dist/cli/main.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    },
+    "./auth": {
+      "types": "./dist/auth.d.ts",
+      "default": "./dist/auth.js"
+    },
+    "./auth-node": {
+      "types": "./dist/auth-node.d.ts",
+      "default": "./dist/auth-node.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test 'tests/*.test.js'",
+    "verify:volunteer-ego": "node scripts/verify-volunteer-ego.mjs",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@napi-rs/keyring": "^2.1.2",
+    "commander": "^14.0.2",
+    "fs-native-extensions": "1.5.2",
+    "oauth4webapi": "3.8.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "jsdom": "29.0.1",
+    "typescript": "^5.9.3"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
+}
