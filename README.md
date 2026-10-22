@@ -35,6 +35,15 @@ friends courses registrations apply <courseUuid> --via api --confirm apply --jso
 friends courses registrations withdraw <registrationUuid> --via api --confirm withdraw --json
 friends courses registrations exit <registrationUuid> --via api --confirm exit --json
 friends courses registrations apply <courseUuid> --via ego --ego-task-space 12 --ego-page p1 --confirm apply --json
+
+friends course-offering prepare --input course-application.json --json
+friends course-offering materials --input course-materials.json --via api --dry-run
+friends course-offering materials --input course-materials.json --via api --confirm
+friends course-offering next-step --input course-application.json --via api --confirm
+friends course-offering submit --input course-application.json --via api --confirm
+friends course-offering status <courseUuid> --json
+friends course-offering prepare-ego --input course-application.json \
+  --via ego --ego-task-space 16 --json
 friends organizations list --json
 friends organizations profile show <organizationUuid> --json
 friends organizations members <organizationUuid> --page 1 --page-size 10 --json
@@ -86,6 +95,14 @@ const session = await readVerifiedEgoSession({ taskSpaceId: 12, page: "p1" });
 const courses = await sdk.createCourseClient(session);
 await courses.list({ keyword: "周周艺" });
 
+const offering = await sdk.createCourseOfferingClient(session);
+const prepared = await offering.prepare(application);
+const staged = await offering.stageMaterials(prepared, files, {
+  via: "api",
+  intent: "stage-course-materials",
+  confirm: true,
+});
+
 const organizationClient = await sdk.createOrganizationClient(session);
 const organizations = await organizationClient.listManaged();
 const profile = await organizationClient.get(organizationId(organizations[0].id));
@@ -117,6 +134,20 @@ API 写入要求 `--via api` 和字面确认：报名 `--confirm apply`、撤销
 
 当前公开源码的角色选择块被注释，因此 Ego 校验所选角色并列为人工核对事项，不注入隐藏模型；日期等只读选择器也交给用户。撤销/退出只打开与当前个人记录唯一匹配的确认层。最终按钮、提交 API、快捷键和 `--yes` 都不能代替用户亲自提交。上述路径通过源码与受控 SDK/CLI/DOM 测试，真实 Ego、学校生产读写及用户最终提交由集中验收另行确认。
 
+## 课程开办申请
+
+以 [虚构输入示例](docs/examples/course-offering.json) 为结构参考，替换为当前账号、角色、身份单位、课程组织和字典代码。`prepare --input <file|->` 校验学校当前学年/学期、课程类型/级别与组织权限，并生成本地材料分组候选 UUID。它只查询来源数据，不创建学校申请；学校返回的学期编号保持原始类型。所有命令的输入、阶段和支持路径可通过 `friends schema course-offering.<command>` 查看。
+
+`materials` 独立接受 `materials.files: [{"kind":"attachment","path":"/absolute/syllabus.pdf"},{"kind":"publicity","path":"/absolute/poster.png"}]`，其他命令拒绝这个字段。上传走 `POST /gateway/ek-agg-mob/biz-common/protected-file-upload`，AppKey 为 `zovecenter-saip-ek-agg-mob`，multipart 字段是 `files`、`groupId`。使用材料阶段返回的 `groups` 更新申请的 `materials` 后再执行下一阶段。海报与附件在公开课程表单源码中未启用必填校验，可分别准备；若声明已有组，写入前会回查该组。海报最多五张，文件格式与大小按课程上传组件检查。`--dry-run` 只校验并进行必要只读查询。
+
+`next-step --via api --confirm` 新建时调用课程服务的 `POST apply/next-step`，已有 UUID 时调用 `PUT apply`；只保存第一步并返回课程 UUID，`finalSubmission:false`。将这个 UUID 放回申请的 `uuid`，再独立调用 `submit --via api --confirm`：复核身份、组织、材料和草稿/退回状态，调用 `POST apply/apply`，随后只读回查。不会自动从第一步续交。当前只支持空的问卷、岗位和院系/年级/学历限制数组；非空输入明确拒绝。`AUTO|MAN` 与签到设置独立校验；完整范围和限制见 [验收记录](docs/verification/2026-10-23-course-offering.md)。
+
+上传、第一步保存或最终提交响应丢失时返回 `UNKNOWN_OUTCOME`（退出码 7）。`error.recovery` 保留可另存为申请 JSON 的 `input`、已确认上传项、待确认文件、材料组和已有课程 UUID；已知 UUID 或上传组只做只读回查。即使回查匹配仍保持未知，不重试、不继续下一写操作，也不跨 API/Ego 续交。首次创建丢失 UUID 时无法按 ID 回查，必须人工核实。确认提交后回查失败，也会保留 `serverAcknowledged:true` 并以未知结果停止。
+
+`prepare-ego` 核验既有 Ego 页面中的账号、角色、路由和课程标识，只通过同源 iframe 内的可见控件准备名称、地址、介绍、类型、级别、组织和日期。既支持直接具名控件，也支持公开源码中的 Vant 标签、slot 和分行文本域；picker 等待选项选中及动画结束后才确认。已有人工值会保留，积分、认证设置、材料和下一页报名设置交给用户审阅；缺项及中途失败记录在 `missing`、`executionError` 中，然后 `handOff()`。`submitted:false`，不点“下一步/提交”，`--yes`、`--confirm` 无法绕过。dry-run 不导航、不录入、不点击、不交接。
+
+`status <courseUuid> --via api|ego` 直接查询 `GET apply/approve-detail/{uuid}`；Ego 来源先核验登录上下文。只投影必要课程、组织与流程状态，未知枚举不解释为获批。材料上传、第一步保存、提交确认和开办批准是不同结果。本任务仅完成源码核对与受控 SDK/CLI/iframe 验证，真实 Ego 和生产写入尚未验收。
+
 ## 志愿认证草稿
 
 `drafts create` 只读查询当前上下文可管理的志愿活动、活动详情和报名名单，然后绑定账号/角色/身份单位/活动创建本地草稿。草稿保存在仓库外专用目录，目录 `0700`、JSON `0600`，每次编辑通过临时文件和原子替换保存；过期 revision 的完整并发结果或 CLI patch 会保存为可恢复 conflict 文件。材料只记录本地路径、大小和 SHA-256，恢复时检查存在性与哈希；当前生产认证页面没有材料上传字段，包含材料的草稿不能通过正式完整校验。
@@ -129,7 +160,7 @@ API 写入要求 `--via api` 和字面确认：报名 `--confirm apply`、撤销
 
 ## 输出与错误
 
-业务命令与 schema 输出为版本化 JSON；`auth login --method cqu-auth --no-open` 会先输出一行只含授权 URL 的 JSON 事件，完成后输出最终 JSON。`--help`/`--version` 使用普通文本，错误诊断写 stderr。退出码：0 成功，2 输入错误，3 认证失效，4 权限不足，5 业务拒绝/状态冲突，6 网络或协议错误。HTTP 200 但 `code !== "0"` 不是成功；HTTP 非 2xx 即使业务码为 0 也不是成功。
+业务命令与 schema 输出为版本化 JSON；`auth login --method cqu-auth --no-open` 会先输出一行只含授权 URL 的 JSON 事件，完成后输出最终 JSON。`--help`/`--version` 使用普通文本，错误诊断写 stderr。退出码：0 成功，2 输入错误，3 认证失效，4 权限不足，5 业务拒绝/状态冲突，6 网络或协议错误，7 写入结果未知。HTTP 200 但 `code !== "0"` 不是成功；HTTP 非 2xx 即使业务码为 0 也不是成功。
 
 ## 验证边界
 
@@ -137,6 +168,7 @@ API 写入要求 `--via api` 和字面确认：报名 `--confirm apply`、撤销
 - CQU Auth 生产 native/public client 尚未注册，线上真实 Auth 登录、同意、ST 核销和学校 API 验收由后续配置与主线程验收完成；仓库内受控 HTTP 服务通过不能替代这些生产验收。
 - 课程接口和身份形状已按 2026-10-22 只读实测固化；接口资料中的历史 `verified` 不被当作当前生产验收。
 - 本仓库测试使用虚构 HTTP/Ego 场景。学校登录与只读查询单独记录于 [验收记录](docs/verification/2026-10-22-local-courses.md)，CI 通过不代表生产写入能力。
+- 课程开办的 SDK、真实 CLI 子进程和 strict Ego 脚本已用受控 HTTP/jsdom 场景验证；真实 Ego 页面、材料上传和最终开办写入尚未执行，不能宣称生产验收。
 - 查询类操作可使用 API；后续 Ego 写操作按阶段执行，需要审阅的表单只录入并交接，由用户亲自最终提交。
 - Ego 查询的受控 SDK/CLI 验收见 [Ego 课程查询验收](docs/verification/2026-10-22-ego-course-query.md)；真实已安装 Ego 与学校登录态实测由集中操作另行记录，不能由本仓库受控测试替代。
 

@@ -18,6 +18,7 @@ import { loadCourseQuestionnaireFiles } from "./course-questionnaire-files.js";
 export * from "./draft-store.js";
 export * from "./certification-ego.js";
 export * from "./volunteer-offering-ego.js";
+export * from "./course-offering-ego.js";
 
 export type SessionStorageType = "keyring" | "file";
 

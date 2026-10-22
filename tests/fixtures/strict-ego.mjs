@@ -5,10 +5,10 @@ let script='';for await(const chunk of process.stdin)script+=chunk;
 const configuration=JSON.parse(await readFile(process.env.FRIENDS_EGO_FIXTURE_CONFIG,'utf8'));
 if(!configuration.executeSession&&script.includes('FRIENDS_CLI_EGO_SESSION:')) {console.log('FRIENDS_CLI_EGO_SESSION:'+JSON.stringify({token:'ego-fixture-token',userLevel:'XS'}));process.exit(0);}
 
-const stats={clicks:[],fills:[],handoffs:0,navigations:0,submits:0,snapshots:0};
+const stats={clicks:[],fills:[],handoffs:0,navigations:0,submits:0,remoteWrites:0,snapshots:0};
 const html=await readFile(configuration.html,'utf8');
 const domOptions={url:configuration.url,runScripts:'dangerously',beforeParse(w){
- w.fetch=async(url,init)=>{if(init?.method==='POST')stats.submits++;return fetch(new URL(url,configuration.url),init);};
+ w.fetch=async(url,init)=>{if(['POST','PUT','PATCH','DELETE'].includes(init?.method?.toUpperCase()))stats.remoteWrites++;if(init?.method==='POST')stats.submits++;return fetch(new URL(url,configuration.url),init);};
  w.localStorage.setItem('token_str',configuration.token??'ego-fixture-token');w.localStorage.setItem('userLevel_str',configuration.userLevel??'XS');
  for(const key of ['userInfo_obj','account_str','loginModel_str'])w.localStorage.setItem(key,'fixture');
 }};
@@ -42,4 +42,4 @@ const page={
 };
 const task={page(){return page},async handOff(){active();stats.handoffs++;saved.ownership='user';}};
 try {await new Function('taskSpace','takeOverTaskSpace',`return (async()=>{${script}})()`)(async()=>task,async()=>{saved.ownership='agent';return task;});}
-finally {if(configuration.state)await writeFile(configuration.state,JSON.stringify({ownership:saved.ownership,rows:JSON.parse(w.eval('JSON.stringify(rows)'))}));await writeFile(configuration.result,JSON.stringify({...stats,html:d.body.innerHTML}));dom.window.close();if(contentDom!==dom)contentDom.window.close();}
+finally {if(configuration.state)await writeFile(configuration.state,JSON.stringify({ownership:saved.ownership,rows:JSON.parse(w.eval('JSON.stringify(rows)'))}));await writeFile(configuration.result,JSON.stringify({...stats,model:contentDom.window.__courseForm??null,html:d.body.innerHTML}));dom.window.close();if(contentDom!==dom)contentDom.window.close();}
