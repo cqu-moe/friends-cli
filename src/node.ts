@@ -18,7 +18,7 @@ export interface BrowserSession {
 
 export interface StoredSession {
   schemaVersion: 1;
-  loginMethod: "local";
+  loginMethod: "local" | "cqu-auth";
   storage: SessionStorageType;
   token: string;
   userLevel: string;
@@ -60,12 +60,11 @@ function parseToken(value: unknown): string {
   return "";
 }
 
-async function runEgo(options: {
+async function runEgoProcess(options: {
   script: string;
   command: string;
   timeoutMs: number;
-  missingSessionMessage?: string;
-}): Promise<BrowserOutput> {
+}): Promise<string> {
   const child = spawn(options.command, ["nodejs"], { stdio: ["pipe", "pipe", "pipe"] });
   let stdout = "";
   let stderr = "";
@@ -94,14 +93,28 @@ async function runEgo(options: {
   if (exitCode !== 0) {
     throw safeError("The Ego friends login bridge failed");
   }
+  return `${stdout}\n${stderr}`;
+}
+
+function singleMarker(output: string, marker: string): unknown {
+  const lines = output.split("\n").filter(line => line.startsWith(marker));
+  return lines.length === 1 ? JSON.parse(lines[0].slice(marker.length)) : null;
+}
+
+async function runEgo(options: {
+  script: string;
+  command: string;
+  timeoutMs: number;
+  missingSessionMessage?: string;
+}): Promise<BrowserOutput> {
+  const output = await runEgoProcess(options);
   const marker = "FRIENDS_CLI_EGO_SESSION:";
-  const lines = `${stdout}\n${stderr}`.split("\n").filter(line => line.startsWith(marker));
-  const lastLine = lines.length === 1 ? lines[0].slice(marker.length) : undefined;
-  if (lastLine === undefined && options.missingSessionMessage !== undefined) {
+  const hasMarker = output.split("\n").some(line => line.startsWith(marker));
+  if (!hasMarker && options.missingSessionMessage !== undefined) {
     throw safeError(options.missingSessionMessage);
   }
   try {
-    const parsed = lastLine === undefined ? null : JSON.parse(lastLine) as Record<string, unknown>;
+    const parsed = singleMarker(output, marker) as Record<string, unknown> | null;
     if (parsed?.error === "NO_EXISTING_FRIENDS_SESSION") {
       throw safeError(options.missingSessionMessage ?? "No existing Ego friends session is ready");
     }
@@ -117,6 +130,161 @@ async function runEgo(options: {
     // Use the safe generic error below.
   }
   throw safeError("The Ego friends login bridge returned an invalid session");
+}
+
+export async function prepareOrganizationProfileInEgo(options: {
+  taskSpaceId: number;
+  page?: string;
+  route: string;
+  blurb?: string;
+  timeoutMs?: number;
+  command?: string;
+}): Promise<{
+  route: string;
+  navigated: boolean;
+  dialogAction: "opened-from-snapshot-ref" | "already-open";
+  blurbAction: "filled" | "already-matching" | "human-value-preserved" | "left-empty";
+  externalWriteActions: 0;
+  finalSubmitActions: 0;
+}> {
+  if (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1) {
+    throw safeError("Invalid Ego task space", FriendsErrorCode.InvalidInput);
+  }
+  const page = options.page ?? "p1";
+  if (!/^p[1-9][0-9]*$/.test(page)) {
+    throw safeError("Invalid Ego page label", FriendsErrorCode.InvalidInput);
+  }
+  const userWaitMs = options.timeoutMs ?? 300_000;
+  if (!Number.isSafeInteger(userWaitMs) || userWaitMs < 1) {
+    throw safeError("Invalid Ego timeout", FriendsErrorCode.InvalidInput);
+  }
+  if (!options.route.startsWith("/mobile/groupManage/") || /[\\\r\n\0]/.test(options.route)) {
+    throw safeError("Invalid organization profile edit route", FriendsErrorCode.InvalidInput);
+  }
+  const targetUrl = `https://friends.cqu.edu.cn${options.route}`;
+  const script = `
+const task = await taskSpace(${options.taskSpaceId});
+const page = task.page(${JSON.stringify(page)});
+const targetUrl = ${JSON.stringify(targetUrl)};
+const currentUrl = await page.url();
+function sameEditRoute(value) {
+  try {
+    const current = new URL(value);
+    const target = new URL(targetUrl);
+    return current.pathname === target.pathname &&
+      current.searchParams.get("uuid") === target.searchParams.get("uuid") &&
+      current.searchParams.get("type") === target.searchParams.get("type");
+  } catch {
+    return false;
+  }
+}
+const navigated = !sameEditRoute(currentUrl);
+if (navigated) await page.goto(targetUrl);
+await page.waitForLoadState("load");
+await page.waitForFunction((label) => document.body.innerText.includes(label), "组织简介及Logo", { timeout: 15000 });
+const snapshot = await page.snapshot({ scope: "full_page" });
+async function visibleTextareaState() {
+  return page.evaluate(() => ({
+    count: Array.from(document.querySelectorAll("textarea")).filter((field) => {
+      const rect = field.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && !field.disabled && !field.readOnly;
+    }).length,
+    values: Array.from(document.querySelectorAll("textarea")).filter((field) => {
+      const rect = field.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && !field.disabled && !field.readOnly;
+    }).map((field) => field.value)
+  }));
+}
+const beforeDialog = await visibleTextareaState();
+let dialogAction;
+if (beforeDialog.count === 0) {
+  const entryLine = snapshot.split("\\n").find((line) =>
+    line.includes("组织简介及Logo") && /@\\d+/.test(line)
+  );
+  if (!entryLine) throw new Error("组织简介及Logo entry was not found in the page snapshot");
+  await page.click(entryLine.match(/@\\d+/)[0], { label: "open profile dialog" });
+  await page.waitForSelector("textarea", { state: "visible", timeout: 15000 });
+  dialogAction = "opened-from-snapshot-ref";
+} else if (beforeDialog.count === 1) {
+  dialogAction = "already-open";
+} else {
+  throw new Error("Multiple organization profile textareas are visible");
+}
+const visible = await visibleTextareaState();
+if (visible.count !== 1) throw new Error("Exactly one organization profile textarea must be visible");
+await page.evaluate(() => {
+  const fields = Array.from(document.querySelectorAll("textarea")).filter((field) => {
+    const rect = field.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && !field.disabled && !field.readOnly;
+  });
+  if (fields.length !== 1) throw new Error("Expected one visible organization profile textarea");
+  fields[0].setAttribute("data-friends-cli-blurb", "");
+  return null;
+});
+const currentValue = visible.values[0];
+const requestedBlurb = ${JSON.stringify(options.blurb ?? null)};
+let blurbAction;
+if (currentValue !== "" && requestedBlurb !== null && currentValue === requestedBlurb) {
+  blurbAction = "already-matching";
+} else if (currentValue !== "") {
+  blurbAction = "human-value-preserved";
+} else if (requestedBlurb === null) {
+  blurbAction = "left-empty";
+} else {
+  await page.fill("textarea[data-friends-cli-blurb]", requestedBlurb);
+  await page.waitForFunction((expected) => {
+    const fields = Array.from(document.querySelectorAll("textarea"));
+    return fields.length === 1 && fields[0].value === expected;
+  }, requestedBlurb, { timeout: 15000 });
+  blurbAction = "filled";
+}
+await task.handOff();
+console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({
+  route: ${JSON.stringify(options.route)},
+  navigated,
+  dialogAction,
+  blurbAction,
+  externalWriteActions: 0,
+  finalSubmitActions: 0
+}));
+`;
+  const output = await runEgoProcess({
+    script,
+    command: options.command ?? "ego-browser",
+    timeoutMs: userWaitMs + 30_000,
+  });
+  try {
+    const parsed = singleMarker(output, "FRIENDS_CLI_EGO_PREPARED:") as {
+      route?: unknown;
+      navigated?: unknown;
+      dialogAction?: unknown;
+      blurbAction?: unknown;
+      externalWriteActions?: unknown;
+      finalSubmitActions?: unknown;
+    } | null;
+    const blurbAction = parsed?.blurbAction;
+    if (
+      parsed?.route === options.route &&
+      typeof parsed.navigated === "boolean" &&
+      (parsed.dialogAction === "opened-from-snapshot-ref" || parsed.dialogAction === "already-open") &&
+      (blurbAction === "filled" || blurbAction === "already-matching" ||
+        blurbAction === "human-value-preserved" || blurbAction === "left-empty") &&
+      parsed.externalWriteActions === 0 &&
+      parsed.finalSubmitActions === 0
+    ) {
+      return {
+        route: parsed.route,
+        navigated: parsed.navigated,
+        dialogAction: parsed.dialogAction,
+        blurbAction,
+        externalWriteActions: 0,
+        finalSubmitActions: 0,
+      };
+    }
+  } catch {
+    // Return the generic bridge failure below.
+  }
+  throw safeError("The Ego organization profile preparation did not return its route");
 }
 
 export async function readEgoSession(options: {
@@ -348,12 +516,12 @@ export async function saveSession(
 
 function validateMetadata(value: unknown): SessionMetadata {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw safeError("The local friends session file is invalid", FriendsErrorCode.NetworkProtocol);
+    throw safeError("The friends session file is invalid", FriendsErrorCode.NetworkProtocol);
   }
   const session = value as StoredSession;
   if (
     session.schemaVersion !== 1 ||
-    session.loginMethod !== "local" ||
+    (session.loginMethod !== "local" && session.loginMethod !== "cqu-auth") ||
     (session.storage !== "keyring" && session.storage !== "file") ||
     typeof session.userLevel !== "string" ||
     session.userLevel === "" ||
@@ -366,7 +534,7 @@ function validateMetadata(value: unknown): SessionMetadata {
     typeof session.context?.unit?.unitName !== "string" ||
     typeof session.context?.unit?.unitType !== "number"
   ) {
-    throw safeError("The local friends session file is invalid", FriendsErrorCode.NetworkProtocol);
+    throw safeError("The friends session file is invalid", FriendsErrorCode.NetworkProtocol);
   }
   if (session.storage === "file" && (typeof session.token !== "string" || session.token === "")) {
     throw safeError("The file friends session is missing its token", FriendsErrorCode.NetworkProtocol);
@@ -399,7 +567,7 @@ export async function loadSession(): Promise<StoredSession> {
   try {
     parsed = JSON.parse(await readFile(path, "utf8"));
   } catch {
-    throw safeError("The local friends session file is invalid", FriendsErrorCode.NetworkProtocol);
+    throw safeError("The friends session file is invalid", FriendsErrorCode.NetworkProtocol);
   }
   const metadata = validateMetadata(parsed);
   const token = metadata.storage === "keyring"

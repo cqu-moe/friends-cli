@@ -1,8 +1,9 @@
+import { readJsonInput } from "./json-input.js";
 import type { Command } from "commander";
 import { resolveQuerySession } from "./session.js";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat, readFile } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   createFriendsSdk,
@@ -99,8 +100,6 @@ export const draftSchemas = {
   },
 } as const;
 
-const maximumInputBytes = 10 * 1024 * 1024;
-const dangerousKeys = new Set(["__proto__", "constructor", "prototype"]);
 
 function output(data: unknown, meta: Record<string, unknown> = {}): void {
   process.stdout.write(`${JSON.stringify({ schemaVersion: 1, ok: true, data, meta }, null, 2)}\n`);
@@ -108,47 +107,6 @@ function output(data: unknown, meta: Record<string, unknown> = {}): void {
 
 function invalid(message: string): never {
   throw new FriendsError({ code: FriendsErrorCode.InvalidInput, message });
-}
-
-function rejectUnsafeJson(value: unknown, depth = 0): void {
-  if (depth > 20) invalid("Draft input nesting is too deep");
-  if (Array.isArray(value)) {
-    for (const item of value) rejectUnsafeJson(item, depth + 1);
-    return;
-  }
-  if (typeof value !== "object" || value === null) return;
-  for (const [key, child] of Object.entries(value)) {
-    if (dangerousKeys.has(key)) invalid(`Draft input contains an unsafe key: ${key}`);
-    rejectUnsafeJson(child, depth + 1);
-  }
-}
-
-async function readInput(source: string): Promise<unknown> {
-  let text: string;
-  if (source === "-") {
-    const chunks: Buffer[] = [];
-    let length = 0;
-    for await (const chunk of process.stdin) {
-      const buffer = chunk as Buffer;
-      length += buffer.length;
-      if (length > maximumInputBytes) invalid("Draft input exceeds 10 MiB");
-      chunks.push(buffer);
-    }
-    text = Buffer.concat(chunks).toString("utf8");
-  } else {
-    const stat = await lstat(source).catch(() => null);
-    if (stat === null || !stat.isFile() || stat.isSymbolicLink()) invalid("Draft input must be a regular file or stdin");
-    text = await readFile(source, "utf8");
-    if (Buffer.byteLength(text) > maximumInputBytes) invalid("Draft input exceeds 10 MiB");
-  }
-  try {
-    const parsed: unknown = JSON.parse(text);
-    rejectUnsafeJson(parsed);
-    return parsed;
-  } catch (error) {
-    if (error instanceof FriendsError) throw error;
-    invalid("Draft input must be valid JSON");
-  }
 }
 
 async function sha256(path: string): Promise<string> {
@@ -249,7 +207,7 @@ export function registerDraftCommands(program: Command, options: { baseUrl: stri
     .action(async (options: Record<string, string>) => {
       const context = await volunteerSession(options);
       const source = await client(context).getCertificationSource(options.activityId);
-      const materials = options.materials === undefined ? [] : await resolveMaterials(await readInput(options.materials));
+      const materials = options.materials === undefined ? [] : await resolveMaterials(await readJsonInput(options.materials));
       const draft = createPartialVolunteerCertificationDraft({
         id: randomUUID(), binding: source.binding, activity: source.activity,
         registrations: source.registrations, materials,
@@ -272,7 +230,7 @@ export function registerDraftCommands(program: Command, options: { baseUrl: stri
         invalid("--expected-revision must be a non-negative integer");
       }
       const current = await store.load(draftId);
-      const input = patch(await readInput(options.input));
+      const input = patch(await readJsonInput(options.input));
       if (current.revision !== expectedRevision) {
         await store.savePatchConflict(draftId, expectedRevision, input);
       }

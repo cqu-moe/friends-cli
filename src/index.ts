@@ -1,10 +1,32 @@
 import { FriendsError, FriendsErrorCode } from "./errors.js";
+import {
+  createVerifiedOrganizationClient,
+  type OrganizationSession,
+} from "./organizations.js";
 
 export { FriendsError, FriendsErrorCode, exitCodeFor } from "./errors.js";
 export type { WriteRecovery } from "./errors.js";
 export * from "./drafts.js";
 export * from "./draft-source.js";
 export * from "./certification-prepare.js";
+export { organizationId, validateOrganizationMemberListInput } from "./organizations.js";
+export type {
+  EditableOrganizationProfileField,
+  OrganizationAccess,
+  OrganizationClient,
+  OrganizationId,
+  OrganizationMember,
+  OrganizationMemberListInput,
+  OrganizationMemberPage,
+  OrganizationProfile,
+  OrganizationProfileChanges,
+  OrganizationProfileSaveIntent,
+  OrganizationSession,
+  OrganizationSummary,
+  PreparedOrganizationProfileUpdate,
+  SavedOrganizationProfile,
+} from "./organizations.js";
+export * from "./certification-api.js";
 
 declare const courseIdBrand: unique symbol;
 export type CourseId = string & { readonly [courseIdBrand]: true };
@@ -360,9 +382,9 @@ function invalid(message: string): never {
   throw new FriendsError({ code: FriendsErrorCode.InvalidInput, message });
 }
 
-function validateSession(input: { token: string; userLevel: string }): void {
+function validateSession(input: { token: string; userLevel?: string }): void {
   if (!input || typeof input.token !== "string" || !input.token ||
-      typeof input.userLevel !== "string" || !input.userLevel ||
+      (typeof input.userLevel !== "string" || (!input.userLevel && input.userLevel !== "")) ||
       /[\r\n]/.test(input.token + input.userLevel)) invalid("A token and user level are required");
 }
 
@@ -388,12 +410,12 @@ export function createFriendsSdk(options: {
 
   async function inspectLocalSession(input: {
     token: string;
-    userLevel: string;
+    userLevel?: string;
   }): Promise<LocalSessionInspection> {
     validateSession(input);
     const init = {
       method: "POST",
-      headers: headers(input.token, input.userLevel, mainService),
+      headers: headers(input.token, input.userLevel ?? "", mainService),
       body: "{}",
     };
     const [levels, info] = await Promise.all([
@@ -418,7 +440,7 @@ export function createFriendsSdk(options: {
     verifyLocalSession,
     async activateLocalContext(source: {
       token: string;
-      userLevel: string;
+      userLevel?: string;
       selector?: { levelNo?: string; unitNo?: string };
       expectedAccount?: string;
     }): Promise<ActivatedLocalContext> {
@@ -566,6 +588,32 @@ export function createFriendsSdk(options: {
           }};
         },
       };
+    },
+    async createOrganizationClient(input: OrganizationSession) {
+      const session = snapshotSession(input);
+      await sdk.activateLocalContext({
+        token: session.token,
+        userLevel: session.userLevel,
+        expectedAccount: session.account.userNo,
+        selector: { levelNo: session.context.levelNo, unitNo: session.context.unit.unitNo },
+      });
+      return createVerifiedOrganizationClient({
+        baseUrl,
+        session,
+        fetch: fetchImpl,
+        timeoutMs,
+        verifySession: async (currentSession) => {
+          await sdk.activateLocalContext({
+            token: currentSession.token,
+            userLevel: currentSession.userLevel,
+            expectedAccount: currentSession.account.userNo,
+            selector: {
+              levelNo: currentSession.context.levelNo,
+              unitNo: currentSession.context.unit.unitNo,
+            },
+          });
+        },
+      });
     },
   };
   return sdk;

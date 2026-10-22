@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
 import { Command } from "commander";
 import {
   courseId,
@@ -15,12 +16,22 @@ import {
   sessionPath,
   SessionStorageType,
 } from "../node.js";
+import {
+  openAuthorizationUrl,
+  recoverCquFriendsSession,
+  saveCquAuthGrant,
+  startCquAuthLoopback,
+} from "../auth-node.js";
+import { createCquAuthClient } from "../auth.js";
 import { resolveQuerySession } from "./session.js";
 import { draftSchemas, registerDraftCommands } from "./drafts.js";
+import { organizationSchemas, registerOrganizationCommands } from "./organizations.js";
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
+  ...certificationApiSchemas,
   ...draftSchemas,
+  ...organizationSchemas,
   errors: {
     operation: "errors", readonly:true, permission:"none", phases:["inspect"], supportedVia:["local"],
     exitCodes: {0:"success", 2:"INVALID_INPUT", 3:"AUTH_REQUIRED", 4:"PERMISSION_DENIED", 5:"BUSINESS_REJECTED", 6:"NETWORK_PROTOCOL_ERROR", 7:"UNKNOWN_OUTCOME"},
@@ -29,14 +40,17 @@ const schemas = {
     operation: "auth.login",
     permission: "school login and an available identity", phases: ["login"],
     input: {
-      method: { type: "local", required: true },
+      method: { type: "local or cqu-auth", required: true },
       egoTaskSpace: { type: "integer", default: "managed friends-cli space; explicit integer reuses an existing space" },
       egoPage: { type: "string", default: "p1" },
+      issuer: { type: "URL or CQU_AUTH_ISSUER; required for cqu-auth" },
+      clientId: { type: "public client ID or CQU_AUTH_CLIENT_ID; required for cqu-auth" },
+      noOpen: { type: "boolean; prints only the authorization URL for manual opening" },
       storage: { type: "keyring or explicit file", default: "keyring", fileSupport: "POSIX only: dedicated 0700 directory and 0600 file" },
       levelNo: { type: "string", required: "only when multiple contexts match" },
       unitNo: { type: "string", required: "only when multiple contexts match" },
     },
-    output: "account and selected context; never token",
+    output: "authorization event when --no-open is used, then account and selected context; never code, state, verifier, key, or token",
     readonly: false,
     sideEffect: "establishes a local session and fixed friends context",
     supportedVia: ["ego-login", "api-verification"],
@@ -93,8 +107,12 @@ const schemas = {
 
 function output(data: unknown, meta: Record<string, unknown> = {}): void {
   process.stdout.write(
-    `${JSON.stringify({ schemaVersion: 1, ok: true, data, meta }, null, 2)}\n`,
+    `${JSON.stringify({ schemaVersion: 1, ok: true, data, meta })}\n`,
   );
+}
+
+function invalid(message: string): never {
+  throw new FriendsError({ code: FriendsErrorCode.InvalidInput, message });
 }
 
 function sdk() {
@@ -120,10 +138,31 @@ function queryMeta(source: {
   };
 }
 
+async function createQueryCourseClient(
+  source: { session: { loginMethod?: "local" | "cqu-auth"; token: string; userLevel: string; account: { userNo: string }; context: { levelNo: string; unit: { unitNo: string } } }; entry: "api" | "ego" },
+  baseUrl: string,
+) {
+  const sdkInstance = createFriendsSdk({ baseUrl });
+  try {
+    return await sdkInstance.createCourseClient(source.session);
+  } catch (error) {
+    if (
+      source.entry !== "api" ||
+      source.session.loginMethod !== "cqu-auth" ||
+      !(error instanceof FriendsError) ||
+      error.code !== FriendsErrorCode.AuthRequired
+    ) {
+      throw error;
+    }
+    const recovered = await recoverCquFriendsSession({ friendsBaseUrl: baseUrl });
+    return sdkInstance.createCourseClient(recovered);
+  }
+}
+
 
 const program = new Command()
   .name("friends")
-  .description("Query courses and manage local volunteer certification drafts")
+  .description("Query courses and manage local volunteer certification drafts and student organizations")
   .version("0.1.0")
   .configureOutput({
     writeOut: (text) => process.stdout.write(text),
@@ -151,7 +190,7 @@ const auth = program.command("auth").description("Local session management");
 
 auth
   .command("login")
-  .description("Log in through the existing Ego page and verify the school context")
+  .description("Log in through the existing Ego page or CQU Auth and verify the school context")
   .requiredOption("--method <method>", "login source", "local")
   .option(
     "--storage <type>",
@@ -160,21 +199,90 @@ auth
   )
   .option("--ego-task-space <number>", "reuse an existing Ego task space by numeric ID")
   .option("--ego-page <label>", "existing Ego page label (default p1)")
+  .option("--issuer <url>", "CQU Auth issuer URL")
+  .option("--client-id <id>", "CQU Auth public client ID")
+  .option("--no-open", "print the authorization URL without opening a browser")
   .option("--level-no <value>", "select a level when multiple contexts match")
   .option("--unit-no <value>", "select an identity unit when multiple contexts match")
   .option("--json", "print stable JSON", true)
   .action(async (options: Record<string, string>) => {
-    if (options.method !== "local") {
-      throw new FriendsError({
-        code: FriendsErrorCode.InvalidInput,
-        message: "Only --method local is implemented in this task",
-      });
-    }
     if (options.storage !== "keyring" && options.storage !== "file") {
-      throw new FriendsError({
-        code: FriendsErrorCode.InvalidInput,
-        message: "--storage must be keyring or file",
+      invalid("--storage must be keyring or file");
+    }
+    if (options.method === "cqu-auth") {
+      const egoOptions = ["egoTaskSpace", "egoPage"].filter(key => options[key] !== undefined);
+      if (egoOptions.length > 0) invalid(`Ego options require --method local: ${egoOptions.join(", ")}`);
+      const issuer = options.issuer ?? process.env.CQU_AUTH_ISSUER;
+      const clientId = options.clientId ?? process.env.CQU_AUTH_CLIENT_ID;
+      if (issuer === undefined || issuer === "") invalid("cqu-auth requires --issuer or CQU_AUTH_ISSUER");
+      if (clientId === undefined || clientId === "") invalid("cqu-auth requires --client-id or CQU_AUTH_CLIENT_ID");
+      if ((options.levelNo === undefined) !== (options.unitNo === undefined)) {
+        invalid("A multi-account CQU Auth login requires both --level-no and --unit-no");
+      }
+      const selector = options.levelNo === undefined
+        ? undefined
+        : { levelNo: options.levelNo, unitNo: options.unitNo };
+      const loopback = await startCquAuthLoopback({
+        issuer,
+        clientId,
+        friendsBaseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
       });
+      try {
+        if ((options as Record<string, unknown>).open === false) {
+          output({ authorizationUrl: loopback.authorizationUrl }, {
+            operation: "auth.login",
+            phase: "authorization",
+            via: "cqu-auth",
+          });
+        } else {
+          await openAuthorizationUrl(loopback.authorizationUrl, {
+            command: process.env.FRIENDS_BROWSER,
+          });
+        }
+        const grant = await loopback.completeAuthorization();
+        const auth = createCquAuthClient({
+          issuer,
+          clientId,
+          redirectUri: loopback.redirectUri,
+          friendsBaseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+        });
+        const activated = await auth.createGrantManager({
+          credentials: grant.credentials,
+          keyPair: grant.keyPair,
+        }).exchangeFriendsSession(selector);
+        const authPath = await saveCquAuthGrant(grant, { issuer, clientId, storage: options.storage });
+        const storedSession = {
+          schemaVersion: 1 as const,
+          loginMethod: "cqu-auth" as const,
+          storage: options.storage as SessionStorageType,
+          token: activated.token,
+          userLevel: activated.context.levelNo,
+          account: activated.account,
+          context: activated.context,
+        };
+        const sessionPathValue = await saveSession(storedSession, options.storage);
+        output(
+          {
+            loginMethod: "cqu-auth",
+            account: activated.account,
+            context: activated.context,
+            storage: { type: options.storage, authPath, sessionPath: sessionPathValue },
+          },
+          {
+            operation: "auth.login",
+            via: "cqu-auth+school-api-verification",
+            verification: { identityAndContext: "school-api-verified" },
+          },
+        );
+      } finally {
+        await loopback.close().catch(() => undefined);
+      }
+      return;
+    }
+    if (options.method !== "local") invalid("--method must be local or cqu-auth");
+    const cquOptions = ["issuer", "clientId"].filter(key => options[key] !== undefined);
+    if ((options as Record<string, unknown>).open === false || cquOptions.length > 0) {
+      invalid(`CQU Auth options require --method cqu-auth: ${["no-open", ...cquOptions].join(", ")}`);
     }
     const taskSpaceId = options.egoTaskSpace === undefined
       ? undefined
@@ -261,7 +369,7 @@ courses
   .action(async (options: Record<string, string>) => {
     const query = validateCourseListInput({page:Number(options.page), pageSize:Number(options.pageSize), keyword:options.keyword});
     const source = await resolveQuerySession(options, process.env.FRIENDS_BASE_URL ?? productionBaseUrl);
-    const client = await sdk().createCourseClient(source.session);
+    const client = await createQueryCourseClient(source, process.env.FRIENDS_BASE_URL ?? productionBaseUrl);
     const data = await client.list(query);
     output(data, {
       operation: "courses.list",
@@ -282,18 +390,24 @@ courses
   .action(async (courseIdValue: string, options: Record<string, string>) => {
     const id = courseId(courseIdValue);
     const source = await resolveQuerySession(options, process.env.FRIENDS_BASE_URL ?? productionBaseUrl);
-    const client = await sdk().createCourseClient(source.session);
+    const client = await createQueryCourseClient(source, process.env.FRIENDS_BASE_URL ?? productionBaseUrl);
     output(await client.get(id), {
       operation: "courses.get",
       ...queryMeta(source),
     });
   });
 
+registerCertificationApiCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
+
 registerDraftCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
 });
 
-program.parseAsync(process.argv).catch((error: unknown) => {
+registerOrganizationCommands(program, {
+  baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+});
+
+program.parseAsync(process.argv).catch(async (error: unknown) => {
   const code = (error as { code?: string }).code;
   if (
     code === "commander.help" ||
@@ -311,7 +425,7 @@ program.parseAsync(process.argv).catch((error: unknown) => {
         });
   const nextAction =
     friendsError.code === FriendsErrorCode.AuthRequired
-      ? "friends auth login --method local"
+      ? `friends auth login --method ${await loadSession().then(session => session.loginMethod).catch(() => "local")}`
       : undefined;
   process.stdout.write(
     `${JSON.stringify(
@@ -328,8 +442,6 @@ program.parseAsync(process.argv).catch((error: unknown) => {
           nextAction,
         },
       },
-      null,
-      2,
     )}\n`,
   );
   process.stderr.write(`${friendsError.message}\n`);
