@@ -1,6 +1,6 @@
 # SPEC #1 覆盖与交付验收
 
-更新：2026-10-23。范围依据 [SPEC #1](https://github.com/cqu-moe/friends-cli/issues/1)、对应 ticket、仓库各项 verification 及主任务回报；以本页更新说明补充较早记录。#16、#17（课程认证）已撤销，不纳入交付。#23 是**组织负责人变更**，不是个人入会。
+更新：2026-10-23。范围依据 [SPEC #1](https://github.com/cqu-moe/friends-cli/issues/1)、对应 ticket、仓库各项 verification 及已记录的实测结果；以本页更新说明补充较早记录。#16、#17（课程认证）已撤销，不纳入交付。#23 是**组织负责人变更**，不是个人入会。
 
 下表记录当前已合入代码的公开能力；“受控”指公开 SDK、真实 CLI 子进程、本地 HTTP 服务及执行实际 DOM 回调的页面场景，不等于真实学校业务通过。Ego 查询可用新鲜核验的现有会话直接查询 API；Ego 写属性操作只进行可见准备，保留人工输入并交接，最终由用户亲自提交。独立 API 写入要求明确选择与确认，不能接续 Ego 交接任务。响应丢失或含糊时保持 `UNKNOWN_OUTCOME` / exit 7，即使只读回查匹配也不自动重试或执行下一项写入。
 
@@ -24,7 +24,7 @@ SDK 名称指 npm 根入口；页面/存储适配器从 `/node` 导入，原生�
 | #13 课程参与 | 课程 participation client、Node prepare；`courses registrations list/show/apply/cancel/exit` | 条件、问卷/材料校验、独立参与写入、个人记录 | 可见准备/交接；角色、日期等未完成项交给用户 | API 明确确认或用户 |
 | #14 课程开办 | `createCourseOfferingClient`、Node prepare；`course-offering prepare/materials/next-step/submit/status/prepare-ego` | 只读准备 → 独立上传 → 第一步保存 → 最终申请 → 状态 | 仅第一步部分字段准备；不上传或点击下一步 | API 每个写阶段独立确认或用户；复杂岗位/问卷/受众限制未支持 |
 | #15 课程开办/报名审批 | `createCourseReviewClient`、Node prepare；`courses reviews list/show/prepare/decide` | 两类现有待办/详情、决定、回查 | 可见决定/意见准备、交接 | API 明确确认或用户；具体节点决定与整体流程状态分开 |
-| #18 组织活动查询、开办 | `createOrganizationActivityClient`、Node prepare；`organization-activities list/show/requirements/status/prepare/materials/submit` | 查询/组织字典 → 独立材料 → 第一步保存 → 最终设置 → 状态 | 仅第一阶段空白文本；组织/日期/材料、下一步及第二步交给用户 | API 明确确认或用户；1–8 次签到、空自定义问卷，拒绝任意字段透传 |
+| #18 组织活动查询、开办 | `createOrganizationActivityClient`、Node prepare；`organization-activities list/show/requirements/status/prepare/materials/submit` | 查询/可选组织核验 → 独立材料 → 第一步保存 → 最终设置 → 状态 | 第一阶段空白文本准备，识别并保留已匹配组织；改选组织、日期/材料、下一步及第二步由用户处理 | API 明确确认或用户；1–8 次签到、空自定义问卷，拒绝任意字段透传 |
 | #19 组织活动参与 | `createOrganizationParticipationClient`、Node prepare；`organization-participation list/show/prepare/apply/cancel/exit` | 活动/条件、已有材料组校验、参与写入、状态 | 对应页面准备、交接；日期/附件交给用户 | API 明确确认或用户；无自动上传 |
 | #20 组织活动审批 | `createOrganizationActivityReviewClient`、Node prepare；`organization-activities offering-reviews/registration-reviews` | 待办/详情/verify；开办通过先保存再审批；报名独立审批 | 只打开决定弹窗、准备意见、交接 | API 明确确认或用户；保存不确定时不续审批；待办消失不证明具体决定 |
 | #21 组织资料、成员 | `createFriendsSdk` 组织 client、Node profile prepare；`organizations list/members/profile show/prepare/save` | 组织权限、成员分页、允许字段准备/保存 | 可见资料准备、交接 | API 明确确认或用户；限定字段，拒绝错误组织 |
@@ -34,7 +34,7 @@ SDK 名称指 npm 根入口；页面/存储适配器从 `/node` 导入，原生�
 
 ## 源码、受控与真实证据
 
-“真实”只列已记录的阶段，空列表、权限拒绝或关闭窗口不能证明写入可用。2026-10-23 新增结果由主任务执行并回报，本 worker 未访问浏览器或生产 API。以下只保留数量与阶段，不收录人员、组织、申请 ID 或电话。学校公开 JS 的文件名及对应接口见各行链接；原始 source/evidence 留在本地证据目录。
+“真实”只列已记录的阶段，空列表、权限拒绝或关闭窗口不能证明写入可用。学校登录态只读查询、真实页面 helper 诊断、受控公开 SDK/CLI 调用分别记录，不能互相替代。2026-10-23 的 helper 诊断均抑制 handoff（`handoffExercised:false`），不构成真实完整公开 SDK/CLI 交接验收。以下只保留数量与阶段，不收录人员、组织、申请 ID 或电话。学校公开 JS 的文件名及对应接口见各行链接；原始 source/evidence 保存在本地证据目录。
 
 | Ticket | 已知来源 | 受控覆盖 | 真实证据与保留限制 |
 | --- | --- | --- | --- |
@@ -45,26 +45,26 @@ SDK 名称指 npm 根入口；页面/存储适配器从 `/node` 导入，原生�
 | #6 | [认证页与局部编辑](2026-10-22-volunteer-certification-ego.md) | 真实 DOM 事件、人工值、交接后停止、Ego submit 拒绝 | 10-22 已安装 Ego 在**本地虚构页面**录入及零最终请求；该次 handoff 为记录包装器。真实学校只读检查控件；学校最终提交未验收 |
 | #7 | [人工捕获记录](2026-10-22-certification-capture.md) | SDK/真实 CLI 捕获、修订冲突、恢复与控制边界 | 10-22 本地虚构页面真实交接/交还与捕获；学校页面局部名单编辑/捕获、只读认证状态 absent，刷新后临时名单消失。学校实际准备使用交接记录包装器；无最终提交 |
 | #8 | [认证 API、空 DTO](2026-10-22-certification-api.md) | SDK/CLI 提交、拒绝、UNKNOWN_OUTCOME、不重试、只读回查 | 10-22 学校既有会话只读确认无申请的全 null DTO；真实最终 POST 与认证后结果未验收 |
-| #9 | [志愿查询与参与](2026-10-22-volunteer-operations.md)、[集成修复](2026-10-23-volunteer-fixes.md) | SDK/真实 CLI 全部查询与报名/退出；同源 iframe 实际控件、人工值和中断回执 | 10-23 主任务实际调用公开 SDK `listActivities({pageSize:1})` 成功 1 项；`getIdentity` 的 can-apply 返回 HTTP 400/code=10000，已核实为“已有待审申请”的业务拒绝；错误分类与部分身份结果修复待合入。此前 CLI 500 非持续故障，统一搜索现已调用志愿 SDK 成功；**独立志愿 CLI 尚未完成真实验收**，无参与写入 |
+| #9 | [志愿查询与参与](2026-10-22-volunteer-operations.md)、[集成修复](2026-10-23-volunteer-fixes.md)、[身份业务拒绝修复](2026-10-23-volunteer-identity.md) | SDK/真实 CLI 全部查询与报名/退出；同源 iframe 实际控件、人工值和中断回执 | 10-23 `fa994fe` 的真实独立 CLI Ego `volunteers identity` 成功：`memberView={present:false,interpreted:false}`、`membershipApplicationAllowed=null`、`membershipApplication.status=business-rejected`、`upstreamCode=10000`。can-apply 的无参数 GET 返回 HTTP 400，已核实为已有待审申请的业务拒绝，不是网络失败。独立 CLI Ego `volunteers activities list --page-size 1` 成功 1 项；身份修复已合入。无真实报名或退出写入 |
 | #10 | [志愿开办及学校页面](2026-10-22-volunteer-offering.md) | SDK/CLI 分阶段 API、材料、丢失响应；真实 DOM 人工值保护 | 10-22 SDK 字典/组织/学期成功，实际 iframe 文本/选择器/日期准备，随后 reload；handoff 被包装。无真实上传、下一步或最终提交 |
 | #11 | [两类志愿审批](2026-10-22-volunteer-activity-reviews.md) | SDK/CLI 两领域、严格 URL/ID/权限、真实 DOM 决定准备 | 10-23 真实 CLI `volunteer activity-reviews list --type registration --via ego --page-size 1` 成功、0 项；此前记录 hasMore=false。无真实决定弹窗或写入 |
 | #12 | [个人时长与认证审批](2026-10-22-volunteer-reviews.md) | SDK/CLI 时长、审批与错误；实际 DOM radio/textarea | 真实 CLI Ego 时长空列表；审批因当前角色权限不足拒绝。无真实审批准备/保存/最终提交 |
 | #13 | [课程参与源码与测试](2026-10-22-course-participation.md) | SDK/CLI 参与写入、问卷/材料、状态；iframe 实际事件 | 10-23 真实 CLI `courses registrations list --via ego` 返回 1 项。无真实报名、撤销或退出；角色控件等需用户处理 |
-| #14 | [CourseInfo/ReportSet、材料边界](2026-10-23-course-offering.md) | SDK/CLI 六阶段、丢失响应、严格 iframe DOM | 10-23 实际 SDK prepare 组织/字典查询成功；`080d893` 真实 helper 恢复及空表单完整录入通过，组织原值匹配，`executionError:null`、`submitted:false`。主任务重载清理后非空可编辑项/上传均为 0；handoff 被抑制（`handoffExercised:false`），实际公开 SDK/CLI 整体入口及真实交接未单独验收，无上传/下一步/最终提交 |
-| #15 | [课程两类审批源码](2026-10-23-course-reviews.md)、[角色核验修复](2026-10-23-review-context-fix.md) | SDK/CLI、权限/节点/状态、真实 DOM 与零最终请求 | 10-23 主任务在功能提交 `dff1dd1` 的真实 CLI Ego 报名待办查询成功、0 项；此前 AUTH_REQUIRED 修复已进入 integration。无真实准备/决定；受控回查不证明整体获批 |
-| #18 | [组织活动查询、两步开办与材料](2026-10-23-organization-activities.md) | SDK/真实 CLI 全部命令、严格路径/材料、多步停止、iframe 实际文本与事件 | 10-23 主任务真实 CLI list/show/requirements 成功；错误历史端点修正后，`e53aea7` 公开 SDK status 成功，nodeList=3、evaluationRecords=2，已随 `42f7d28` 合入。无开办准备/上传/申请写入。材料资源回查只核对 ID/文件名，不证明字节哈希 |
+| #14 | [CourseInfo/ReportSet、材料边界](2026-10-23-course-offering.md) | SDK/CLI 六阶段、丢失响应、严格 iframe DOM | 10-23 实际 SDK prepare 组织/字典查询成功；`080d893` 真实 helper 恢复及空表单完整录入通过，组织原值匹配，`executionError:null`、`submitted:false`。重载清理后非空可编辑项/上传均为 0；handoff 被抑制（`handoffExercised:false`），实际公开 SDK/CLI 整体入口及真实交接未单独验收，无上传/下一步/最终提交 |
+| #15 | [课程两类审批源码](2026-10-23-course-reviews.md)、[角色核验修复](2026-10-23-review-context-fix.md) | SDK/CLI、权限/节点/状态、真实 DOM 与零最终请求 | 10-23 功能提交 `dff1dd1` 的真实 CLI Ego 报名待办查询成功、0 项；此前 AUTH_REQUIRED 修复已进入 integration。无真实准备/决定；受控回查不证明整体获批 |
+| #18 | [组织活动查询、两步开办与材料](2026-10-23-organization-activities.md)、[端点与字段审计](2026-10-23-organization-activity-source-audit.md) | SDK/真实 CLI 全部命令、严格路径/材料、多步停止、iframe 实际文本与事件 | 10-23 真实 CLI list/show/requirements 成功；`e53aea7` 公开 SDK status 返回 nodeList=3、evaluationRecords=2。组织来源修正为 POST `apply-info/drop-down-list`、`{isTeacher:false}`，以学校 `isCurrentTerm` 字符串 `"1"` 选期的真实 SDK prepare 返回 materials-required。`aa26be7` 真实 helper 填写名称/简介/地址并通过 custom DIV 组织回读：已选组织匹配，`organizationRequiresManual=false`、`executionError:null`、`submitted:false`；日期、材料、后续设置仍为人工事项。诊断 `handoffExercised:false`；重载清理后可编辑文本/上传均为 0。真实完整公开 SDK/CLI 交接未验收，无下一步、上传或最终提交。材料资源回查只核对 ID/文件名，不证明字节哈希 |
 | #19 | [组织活动参与源码](2026-10-23-organization-participation.md) | SDK/CLI 参与、材料组、丢失响应；实际 DOM | 10-23 真实 CLI list/show 同一项成功，但报名窗口关闭。无实际报名/撤销/退出 |
 | #20 | [组织开办/报名审批源码](2026-10-23-organization-activity-reviews.md) | SDK/CLI 两领域、严格来源/权限、多步停止、实际 DOM | 10-23 真实 CLI 开办待办查询因当前 XS 身份不能审批而正确 PERMISSION_DENIED / exit 4；**无真实待办查询成功、准备或写入证据**。verify 只证明当前角色待办范围内的观察 |
-| #21 | [组织查询/维护公开说明](../../README.md#学生组织)、组织管理公开 JS | SDK/CLI 组织/成员/允许字段、API 保存及页面保护 | 10-23 真实 CLI Ego `organizations list` 成功 5 项。成员/资料编辑及写入无新增真实证据 |
+| #21 | [组织查询/维护公开说明](../../README.md#学生组织)、组织管理公开 JS | SDK/CLI 组织/成员/允许字段、API 保存及页面保护 | 10-23 真实 CLI Ego `organizations list` 成功 5 项；真实 CLI `profile show` 只读成功，返回 id/name/type/logo/backgroundGroupUuid/blurb 键，`members --page-size 1` 返回 1 项。资料编辑、成员写入均未验收 |
 | #22 | [加入/退出审批与实际 DIV](2026-10-23-organization-approvals.md) | SDK/CLI API、公开 prepare 自行重验；实际 DIV 无 ref、textarea、人工值、外层冲突与丢失回执 | 10-23 真实 CLI 加入申请列表 page-size=1 返回 1 项；手动打开空“通过”意见弹窗后取消。所选申请已通过、关系 state=1，公开 SDK 正确 BUSINESS_REJECTED；另有未处理申请但当前角色无审批权，正确 PERMISSION_DENIED。两者均未进入 UI，未填意见。**当前无“待处理且有权”的实测目标，完整 public prepare 仅受控；真实预检保护已验证** |
 | #23 | [responsiblePersonChangeInfo 来源](2026-10-23-organization-leader-change.md) | SDK/CLI 候选人/资格/申请/状态、DOM 与不确定响应 | 10-23 真实 CLI Ego status 返回当前负责人、申请及岗位。无负责人变更申请写入或真实可见准备验收 |
-| #24 | [三领域现有查询及预算契约](2026-10-23-unified-search.md) | SDK/真实 CLI、类型/ID、独立预算、未知分页与部分失败已覆盖 | 10-23 主任务在 `3be2468` 真实 CLI Ego 统一搜索：三领域均 status=ok、各 1 项，complete=false 且 budget 停止符合预期；无点击/填表/导航。已进入 integration；最终提交另做安装验收 |
+| #24 | [三领域现有查询及预算契约](2026-10-23-unified-search.md) | SDK/真实 CLI、类型/ID、独立预算、未知分页与部分失败已覆盖 | 10-23 `3be2468` 的真实 CLI Ego 统一搜索：三领域均 status=ok、各 1 项，complete=false 且 budget 停止符合预期；无点击/填表/导航。已合入；最终合并头安装验收尚待补充 |
 
-通用公共接口必须使用 `/gateway/ek-agg-mob/biz-common/...` 与 `zovecenter-saip-ek-agg-mob`，不能退回 `/gateway/biz-common` 或换 AppKey 重试。历史测试数是各记录当时的本地结果；本次整体验收见下一节，不能相加当作当前测试数。
+通用公共接口必须使用 `/gateway/ek-agg-mob/biz-common/...` 与 `zovecenter-saip-ek-agg-mob`，不能退回 `/gateway/biz-common` 或换 AppKey 重试。历史测试数是各记录当时的本地结果，不能相加当作当前测试数；安装检查的适用提交与限制见下一节。
 
 ## 本次安装包验收
 
-以下为已完成的**中间提交安装检查**；后续功能修复仍在合入，不能当作最终 PR 头的安装验收。主任务接手最终合并头复验，使用共享本地 notes 中保存的 `delivery-package-acceptance.mjs`（传入干净 checkout 路径与证据目录），无需新增仓库测试。
+以下为已完成的**中间提交安装检查**；后续功能修复发生在该检查之后，不能当作最终 PR 头的安装验收。对应脚本为本地证据目录中的 `delivery-package-acceptance.mjs`；最终合并头的安装结果尚待补充。
 
 | 项目 | 已记录结果 |
 | --- | --- |
@@ -79,6 +79,6 @@ SDK 名称指 npm 根入口；页面/存储适配器从 `/node` 导入，原生�
 
 实际执行 `npm pack`（含 prepack 构建），在源码仓库外临时 fixture home 正常 `npm install` 生成的 tarball，未跳过 lifecycle scripts；依赖版本、manifest、integrity、内容扫描及命令结果保存在 `delivery-installed-1cc70eb4f3f3/`。扫描未见凭据或私有个人数据；README 唯一手机号形状字面量与虚构负责人测试数据逐字核对，未将其当成真实联系方式。离线缓存元数据不足的一次安装没有计为通过；正常 registry 安装成功。未发现需修复的打包缺陷。
 
-本分支合入 integration `b292ccf91b44ddd8c51db4b8fab8e0644cf7a4cc` 后，在 `d079594c307fc6665d031edded437918b19335cb` 运行完整 `npm test`（含 TypeScript 构建）：**238 项通过，0 失败、0 跳过**。之后仅更新验收文档。此结果是本地受控测试，不是 CI；最终合并头的安装包复验由主任务运行保存的脚本，不把上述中间包套用到新功能头。
+历史本地受控测试：`d079594c307fc6665d031edded437918b19335cb`（包含 integration `b292ccf91b44ddd8c51db4b8fab8e0644cf7a4cc`）运行完整 `npm test`（含 TypeScript 构建），**238 项通过，0 失败、0 跳过**。此结果不是 CI，也不是最终合并头的安装验收；上述中间包结果不能套用到后续修复头。
 
-当前仍未验收：CI、真实 API 业务写入、用户最终提交及其生产回查。安装/受控测试不解除原生 Auth 的 WAF 阻塞；主任务负责 PR #25 和真实运行时验收，本 worker 不推送或发布。
+当前仍未验收：CI、最终合并头安装包、真实 API 业务写入、用户最终提交及其生产回查。安装/受控测试不解除原生 Auth 的 WAF 阻塞；#4 仍未完成，SPEC 不能视为整体验收通过。
