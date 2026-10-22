@@ -8,7 +8,7 @@ if(!configuration.executeSession&&script.includes('FRIENDS_CLI_EGO_SESSION:')) {
 const stats={clicks:[],fills:[],handoffs:0,navigations:0,submits:0,snapshots:0};
 const dom=new JSDOM(await readFile(configuration.html,'utf8'),{url:configuration.url,runScripts:'dangerously',beforeParse(w){
  w.fetch=async(url,init)=>{if(init?.method==='POST')stats.submits++;return fetch(new URL(url,configuration.url),init);};
- w.localStorage.setItem('token_str',configuration.token??'ego-fixture-token');w.localStorage.setItem('userLevel_str','XS');
+ w.localStorage.setItem('token_str',configuration.token??'ego-fixture-token');w.localStorage.setItem('userLevel_str',configuration.userLevel??'XS');
 }});
 const w=dom.window;
 let saved=configuration.state?JSON.parse(await readFile(configuration.state,'utf8').catch(()=>'{"ownership":"agent"}')):{ownership:'agent'};
@@ -29,7 +29,7 @@ const page={
  async goto(){stats.navigations++;throw new Error('Unexpected navigation would discard fixture edits');},
  async snapshot(){active();stats.snapshots++;if(configuration.changeOnSecondSnapshot&&stats.snapshots===2){w.document.querySelector('#edit input[name=requiredCourseCount]').value='9';w.document.querySelector('.hours span:last-child').textContent='9';}return w.document.body.textContent;},
  async evaluate(fn,arg){active();if(arguments.length>1&&arg===undefined)throw new Error("page.evaluate argument must be JSON-serializable");w.__argument=structuredClone(arg);return JSON.parse(JSON.stringify(await w.eval(`(${fn.toString()})(__argument)`)));},
- async waitForFunction(fn,arg){active();w.__argument=structuredClone(arg);if(!await w.eval(`(${fn.toString()})(__argument)`))throw new Error('Fixture never became ready');},
+ async waitForFunction(fn,arg){active();w.__argument=structuredClone(arg);for(let i=0;i<30;i++){if(await w.eval(`(${fn.toString()})(__argument)`))return;await new Promise(r=>setTimeout(r,10));}throw new Error('Fixture never became ready');},
  async click(selector,options){active();if(selector==="loc=css:.van-overlay"&&!options?.position)throw new Error("Popup intercepts the overlay center");const e=one(selector);if(w.getComputedStyle(e).pointerEvents==="none")throw new Error("Field body intercepts input pointer events");stats.clicks.push(selector);e.click();},
  async fill(selector,value){active();const e=one(selector);if(e.disabled)throw new Error('Cannot fill disabled input');stats.fills.push(selector);e.value=value;e.dispatchEvent(new w.Event('input',{bubbles:true}));e.dispatchEvent(new w.Event('change',{bubbles:true}));},
  async waitForSelector(selector,{state='visible'}={}){active();if(matches(selector,true).length>1)throw new Error('Ambiguous wait selector including hidden elements');for(let i=0;i<30;i++){const list=matches(selector);if(state==='hidden'?list.length===0:list.length>0)return;await new Promise(r=>setTimeout(r,10));}throw new Error('Waiting for selector failed: '+selector);},

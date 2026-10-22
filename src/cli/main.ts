@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {volunteerActivityReviewSchemas,registerVolunteerActivityReviewCommands} from "./volunteer-activity-reviews.js";
 import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
 import { Command } from "commander";
 import {
@@ -29,6 +30,7 @@ import { organizationSchemas, registerOrganizationCommands } from "./organizatio
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
+  ...volunteerActivityReviewSchemas,
   ...certificationApiSchemas,
   ...draftSchemas,
   ...organizationSchemas,
@@ -397,6 +399,7 @@ courses
     });
   });
 
+registerVolunteerActivityReviewCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 registerCertificationApiCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 
 registerDraftCommands(program, {
