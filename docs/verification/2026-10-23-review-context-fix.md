@@ -18,8 +18,12 @@
 - 三套 HTTP fixture 默认都移除仪表盘的伪造角色字段；课程/志愿活动仍覆盖各自 SDK 与 CLI 的完整既有审批路径。旧认证 fixture 原先用 `XS` session 配合仪表盘伪造的 `XSC`，现改为会话、可用身份及 `enterHall` 一致的 `XSC`；另明确验证真实 `XS` 上下文仍无认证审批角色。
 - `tests/review-context.test.js` 从三个公开 SDK 工厂直接进入，覆盖每次检查的账号/角色/单位漂移、角色/单位消失、伪造或内部不一致的 caller session、准备后回执变化。负例断言不会进入审批业务请求，也不会自动选其他身份或发送决定。
 - 定向 TypeScript 构建和七个 SDK/CLI 测试文件：34 项通过，0 失败、0 跳过。
-- `01fc43f` 提交修复，`7f24e77` 合入 integration `368abee`。合入后的完整 `npm test`（包含 TypeScript 构建）：204 项通过，0 失败、0 跳过。完整日志保存于共享 notes 的 `review-context-fix-npm-test.log`；生产改动仍只涉及三个指定模块。
+- `01fc43f` 提交修复，`7f24e77` 合入 integration `368abee`，最终通过 `170e153` 再合入更新后的 integration `b2adb95`，均无冲突。最终完整 `npm test`（包含 TypeScript 构建）：229 项通过，0 失败、0 跳过。完整日志保存于共享 notes 的 `review-context-fix-npm-test.log`；生产改动仍只涉及三个指定模块。
+
+## 主 agent 真实只读复验
+
+主 agent 已在本 worker 的构建分支上执行 `courses reviews list --type registration --via ego --ego-task-space 16 --ego-page p3 --page-size 1`，报告返回 `ok: true`、`items` 数量为 `0`，原有 `AUTH_REQUIRED` 已消除。这是主 agent 提供的真实学校复验证据，worker 未自行访问生产环境；空列表证明该只读查询成功，不代表存在待审批记录或审批写入已经验收。
 
 ## 验收限制
 
-所有 worker HTTP、CLI、Ego fixtures 均为虚构本地场景。真实学校只读命令的修复回归由主 agent 在合入后完成；worker 未操作 GitHub、生产业务写入或真实浏览器。`enterHall` 会建立/核对明确指定的固定会话上下文，它不是审批提交；本修复没有增加业务写入或绕过人工最终提交。
+所有 worker HTTP、CLI、Ego fixtures 均为虚构本地场景。真实只读复验由主 agent 完成；worker 未操作 GitHub、生产业务写入或真实浏览器。`enterHall` 会建立/核对明确指定的固定会话上下文，它不是审批提交；本修复没有增加业务写入或绕过人工最终提交。
