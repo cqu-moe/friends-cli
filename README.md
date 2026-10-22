@@ -1,6 +1,6 @@
 # friends-cli
 
-重庆大学第二课堂平台的本地 CLI 与可复用 SDK。当前交付 Issue #2–#3 的最小只读课程链、Issue #4 的 CQU Auth OAuth/DPoP 登录与恢复、Issue #5 的志愿认证本地草稿，以及 Issue #21 的学生组织查询、成员查询与组织资料受控维护：Ego 浏览器本地登录、学校 API 身份/上下文核验、课程查询、可管理志愿活动/报名名单只读查询、草稿编辑与恢复、组织/资料/成员查询。不包含组织活动报名、审批、成员写入、部门维护或学校认证提交。
+重庆大学第二课堂平台的本地 CLI 与可复用 SDK。当前交付 Issue #2–#3 的最小只读课程链、Issue #4 的 CQU Auth OAuth/DPoP 登录与恢复、Issue #5 的志愿认证本地草稿、Issue #12 的个人志愿时长与认证审批查询/受控决定，以及 Issue #21 的学生组织查询、成员查询与组织资料受控维护：Ego 浏览器本地登录、学校 API 身份/上下文核验、课程查询、可管理志愿活动/报名名单只读查询、草稿编辑与恢复、志愿时长/认证审批查询、组织/资料/成员查询。不包含组织活动报名、审批、成员写入或部门维护。
 
 ## 安装与命令
 
@@ -33,6 +33,15 @@ friends organizations profile show <organizationUuid> --json
 friends organizations members <organizationUuid> --page 1 --page-size 10 --json
 friends organizations profile prepare <organizationUuid> \
   --via ego --ego-task-space 12 --ego-page p1 --blurb "新的组织简介" --json
+friends volunteer-hours list --page 1 --page-size 10 --json
+friends volunteer-hours show <transcriptUuid> --json
+friends volunteer-certification-reviews list --via ego \
+  --ego-task-space 16 --ego-page p1 --json
+friends volunteer-certification-reviews show <reviewUuid> --json
+friends volunteer-certification-reviews decide <reviewUuid> \
+  --via api --decision pass --message "同意认证" --time 2026-10-22 --confirm --json
+friends volunteer-certification-reviews prepare <reviewUuid> \
+  --via ego --ego-task-space 16 --decision back --message "请补充材料" --json
 friends drafts activities --via ego --ego-task-space 16 --ego-page p1 --json
 friends drafts create --activity-id <activityUuid> --json
 friends drafts edit <draftId> --expected-revision 0 --input patch.json --json
@@ -127,6 +136,12 @@ friends certification status <activityId> --via ego --ego-task-space 16
 ```
 
 `--input -` 读取 stdin 导出的草稿。当前认证表单没有附件入口，带材料的草稿会在写入前拒绝。`UNKNOWN_OUTCOME`（退出码 7）时保留草稿，先用 `certification status` 回查，不自动重交。业务确认与回查结果分别返回；已有认证不会被这个新建命令覆盖。
+
+## 个人志愿时长与认证审批
+
+`volunteer-hours` 查询学校成绩单分页和详情，时长按生产页面已核实的单位投影为小时；未知活动类型、状态和分页能力保留原值或 `null`，不把待审时长解释为已认定。`volunteer-certification-reviews` 先用学校返回的真实登录角色映射审批 `handleType`，角色不能由 CLI 参数指定或提升。
+
+认证审批 API 决定只暴露生产页面可见的 `pass` 和 `back`。决定必须独立 `--via api`，并使用 `--confirm` 或 `--dry-run`；BACK 的回退节点只能来自学校 callback-list。请求确认和只读回查分开返回，写入响应丢失时即使回查匹配也保持 `UNKNOWN_OUTCOME`，不会重试。Ego prepare 会打开对应的通过/打回对话框并填写意见，然后交接页面；不点击最终确认、不触发保存 PUT、不调用写入 API，BACK 的回退节点和最终提交由用户人工确认。
 
 ## 学生组织
 

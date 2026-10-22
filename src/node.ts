@@ -287,6 +287,130 @@ console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({
   throw safeError("The Ego organization profile preparation did not return its route");
 }
 
+export async function prepareVolunteerCertificationReviewInEgo(options: {
+  taskSpaceId: number;
+  page?: string;
+  reviewId: string;
+  activityId: string;
+  schoolRole: string;
+  decision: "pass" | "back";
+  message: string;
+  timeoutMs?: number;
+  command?: string;
+}): Promise<{
+  route: string;
+  decision: "pass" | "back";
+  messageAction: "filled";
+  externalWriteActions: 0;
+  finalSubmitActions: 0;
+  handedOff: true;
+}> {
+  if (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1) {
+    throw safeError("Invalid Ego task space", FriendsErrorCode.InvalidInput);
+  }
+  const page = options.page ?? "p1";
+  if (!/^p[1-9][0-9]*$/.test(page)) {
+    throw safeError("Invalid Ego page label", FriendsErrorCode.InvalidInput);
+  }
+  const userWaitMs = options.timeoutMs ?? 300_000;
+  if (!Number.isSafeInteger(userWaitMs) || userWaitMs < 1) {
+    throw safeError("Invalid Ego timeout", FriendsErrorCode.InvalidInput);
+  }
+  if (
+    options.decision !== "pass" && options.decision !== "back" ||
+    typeof options.message !== "string" || options.message.trim() === "" || options.message.length > 100 ||
+    [options.reviewId, options.activityId, options.schoolRole]
+      .some((value) => typeof value !== "string" || value === "" || /[\\/?#\s\r\n]/.test(value))
+  ) {
+    throw safeError("Invalid certification review preparation input", FriendsErrorCode.InvalidInput);
+  }
+  const query = new URLSearchParams({
+    uuid: options.reviewId,
+    activityId: options.activityId,
+    handleType: options.schoolRole,
+  });
+  const route = `/mobile/volunteerManage/campusCerApprovalDetail?${query.toString()}`;
+  const actionLabel = options.decision === "pass" ? "通过" : "打回";
+  const script = `
+const task = await taskSpace(${options.taskSpaceId});
+const page = task.page(${JSON.stringify(page)});
+const route = ${JSON.stringify(route)};
+await page.goto("https://friends.cqu.edu.cn" + route);
+await page.waitForLoadState("load");
+await page.waitForFunction((label) => document.body.innerText.includes(label), ${JSON.stringify(actionLabel)}, { timeout: 15000 });
+const actionSelector = await page.evaluate((label) => {
+  const actions = Array.from(document.querySelectorAll("button, [role=button]"))
+    .filter((element) => {
+      const rect = element.getBoundingClientRect();
+      const text = element.textContent?.trim();
+      return rect.width > 0 && rect.height > 0 && !element.disabled && text === label;
+    });
+  if (actions.length !== 1) throw new Error("Expected exactly one visible certification review action");
+  actions[0].setAttribute("data-friends-cli-review-action", "");
+  return "[data-friends-cli-review-action]";
+}, ${JSON.stringify(actionLabel)});
+await page.click(actionSelector, { label: ${JSON.stringify(actionLabel)} });
+await page.waitForSelector("textarea", { state: "visible", timeout: 15000 });
+const messageSelector = await page.evaluate(() => {
+  const fields = Array.from(document.querySelectorAll("textarea"))
+    .filter((field) => {
+      const rect = field.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && !field.disabled && !field.readOnly;
+    });
+  if (fields.length !== 1) throw new Error("Expected exactly one visible certification review message field");
+  fields[0].setAttribute("data-friends-cli-review-message", "");
+  return "[data-friends-cli-review-message]";
+});
+await page.fill(messageSelector, ${JSON.stringify(options.message)});
+await page.waitForFunction((expected) => Array.from(document.querySelectorAll("textarea"))
+  .some((field) => field.value === expected), ${JSON.stringify(options.message)}, { timeout: 15000 });
+await task.handOff();
+console.log("FRIENDS_CLI_EGO_REVIEW_PREPARED:" + JSON.stringify({
+  route,
+  decision: ${JSON.stringify(options.decision)},
+  messageAction: "filled",
+  externalWriteActions: 0,
+  finalSubmitActions: 0,
+  handedOff: true
+}));
+`;
+  const output = await runEgoProcess({
+    script,
+    command: options.command ?? "ego-browser",
+    timeoutMs: userWaitMs + 30_000,
+  });
+  try {
+    const parsed = singleMarker(output, "FRIENDS_CLI_EGO_REVIEW_PREPARED:") as {
+      route?: unknown;
+      decision?: unknown;
+      messageAction?: unknown;
+      externalWriteActions?: unknown;
+      finalSubmitActions?: unknown;
+      handedOff?: unknown;
+    } | null;
+    if (
+      parsed?.route === route &&
+      parsed.decision === options.decision &&
+      parsed.messageAction === "filled" &&
+      parsed.externalWriteActions === 0 &&
+      parsed.finalSubmitActions === 0 &&
+      parsed.handedOff === true
+    ) {
+      return {
+        route: parsed.route,
+        decision: options.decision,
+        messageAction: parsed.messageAction,
+        externalWriteActions: 0,
+        finalSubmitActions: 0,
+        handedOff: true,
+      };
+    }
+  } catch {
+    // Return the generic bridge failure below.
+  }
+  throw safeError("The Ego certification review preparation did not return its route");
+}
+
 export async function readEgoSession(options: {
   taskSpaceId?: number;
   page?: string;

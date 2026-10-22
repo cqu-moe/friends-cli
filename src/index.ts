@@ -27,6 +27,7 @@ export type {
   SavedOrganizationProfile,
 } from "./organizations.js";
 export * from "./certification-api.js";
+export * from "./volunteer-reviews.js";
 
 declare const courseIdBrand: unique symbol;
 export type CourseId = string & { readonly [courseIdBrand]: true };
