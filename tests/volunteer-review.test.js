@@ -212,7 +212,7 @@ test("SDK uses real callback nodes for BACK and rejects unsupported verified rev
 
   upstream.state.availableRole = "XS";
   upstream.state.role = "XS";
-  const student = createVolunteerCertificationReviewClient({ ...upstream, session: { ...session, userLevel: "XS", levelNo: "XS" } });
+  const student = createVolunteerCertificationReviewClient({ ...upstream, session: { ...session, token:"student-review-token", userLevel: "XS", levelNo: "XS" } });
   await assert.rejects(() => student.list(), (error) =>
     error.code === FriendsErrorCode.PermissionDenied);
 });

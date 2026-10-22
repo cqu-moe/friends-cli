@@ -236,3 +236,25 @@ test("CQU Auth SDK distinguishes blocked discovery from issuer mismatch", async 
     assert.equal(scenario.requests.length, 1);
   }
 });
+
+
+test('friends-only DPoP grants exchange tickets without refresh and require reauthorization on expiry', async t=>{
+ const scenario=await controlledCquAuthScenario({accessOnly:true,expectedOfflineAccess:false});t.after(()=>scenario.close());
+ const auth=createCquAuthClient({issuer:scenario.issuer,clientId,redirectUri:'http://127.0.0.1:9/callback',friendsBaseUrl:scenario.friendsBaseUrl});
+ const pending=await auth.beginAuthorization({keyPair:await generateCquDpopKeyPair(),offlineAccess:false});
+ assert.deepEqual(pending.scopes,['cqu:ticket:friends']);
+ const redirect=await fetch(pending.authorizationUrl,{redirect:'manual'});
+ const grant=await auth.completeAuthorization(pending,redirect.headers.get('location'));
+ assert.equal(grant.credentials.refreshToken,undefined);
+ const manager=auth.createGrantManager({credentials:grant.credentials,keyPair:grant.keyPair});
+ const session=await manager.exchangeFriendsSession();
+ assert.equal((await (await manager.createCourseClient(session)).list()).items[0].id,'course-1');
+ const ticket=await auth.requestFriendsServiceTicket(grant.credentials,grant.keyPair);
+ await auth.exchangeFriendsSession(ticket);
+ await assert.rejects(()=>auth.exchangeFriendsSession(ticket),{code:'AUTH_REQUIRED'});
+ const count=scenario.requests.length;
+ await assert.rejects(()=>manager.refresh(),{code:'AUTH_REQUIRED'});
+ const expired=auth.createGrantManager({credentials:{...grant.credentials,expiresAt:0},keyPair:grant.keyPair});
+ await assert.rejects(()=>expired.requestFriendsServiceTicket(),{code:'AUTH_REQUIRED'});
+ assert.equal(scenario.requests.length,count,'no refresh, ticket replay or fallback is allowed after expiry');
+});

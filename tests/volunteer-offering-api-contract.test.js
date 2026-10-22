@@ -22,6 +22,10 @@ test("SDK rejects invalid offering dates, rosters, organizations, and material s
   const upstream = await offeringSchool(t);
   const offering = client(upstream);
   const cases = [
+    ...['isOpenEnrollment','isEnrollExamine','isHideList','isLimitVolunteer','isPrivateCollection','currentOrganization'].map(field => [field+' string', input => { input.registration[field]='true'; }]),
+    ['required question string', input => { input.registration.questionnaires[0].isMandatory='true'; }],
+    ['star object', input => { input.registration.volunteerStar={unexpected:true}; }],
+    ['questionnaire object', input => { input.registration.questionnaires={unexpected:true}; }],
     ["invalid end date", (input) => { input.activity.endTime = "2026-02-30 10:00:00"; }],
     ["invalid phone", (input) => { input.activity.phone = "23800138000"; }],
     ["missing publicity", (input) => { input.materials.publicityPictures = []; }],
@@ -33,6 +37,12 @@ test("SDK rejects invalid offering dates, rosters, organizations, and material s
     ["unknown top field", (input) => { input.activityStyle = "legacy"; }],
     ["attachment extension", (input) => {
       input.materials.attachments = [new File(["x"], "program.exe", { type: "application/octet-stream" })];
+    }],
+    ["lying Blob size", (input) => {
+      input.materials.attachments = [{name:'large.pdf',type:'application/pdf',size:1,file:new Blob([new Uint8Array(21*1024*1024)])}];
+    }],
+    ["inconsistent Blob size", (input) => {
+      input.materials.attachments = [{name:'small.pdf',type:'application/pdf',size:2,file:new Blob(['x'])}];
     }],
     ["attachment size", (input) => {
       input.materials.attachments = [new File([new Uint8Array(21 * 1024 * 1024)], "too-large.pdf", { type: "application/pdf" })];

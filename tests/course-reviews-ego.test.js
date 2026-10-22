@@ -79,3 +79,23 @@ test('course Ego SDK preserves a different human decision and SDK/CLI report par
   }
   assert.equal(api.writes().length,0);
 });
+
+
+test('public course review SDK and CLI bind the acted-on iframe route and fresh session',async t=>{
+ const api=await courseReviewScenario();t.after(api.close);const cli=await courseCli(t,api);
+ for(const mismatch of ['url','token','role']){
+  const page=await pageFixture(cli,api,'registration','refuse');
+  const config=JSON.parse(await readFile(page.config,'utf8'));config.outerUrl=config.url;
+  if(mismatch==='url')config.url=config.url.replace('course-reg-1','other-registration');
+  if(mismatch==='token')config.preparationToken='different-token';
+  if(mismatch==='role')config.preparationRole='XS';
+  await writeFile(page.config,JSON.stringify(config));
+  await viaSdk(page,api,run=>assert.rejects(run,{code:'PERMISSION_DENIED'}));
+  const result=await cli.run(['courses','reviews','prepare',page.input.id,'--type','registration','--decision','refuse','--via','ego','--ego-task-space','7','--ego-page','p2','--input','-'],JSON.stringify({message:page.input.message,time:page.input.time}),page.env);
+  assert.equal(cliJson(result,4).error.code,'PERMISSION_DENIED');
+  const observed=JSON.parse(await readFile(page.result,'utf8'));
+  for(const count of ['fills','clicks'])assert.deepEqual(observed[count],[]);
+  assert.equal(observed.navigations,0);assert.equal(observed.handoffs,0);assert.equal(observed.submits,0);
+ }
+ assert.equal(api.writes().length,0);
+});

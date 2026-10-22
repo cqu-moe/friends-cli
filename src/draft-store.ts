@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { createReadStream, constants } from "node:fs";
+import { tryLock } from "fs-native-extensions";
+import { chmod, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { FriendsError, FriendsErrorCode } from "./errors.js";
@@ -113,23 +114,19 @@ async function readDraft(path: string): Promise<VolunteerCertificationDraft> {
 }
 
 async function withLock<T>(lockPath: string, operation: () => Promise<T>): Promise<T> {
+  const handle = await open(lockPath, constants.O_CREAT | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);
   try {
-    await mkdir(lockPath, { mode: 0o700 });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const stat = await handle.stat();
+    if (!stat.isFile() || (stat.mode & 0o777) !== 0o600) throw localError("The draft lock file is unsafe", FriendsErrorCode.InvalidInput);
     const deadline = Date.now() + 5_000;
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-      if (!(await lstat(lockPath).catch(() => null))) {
-        return withLock(lockPath, operation);
-      }
+    while (!tryLock(handle.fd)) {
+      if (Date.now() >= deadline) throw localError("The certification draft is locked by another operation", FriendsErrorCode.UpstreamBusiness);
+      await new Promise(resolve => setTimeout(resolve, 25));
     }
-    throw localError("The certification draft is locked by another operation", FriendsErrorCode.UpstreamBusiness);
-  }
-  try {
     return await operation();
   } finally {
-    await rm(lockPath, { recursive: true, force: true });
+    // Keep the inode stable; unlinking it could split concurrent lock owners.
+    await handle.close();
   }
 }
 
@@ -157,7 +154,7 @@ export function createCertificationDraftStore(options: DraftStoreOptions = {}) {
       const storageRoot = await prepare();
       const path = this.path(draft.id);
       await assertOutsideRepository(path);
-      return withLock(join(storageRoot, `.${draft.id}.lock`), async () => {
+      return withLock(join(storageRoot, `.${draft.id}.write-lock`), async () => {
         const existing = await lstat(path).catch(() => null);
         const current = existing === null ? null : await readDraft(path);
         const currentRevision = current?.revision ?? -1;
@@ -184,7 +181,7 @@ export function createCertificationDraftStore(options: DraftStoreOptions = {}) {
       }
       const storageRoot = await prepare();
       const path = this.path(id);
-      return withLock(join(storageRoot, `.${id}.lock`), async () => {
+      return withLock(join(storageRoot, `.${id}.write-lock`), async () => {
         const current = await readDraft(path);
         const conflictPath = join(
           storageRoot,

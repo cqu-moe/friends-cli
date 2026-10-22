@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';import {test} from 'node:test';import {p
 async function run(args,env,input){return new Promise((resolve,reject)=>{const p=spawn(process.execPath,['dist/cli/main.js',...args],{env});let stdout='',stderr='';p.stdout.on('data',d=>stdout+=d);p.stderr.on('data',d=>stderr+=d);p.on('error',reject);p.on('close',code=>resolve({code,stdout,stderr}));p.stdin.end(input);});}
 test('SDK Ego prepares real iframe fields, preserves human input and stops before each final action',async t=>{
  const api=await participationScenario();t.after(api.close);api.questions.push({uuid:'q-2',title:'协作方式',itemType:'2',isMandatory:false,respDtoList:[{optionName:'布置'},{optionName:'协作'}]});
- for(const action of ['register','exit']){if(action==='exit')Object.assign(api.row,{application:true,applicationCode:7,applicationUuid:'org-registration-1'});const ego=await participationEgo(t,api.baseUrl,{action,human:'人工保留意见'});const result=await prepareOrganizationParticipationInEgo({input:{activityId:'org-activity-1',action,...(action==='register'?{answers:{'q-1':'自动填写','q-2':['协作']}}:{})},taskSpaceId:1,command:ego.command,baseUrl:api.baseUrl});assert.equal(result.submitted,false);const observed=await ego.observed();assert.equal(observed.handoffs,1);assert.equal(observed.submits,0);if(action==='register'){assert.match(observed.html,/人工保留意见/);assert.match(observed.html,/aria-checked="true"/);assert.ok(result.manualFields.includes('preserved:q-1'));}}
+ for(const action of ['register','exit']){if(action==='exit')Object.assign(api.row,{application:true,applicationCode:7,applicationUuid:'org-registration-1'});const ego=await participationEgo(t,api.baseUrl,{action,human:'人工保留意见'});const result=await prepareOrganizationParticipationInEgo({input:{activityId:'org-activity-1',action,...(action==='register'?{answers:{'q-1':'自动填写','q-2':['协作']}}:{})},taskSpaceId:1,command:ego.command,baseUrl:api.baseUrl});assert.equal(result.submitted,false);const observed=await ego.observed();assert.equal(observed.handoffs,1);assert.equal(observed.submits,0);assert.equal(observed.navigations,0);if(action==='register'){assert.match(observed.html,/人工保留意见/);assert.match(observed.html,/aria-checked="true"/);assert.ok(result.manualFields.includes('preserved:q-1'));}}
  assert.equal(api.requests.filter(r=>r.path.endsWith('/enroll-info')||r.method==='DELETE').length,0);
 });
 test('real CLI Ego query and partial visible prepare report actual route and never business-submit',async t=>{
@@ -14,5 +14,22 @@ test('real CLI Ego query and partial visible prepare report actual route and nev
 test('CLI Ego preparation covers successful registration and exit handoffs, while identity drift cannot fill',async t=>{
  const api=await participationScenario();t.after(api.close);api.questions.push({uuid:'q-2',title:'协作方式',itemType:'2',isMandatory:false,respDtoList:[{optionName:'布置'},{optionName:'协作'}]});
  for(const action of ['register','exit']){if(action==='exit')Object.assign(api.row,{application:true,applicationCode:7,applicationUuid:'org-registration-1'});const ego=await participationEgo(t,api.baseUrl,{action});const env={...process.env,PATH:ego.root+':'+process.env.PATH,FRIENDS_BASE_URL:api.baseUrl,FRIENDS_HOME:ego.root+'/unused'};const result=await run(['organization-participation','prepare','org-activity-1','--action',action,'--via','ego','--ego-task-space','1',...(action==='register'?['--input','-']:[])],env,action==='register'?JSON.stringify({'q-1':'示例','q-2':['布置']}):undefined);assert.equal(result.code,0,result.stderr);assert.equal(JSON.parse(result.stdout).data.submitted,false);assert.equal(JSON.parse(result.stdout).meta.requestMode,'visible-ui');const observed=await ego.observed();assert.equal(observed.handoffs,1);assert.equal(observed.submits,0);}
- Object.assign(api.row,{application:false,applicationCode:null,applicationUuid:null});const ego=await participationEgo(t,api.baseUrl,{token:'changed-token'});await assert.rejects(()=>prepareOrganizationParticipationInEgo({input:{activityId:'org-activity-1',action:'register',answers:{'q-1':'示例'}},taskSpaceId:1,command:ego.command,baseUrl:api.baseUrl}),{code:'PERMISSION_DENIED'});const observed=await ego.observed();assert.equal(observed.fills.length,0);assert.equal(observed.clicks.length,0);assert.equal(observed.submits,0);
+ Object.assign(api.row,{application:false,applicationCode:null,applicationUuid:null});const ego=await participationEgo(t,api.baseUrl,{preparationToken:'changed-token'});await assert.rejects(()=>prepareOrganizationParticipationInEgo({input:{activityId:'org-activity-1',action:'register',answers:{'q-1':'示例'}},taskSpaceId:1,command:ego.command,baseUrl:api.baseUrl}),{code:'PERMISSION_DENIED'});const observed=await ego.observed();assert.equal(observed.fills.length,0);assert.equal(observed.clicks.length,0);assert.equal(observed.submits,0);
+});
+
+
+test('public organization prepare preserves choices and files on a different iframe form before navigation',async t=>{
+ const api=await participationScenario();t.after(api.close);
+ api.questions.push({uuid:'q-2',title:'协作方式',itemType:'2',isMandatory:false,respDtoList:[{optionName:'布置'},{optionName:'协作'}]});
+ for(const fields of [{human:'人工文字'},{selected:true},{file:true}]){
+  const ego=await participationEgo(t,api.baseUrl,{...fields,unrelated:true});
+  const result=await prepareOrganizationParticipationInEgo({input:{activityId:'org-activity-1',action:'register',answers:{'q-1':'自动','q-2':['协作']}},taskSpaceId:1,command:ego.command,baseUrl:api.baseUrl});
+  assert.ok(result.manualFields.includes('preserved-unrelated-page'));
+  const observed=await ego.observed();
+  assert.equal(observed.navigations,0);assert.deepEqual(observed.clicks,[]);assert.deepEqual(observed.fills,[]);assert.equal(observed.submits,0);
+ }
+ const ego=await participationEgo(t,api.baseUrl,{selected:true});
+ const result=await prepareOrganizationParticipationInEgo({input:{activityId:'org-activity-1',action:'register',answers:{'q-1':'填写','q-2':['协作']}},taskSpaceId:1,command:ego.command,baseUrl:api.baseUrl});
+ assert.ok(result.manualFields.includes('preserved:q-2'));
+ const observed=await ego.observed();assert.equal(observed.navigations,0);assert.deepEqual(observed.clicks,[]);
 });

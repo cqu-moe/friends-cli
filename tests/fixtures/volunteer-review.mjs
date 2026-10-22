@@ -183,7 +183,7 @@ export async function school(t) {
   };
 }
 
-export async function executingEgo(root, { initialMessage = "", currentUrl, browserToken = "review-token", failAfterFill = false } = {}) {
+export async function executingEgo(root, { initialMessage = "", currentUrl, browserToken = "review-token", iframeToken, iframeRole, iframeUrl, failAfterFill = false } = {}) {
   const runner = `${root}/ego-runner.mjs`;
   const scriptLog = `${root}/generated-script.js`;
   const actionLog = `${root}/ego-actions.jsonl`;
@@ -215,7 +215,7 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
     targetUrl,
     currentUrl: currentUrl ?? targetUrl,
     result: `${root}/observed.json`,
-    browserToken, failAfterFill,
+    browserToken, iframeToken, iframeRole, iframeUrl, failAfterFill,
   }));
   await writeFile(`${root}/page.html`, html);
   await writeFile(runner, String.raw`
@@ -234,7 +234,7 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
       navigations: 0, remoteWrites: 0, externalSaves: 0, finalConfirms: 0,
     };
     const contentDom = new JSDOM(await readFile(configuration.html, "utf8"), {
-      url: configuration.targetUrl,
+      url: configuration.iframeUrl??configuration.targetUrl,
       runScripts: "dangerously",
       beforeParse(window) {
         const originalGetBoundingClientRect = window.Element.prototype.getBoundingClientRect;
@@ -257,6 +257,8 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
     const window = dom.window, document = contentDom.window.document;
     for(const w of [window,contentDom.window]){w.localStorage.setItem('token_str',configuration.browserToken);w.localStorage.setItem('userLevel_str','XSC');}
 
+    if(configuration.iframeToken)contentDom.window.localStorage.setItem('token_str',configuration.iframeToken);
+    if(configuration.iframeRole)contentDom.window.localStorage.setItem('userLevel_str',configuration.iframeRole);
     let currentUrl = configuration.currentUrl;
     let handedOff = false;
     function active() { if (handedOff) throw new Error("Browser operation after handOff"); }

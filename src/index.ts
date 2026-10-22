@@ -1,3 +1,4 @@
+import { reserveSchoolContext } from "./school-context.js";
 import {createOrganizationActivityClient} from "./organization-activities.js";
 export * from "./organization-activities.js";
 import { FriendsError, FriendsErrorCode } from "./errors.js";
@@ -499,7 +500,6 @@ export function createFriendsSdk(options: {
   const baseUrl = (options.baseUrl ?? "https://friends.cqu.edu.cn/gateway").replace(/\/$/, "");
   const fetchImpl = options.fetch ?? fetch;
   const timeoutMs = options.timeoutMs ?? 60_000;
-  const bindings = new Map<string, string>();
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) invalid("timeoutMs must be a positive integer");
 
   async function inspectLocalSession(input: {
@@ -551,13 +551,8 @@ export function createFriendsSdk(options: {
         });
       }
       const context = chooseContext(inspection.contexts, input.selector);
-      const binding = JSON.stringify([inspection.account.userNo, context.levelNo, context.unit.unitNo]);
-      if (bindings.has(input.token) && bindings.get(input.token) !== binding) {
-        throw new FriendsError({code:FriendsErrorCode.UpstreamBusiness, message:"This school token is already bound to another context; use a separate login session"});
-      }
       const userType = userTypeFor(inspection.userLoginType);
-      // One school token may hold server-side identity state; never bind it to competing clients.
-      bindings.set(input.token, binding);
+      await reserveSchoolContext(baseUrl, input.token, inspection.account.userNo, context.levelNo, context.unit.unitNo);
       const envelope = await callApi(
         baseUrl,
         "/ek-agg-mob/user/enterHall",

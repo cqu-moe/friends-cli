@@ -2,16 +2,15 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 const execFileAsync = promisify(execFile);
 const run = (file, args, options = {}) =>
   execFileAsync(file, args, { timeout: 60_000, ...options });
 
 test('packed installation exposes SDK without Ego and runs the complete CLI flow', { timeout: 120000 }, async () => {
-  const root = resolve('.test-artifacts');
-  await mkdir(root, { recursive: true });
-  const install = await mkdtemp(join(root, 'installed-'));
+  const install = await mkdtemp(join(tmpdir(), 'friends-package-installed-'));
   try {
     const { stdout } = await run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', install]);
     const [packed] = JSON.parse(stdout);

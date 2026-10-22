@@ -9,6 +9,7 @@ export async function prepareVolunteerActivityReviewPage(page: {
     waitForSelector(selector: string, options?: unknown): Promise<unknown>;
 }, input: {
     url: string;
+    session: {token:string; userLevel:string};
     decision: 'pass' | 'back' | 'refuse';
     message: string;
     time: string;
@@ -17,34 +18,36 @@ export async function prepareVolunteerActivityReviewPage(page: {
 }) {
     const completed: string[] = [];
     function inspect() {
-        const d = document.querySelector("iframe")?.contentDocument ?? document;
+        const frame = document.querySelector("iframe");
+        const d = frame ? frame.contentDocument : document;
+        const w = d?.defaultView;
+        if (!d || !w) return {url:null,token:null,userLevel:null,title:null,message:'',safe:[],date:null,callback:false};
+        let token=w.localStorage.getItem('token_str');
+        try {if(token?.startsWith('{')){const parsed=JSON.parse(token);token=parsed.token??(typeof parsed.data==='string'?parsed.data:parsed.data?.token)??null;}} catch {token=null;}
         const visible = (e: Element) => { for (let n: Element | null = e; n; n = n.parentElement)
             if (getComputedStyle(n).display === 'none' || getComputedStyle(n).visibility === 'hidden')
                 return false; return true; };
         const dialogs = [...d.querySelectorAll('.van-dialog')].filter(visible);
         const dialog = dialogs[0];
         const textarea = dialog?.querySelector('textarea');
-        return { hasInputs: [...d.querySelectorAll('input,textarea')].some(e => visible(e) && !!(e as HTMLInputElement).value), title: dialog?.querySelector('.van-dialog__header')?.textContent?.trim() ?? null, message: (textarea as HTMLTextAreaElement)?.value ?? '', safe: [...dialog?.querySelectorAll('[role="radio"]') ?? []].filter(e => e.getAttribute('aria-checked') === 'true').map(e => e.textContent?.trim()), date: (dialog?.querySelector('input[name="time"]') as HTMLInputElement)?.value ?? null, callback: !!dialog?.querySelector('input[name="callbackActivityId"]') };
+        return { url:w.location.href,token,userLevel:w.localStorage.getItem('userLevel_str'),title: dialog?.querySelector('.van-dialog__header')?.textContent?.trim() ?? null, message: (textarea as HTMLTextAreaElement)?.value ?? '', safe: [...dialog?.querySelectorAll('[role="radio"]') ?? []].filter(e => e.getAttribute('aria-checked') === 'true').map(e => e.textContent?.trim()), date: (dialog?.querySelector('input[name="time"]') as HTMLInputElement)?.value ?? null, callback: !!dialog?.querySelector('input[name="callbackActivityId"]') };
+    }
+    async function readState() {
+        const state=await page.evaluate(inspect);
+        const target=new URL(input.url);
+        const current=state.url?new URL(state.url):null;
+        if(!current || current.origin!==target.origin || current.pathname!==target.pathname ||
+           [...target.searchParams].some(([key,value])=>current.searchParams.get(key)!==value) ||
+           state.token!==input.session.token || state.userLevel!==input.session.userLevel) {
+            throw Object.assign(new Error('The visible review iframe, account, role, or application does not match'),{code:'PERMISSION_DENIED'});
+        }
+        return state;
     }
     try {
-        const url = await page.url();
+        await readState();
         await page.snapshot({ scope: 'full_page' });
-        const current = new URL(url);
-        const target = new URL(input.url);
-        const sameTarget = current.origin === target.origin && current.pathname === target.pathname && [...target.searchParams].every(([key, value]) => current.searchParams.get(key) === value);
-        if (!sameTarget) {
-            if (current.origin !== target.origin || !current.pathname.startsWith('/mobile/'))
-                return { status: 'needs-user' as const, submitted: false as const, completed, manualFields: ['unrelated-page'] };
-            const state = await page.evaluate(inspect);
-            if (state.hasInputs)
-                return { status: 'needs-user' as const, submitted: false as const, completed, manualFields: ['existing-page-inputs'] };
-            await page.goto(input.url);
-            completed.push('opened-review');
-            await page.waitForSelector('loc=css:.action-bar button:has-text("通过")');
-            await page.snapshot({ scope: 'full_page' });
-        }
         const expected = { pass: '审批通过', back: '审批打回', refuse: '审批拒绝' }[input.decision];
-        let state = await page.evaluate(inspect);
+        let state = await readState();
         if (state.title && state.title !== expected)
             return { status: 'needs-user' as const, submitted: false as const, completed, manualFields: ['different-open-decision'] };
         if (!state.title) {
@@ -53,10 +56,11 @@ export async function prepareVolunteerActivityReviewPage(page: {
             completed.push('opened-decision');
             await page.waitForSelector('loc=css:.van-dialog textarea');
             await page.snapshot({ scope: 'full_page' });
-            state = await page.evaluate(inspect);
+            state = await readState();
             if (state.title !== expected)
                 throw new Error('Unexpected decision dialog');
         }
+        state = await readState();
         const manualFields: string[] = [];
         if (!state.message) {
             await page.fill('loc=css:.van-dialog textarea', input.message);
@@ -65,6 +69,7 @@ export async function prepareVolunteerActivityReviewPage(page: {
         else if (state.message !== input.message)
             manualFields.push('preserved-human-message');
         if (input.isSafeEducation !== undefined) {
+            state=await readState();
             const label = input.isSafeEducation === 1 ? '是' : '否';
             if (state.safe.length === 0) {
                 await page.click(`loc=css:.van-dialog [role="radio"]:has-text("${label}")`);
@@ -80,7 +85,10 @@ export async function prepareVolunteerActivityReviewPage(page: {
         await page.snapshot({ scope: 'full_page' });
         return { status: 'awaiting-user' as const, submitted: false as const, completed, manualFields };
     }
-    catch {
+    catch (error) {
+        if(completed.length===0 && (error as {code?:string})?.code==='PERMISSION_DENIED') {
+            return {status:'needs-user' as const,submitted:false as const,completed,manualFields:[],denied:true,error:(error as Error).message,errorCode:'PERMISSION_DENIED'};
+        }
         return { status: 'needs-user' as const, submitted: false as const, completed, manualFields: ['inspect-partial-form'], executionError: true };
     }
 }

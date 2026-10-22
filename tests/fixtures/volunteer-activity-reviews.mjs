@@ -11,6 +11,7 @@ export async function reviewScenario() {
     const reply=(data,code='0',status=200)=>{res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify({code,data,message:code==='0'?'ok':'rejected'}));};
     if(path.endsWith('/checkUserAndGetUserLevel'))return reply({userLoginType:'TEACHER',loginLevels:[{levelNo:state.availableRole,levelName:'学院',units:[{unitNo:state.availableUnit,unitName:'示例学院',unitType:1}]}]});
     if(path.endsWith('/enterHall'))return reply({account:state.enteredAccount,name:'示例管理者',userLoginStateLevel:state.role,departmentNo:state.unit});
+    if(path.endsWith('/user/info')&&state.beforeIdentity){const before=state.beforeIdentity;state.beforeIdentity=undefined;await before();}
     if(path.endsWith('/user/info'))return reply({userNo:state.account,userName:'示例管理者'});
     if(path==='/gateway/ek-agg-mob/biz-common/flow/template-activity-state')return reply([{code:'0',name:'待审批'}]);
     if(path==='/gateway/ek-agg-mob/biz-common/flow/callback-list')return reply([{templateActivityRespDto:{activityid:'node-1',name:'申请人'}}]);
@@ -24,6 +25,7 @@ export async function reviewScenario() {
     }
     if(req.method==='POST'&&/\/(pass|refuse|callback)$/.test(path)){
       if(state.mode==='reject')return reply(null,'rejected');
+      if(state.mode==='lost-overlap')await new Promise(resolve=>setTimeout(resolve,60));
       state.pending[kind]=false;rows[kind].flowOverallState=path.endsWith('/pass')?7:5;
       if(state.mode.startsWith('lost')){req.socket.destroy();return;}
       return reply(null);

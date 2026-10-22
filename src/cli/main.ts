@@ -74,12 +74,12 @@ const schemas = {
       egoPage: { type: "string", default: "p1" },
       issuer: { type: "URL or CQU_AUTH_ISSUER; required for cqu-auth" },
       clientId: { type: "public client ID or CQU_AUTH_CLIENT_ID; required for cqu-auth" },
-      noOpen: { type: "boolean; prints only the authorization URL for manual opening" },
+      noOpen: { type: "boolean; writes the authorization URL to stderr for manual opening" },
       storage: { type: "keyring or explicit file", default: "keyring", fileSupport: "POSIX only: dedicated 0700 directory and 0600 file" },
       levelNo: { type: "string", required: "only when multiple contexts match" },
       unitNo: { type: "string", required: "only when multiple contexts match" },
     },
-    output: "authorization event when --no-open is used, then account and selected context; never code, state, verifier, key, or token",
+    output: "one terminal JSON result; --no-open authorization URL is progress on stderr; never code, state, verifier, key, or token in terminal output",
     readonly: false,
     sideEffect: "establishes a local session and fixed friends context",
     supportedVia: ["ego-login", "api-verification"],
@@ -258,11 +258,7 @@ auth
       });
       try {
         if ((options as Record<string, unknown>).open === false) {
-          output({ authorizationUrl: loopback.authorizationUrl }, {
-            operation: "auth.login",
-            phase: "authorization",
-            via: "cqu-auth",
-          });
+          process.stderr.write(`${JSON.stringify({ authorizationUrl: loopback.authorizationUrl })}\n`);
         } else {
           await openAuthorizationUrl(loopback.authorizationUrl, {
             command: process.env.FRIENDS_BROWSER,

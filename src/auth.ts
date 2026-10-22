@@ -12,7 +12,7 @@ export interface CquDpopKeyPair {
 
 export interface CquOAuthCredentials {
   accessToken: string;
-  refreshToken: string;
+  refreshToken?: string;
   tokenType: "DPoP";
   expiresAt: number | null;
   scopes: string[];
@@ -119,16 +119,16 @@ function validateTimeout(timeoutMs: number): void {
   }
 }
 
-function responseCredentials(response: oauth.TokenEndpointResponse): CquOAuthCredentials {
+function responseCredentials(response: oauth.TokenEndpointResponse, refreshRequired = false): CquOAuthCredentials {
   if (response.token_type !== "dpop") {
     throw error("CQU Auth returned a non-DPoP token; reauthorize the native client with DPoP");
   }
-  if (typeof response.refresh_token !== "string" || response.refresh_token === "") {
-    throw error("CQU Auth did not return a refresh token; reauthorize with offline_access");
-  }
   const scopes = (response.scope ?? "").split(/ +/).filter(Boolean);
-  if (!scopes.includes(friendsScope) || !scopes.includes(offlineScope)) {
-    throw error("CQU Auth did not grant the required friends and offline_access scopes", FriendsErrorCode.PermissionDenied);
+  if (!scopes.includes(friendsScope)) {
+    throw error("CQU Auth did not grant the friends scope", FriendsErrorCode.PermissionDenied);
+  }
+  if (response.refresh_token !== undefined && (typeof response.refresh_token !== "string" || !response.refresh_token || !scopes.includes(offlineScope)) || refreshRequired && !response.refresh_token) {
+    throw error("CQU Auth did not return a usable refresh grant; reauthorize with offline_access");
   }
   return {
     accessToken: response.access_token,
@@ -324,23 +324,21 @@ export function createCquAuthClient(options: CreateCquAuthClientOptions) {
     },
 
     createGrantManager(input: CreateCquGrantManagerOptions): CquGrantManager {
-      if (!input?.credentials || input.credentials.tokenType !== "DPoP" || !input.credentials.refreshToken) {
-        throw error("A DPoP-bound refresh grant is required", FriendsErrorCode.AuthRequired);
+      if (!input?.credentials || input.credentials.tokenType !== "DPoP" || !input.credentials.accessToken || !Array.isArray(input.credentials.scopes) || !input.credentials.scopes.includes(friendsScope)) {
+        throw error("A DPoP-bound friends access grant is required", FriendsErrorCode.AuthRequired);
       }
       if (!input.keyPair?.privateKey || !input.keyPair?.publicKey) {
         throw error("The DPoP key bound to the CQU Auth grant is missing; log in again", FriendsErrorCode.AuthRequired);
       }
-      let credentials = { ...input.credentials };
+      let credentials = { ...input.credentials, scopes: [...input.credentials.scopes] };
       let refreshInFlight: Promise<CquOAuthCredentials> | undefined;
 
-      async function tokenRequest(): Promise<oauth.AuthorizationServer> {
-        return discover();
-      }
-
       async function refreshLocked(): Promise<CquOAuthCredentials> {
-        const as = await tokenRequest();
-        const dpop = oauth.DPoP(client, input.keyPair);
         const current = credentials;
+        const refreshToken = current.refreshToken;
+        if (!refreshToken || !current.scopes.includes(offlineScope)) throw error("This access-only grant cannot refresh; reauthorize explicitly", FriendsErrorCode.AuthRequired);
+        const as = await discover();
+        const dpop = oauth.DPoP(client, input.keyPair);
         let response: oauth.TokenEndpointResponse;
         try {
           response = await completeWithDpopRetry(async () => {
@@ -348,7 +346,7 @@ export function createCquAuthClient(options: CreateCquAuthClientOptions) {
               as,
               client,
               oauth.None(),
-              current.refreshToken,
+              refreshToken,
               { DPoP: dpop, ...httpOptions() } as Parameters<typeof oauth.refreshTokenGrantRequest>[4],
             );
             return oauth.processRefreshTokenResponse(as, client, raw);
@@ -356,7 +354,7 @@ export function createCquAuthClient(options: CreateCquAuthClientOptions) {
         } catch {
           throw error("CQU Auth rejected the refresh token or DPoP proof; log in again", FriendsErrorCode.AuthRequired);
         }
-        const next = responseCredentials(response);
+        const next = responseCredentials(response, true);
         if (input.persist) await input.persist(next);
         credentials = next;
         return { ...credentials };
@@ -381,7 +379,7 @@ export function createCquAuthClient(options: CreateCquAuthClientOptions) {
         refresh,
         async requestFriendsServiceTicket(): Promise<string> {
           const token = await ensureFreshAccessToken();
-          const as = await tokenRequest();
+          const as = await discover();
           const ticketUrl = new URL("/api/v1/cqu/service-tickets", issuer);
           const dpop = oauth.DPoP(client, input.keyPair);
           let response: Response;
