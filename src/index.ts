@@ -37,21 +37,44 @@ export type {
   CourseQuestionnaireResult,
 } from "./course-participation.js";
 export * from "./certification-prepare.js";
-export { organizationId, validateOrganizationMemberListInput } from "./organizations.js";
+export {
+  organizationId,
+  organizationApplicationId,
+  validateOrganizationMemberListInput,
+  validateOrganizationApplicationListInput,
+} from "./organizations.js";
 export type {
   EditableOrganizationProfileField,
+  OrganizationApplicationDetail,
+  OrganizationApplicationId,
+  OrganizationApplicationListInput,
+  OrganizationApplicationPage,
+  OrganizationApplicationRelation,
+  OrganizationApplicationSummary,
+  OrganizationApplicationType,
+  OrganizationApplicationDecision,
+  PreparedOrganizationApplicationDecision,
+  DecidedOrganizationApplication,
+  OrganizationApplicationDecisionIntent,
   OrganizationAccess,
   OrganizationClient,
   OrganizationId,
   OrganizationMember,
   OrganizationMemberListInput,
   OrganizationMemberPage,
+  OrganizationLeaderChangeCandidate,
+  OrganizationLeaderChangeApplication,
+  OrganizationLeaderChangeInput,
+  OrganizationLeaderChangeState,
+  OrganizationLeaderChangeSubmitIntent,
   OrganizationProfile,
   OrganizationProfileChanges,
   OrganizationProfileSaveIntent,
   OrganizationSession,
   OrganizationSummary,
+  PreparedOrganizationLeaderChange,
   PreparedOrganizationProfileUpdate,
+  SubmittedOrganizationLeaderChange,
   SavedOrganizationProfile,
 } from "./organizations.js";
 export * from "./certification-api.js";
