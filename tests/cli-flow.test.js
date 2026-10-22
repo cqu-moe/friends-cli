@@ -125,7 +125,7 @@ test("real CLI performs local login, fixed-context activation, storage, and cour
     FRIENDS_HOME: home,
     EGO_SCRIPT_LOG: egoScriptLog,
   };
-  const cli = resolve("dist/cli/main.js");
+  const cli = process.env.FRIENDS_TEST_CLI ?? resolve("dist/cli/main.js");
 
   const login = await run(
     process.execPath,

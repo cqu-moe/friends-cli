@@ -23,7 +23,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test 'tests/*.test.js'"
+    "test": "npm run build && node --test 'tests/*.test.js'",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@napi-rs/keyring": "^2.1.2",
@@ -32,5 +33,9 @@
   "devDependencies": {
     "@types/node": "^24.10.1",
     "typescript": "^5.9.3"
-  }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
 }
