@@ -19,6 +19,8 @@ export interface WriteRecovery {
   completed?: string[];
   serverAcknowledged?: boolean | "unknown";
   readback?: "matched" | "unmatched" | "unavailable";
+  applicationReadback?: "matched" | "unmatched" | "unavailable";
+  submitRetries?: 0;
 }
 
 export class FriendsError extends Error {

@@ -206,3 +206,35 @@ friends volunteer activity-reviews decide <申请UUID> --type offering --decisio
 ```
 
 `review.json` 含 `message`、`time`（YYYY-MM-DD）；开办审批还需 `isSafeEducation: 0|1`，打回多个节点时需 `callbackActivityId`。API 实际决定须显式 `--yes`；Ego 仅准备并交接，用户亲自点最终确定。响应不确定返回 exit 7，不会自动重试。见 [#11 验收记录](docs/verification/2026-10-22-volunteer-activity-reviews.md)。
+
+## 组织负责人变更申请（#23）
+
+该流程使用 `responsiblePersonChangeInfo`，与加入/退出申请审批分开。候选人来自指定组织的 `new-response-person/{organizationUuid}?key=...`，职务列表使用组织详情中的 `labelCode` 查询。准备和提交都重新验证账号、身份、当前负责人权限、候选学号、组织归属、职务配置与现有申请状态；管理员身份本身不足以发起变更。
+
+```sh
+friends organizations leader-change candidates <organizationUuid> --keyword <studentNo> --via api
+friends organizations leader-change status <organizationUuid> --via ego --ego-task-space 16 --ego-page p1
+friends organizations leader-change submit <organizationUuid> --via api --input change.json --dry-run
+friends organizations leader-change submit <organizationUuid> --via api --input change.json --yes
+friends organizations leader-change prepare <organizationUuid> --via ego --ego-task-space 16 --ego-page p1 --input change.json
+```
+
+`change.json` 只接受下列字段，`--input -` 可以读取 stdin；也可使用同名 kebab-case 参数，例如 `--candidate-student-no`、`--new-responsible-phone`：
+
+```json
+{
+  "candidateStudentNo": "20210002",
+  "newResponsiblePhone": "13800000002",
+  "newResponsiblePolitical": "共青团员",
+  "newPostUuid": "post-fixture",
+  "reason": "毕业交接"
+}
+```
+
+手机号遵守生产表单的 `^1\d{10}$`；组织开启职务分工时必须指定已查询到的职务 UUID；原因最多 256 字符，按源码保持可选。候选列表不含完整政治面貌资料，API 路径要求调用者提供并核实该资料。Ego 只比对页面回填的政治面貌，无法确认时标为待人工复核，不修改只读政治面貌字段。
+
+Ego 准备要求指定页面已打开对应组织的 `/mobile/groupManage/studentLeaderApply?uuid=...` 表单。命令在同源 iframe 里通过可见选人、搜索、radio 与职务选择器录入，文本使用实际的 `input[name="newResponsiblePhone"]` 和原因 textarea；不会导航覆盖其他表单。已有人工候选、电话、原因或职务会保留；同名的既有候选不能仅凭姓名证明学号，交给用户核对。`manualFields` 列出尚待复核的内容；`submitted:false` 表示最终“提交申请”必须由用户亲自点击。`prepare --yes` 和 `submit --via ego` 都拒绝，`prepare --dry-run` 不导航、不点击、不填写、不交接。
+
+SDK 根入口的组织 client 提供 `listLeaderChangeCandidates`、`getLeaderChangeState`、`prepareLeaderChange` 和 `submitLeaderChange`。写方法需要独立 `{via:"api",intent:"submit-organization-leader-change",confirm:true}`，不能使用 Ego 准备作为 API 写授权。可见准备从 Node 入口导出 `prepareOrganizationLeaderChangeInEgo({input,taskSpaceId,page})`，并自行读取新鲜的 Ego 会话和核实学校权限。
+
+API 只提交一次申请，再分别回查申请及当前组织负责人。`status:"submitted"` 不代表审批通过，`responsiblePersonChanged` 单独表示查询到的实际负责人是否为候选学号。响应丢失、超时、已确认但回查丢失或不匹配均保持不可重试的 `UNKNOWN_OUTCOME`（exit 7），含组织/已知申请标识与回查证据；不会重交、跨路径续交或回滚。详见 [#23 验收记录](docs/verification/2026-10-23-organization-leader-change.md)。

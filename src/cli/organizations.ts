@@ -7,14 +7,54 @@ import {
   organizationId,
   organizationApplicationId,
   type OrganizationProfileChanges,
+  type OrganizationLeaderChangeInput,
 } from "../index.js";
 import {
   prepareOrganizationApplicationDecisionInEgo,
+  prepareOrganizationLeaderChangeInEgo,
   prepareOrganizationProfileInEgo,
 } from "../node.js";
 import { resolveQuerySession } from "./session.js";
 
+const leaderFields = {
+  organizationId: { type: "organization UUID", required: true },
+  candidateStudentNo: { type: "eligible candidate student number", required: true },
+  newResponsiblePhone: { type: "string", pattern: "^1\\d{10}$", required: true },
+  newResponsiblePolitical: { type: "string", required: true },
+  newPostUuid: { type: "organization post UUID", required: "when job division is enabled" },
+  reason: { type: "string", maximumLength: 256 },
+  input: { type: "JSON file or stdin containing candidate and application fields" },
+};
+
 export const organizationSchemas = {
+  "organizations.leader-change.candidates": {
+    operation: "organizations.leader-change.candidates", readonly: true, phases: ["query"],
+    permission: "current organization responsible person", supportedVia: ["api", "ego"],
+    requestMode: "direct-api", input: { organizationId: leaderFields.organizationId, keyword: { type: "string" } },
+    output: "eligible candidate projections", verifiedWith: "public-source; controlled-api",
+  },
+  "organizations.leader-change.status": {
+    operation: "organizations.leader-change.status", readonly: true, phases: ["query"],
+    permission: "verified organization context; upstream enforces result access", supportedVia: ["api", "ego"],
+    requestMode: "direct-api", input: { organizationId: leaderFields.organizationId },
+    output: "application flow and actual current responsible person, reported separately", verifiedWith: "public-source; controlled-api",
+  },
+  "organizations.leader-change.prepare": {
+    operation: "organizations.leader-change.prepare", readonly: false, remoteReadonly: true,
+    phases: ["visible-prepare"], supportedVia: ["ego"], requestMode: "visible-ego-prepare",
+    permission: "freshly verified current responsible person and eligible candidate", input: leaderFields,
+    confirmation: "final submission is user-only; --yes is rejected", dryRun: "reads only; no UI actions or handoff",
+    output: "submitted:false and editable form handed to the user; manualFields identify preserved or missing values",
+    verifiedWith: "public-source; controlled-iframe-dom",
+  },
+  "organizations.leader-change.submit": {
+    operation: "organizations.leader-change.submit", readonly: false, remoteReadonly: false,
+    phases: ["api-write"], supportedVia: ["api"], requestMode: "api-write",
+    permission: "freshly verified current responsible person and eligible candidate", input: leaderFields,
+    confirmation: "independent --via api --yes; --dry-run performs no application write",
+    sideEffect: "one responsiblePersonChangeInfo/apply POST followed by read-only application and relationship checks; no retry",
+    output: "acknowledged submission, application readback and actual current responsible person", verifiedWith: "public-source; controlled-api",
+  },
   "organizations.list": {
     operation: "organizations.list",
     permission: "organizations returned for the verified school context",
@@ -296,6 +336,30 @@ function collectDecisionFields(
   return result;
 }
 
+const leaderInputNames = ["candidateStudentNo", "newResponsiblePhone", "newResponsiblePolitical", "newPostUuid", "reason"] as const;
+
+function leaderInput(options: Record<string, string | boolean | undefined>, value: unknown): OrganizationLeaderChangeInput {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) invalid("Leader-change input must be an object");
+  const input = value as Record<string, unknown>;
+  for (const key of Object.keys(input)) if (!(leaderInputNames as readonly string[]).includes(key)) invalid(`Unknown leader-change input field: ${key}`);
+  const result: Record<string, unknown> = {};
+  for (const name of leaderInputNames) result[name] = options[name] ?? input[name];
+  return result as unknown as OrganizationLeaderChangeInput;
+}
+
+function leaderInputOptions(command: Command): Command {
+  return command
+    .option("--candidate-student-no <value>", "exact student number from eligible candidates")
+    .option("--new-responsible-phone <value>", "new responsible person's phone")
+    .option("--new-responsible-political <value>", "candidate political affiliation supplied for the application")
+    .option("--new-post-uuid <value>", "post from the organization post list")
+    .option("--reason <text>", "change reason, up to 256 characters")
+    .option("--input <file|->", "JSON file or stdin with candidate and application fields")
+    .option("--dry-run", "validate without application writes or visible UI actions")
+    .option("--yes", "confirm API submission; rejected for Ego preparation")
+    .option("--json", "print stable JSON", true);
+}
+
 function positiveInteger(value: string, name: string): number {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1) invalid(`--${name} must be a positive integer`);
@@ -332,6 +396,52 @@ export function registerOrganizationCommands(program: Command, options: { baseUr
       verification: { organizationContract: "public-source+controlled-api" },
     };
   }
+
+  const leader = organizations.command("leader-change").description("Organization responsible-person change applications and results");
+  queryOptions(leader.command("candidates"))
+    .argument("<organizationId>").option("--keyword <text>", "candidate student number or name", "")
+    .option("--json", "print stable JSON", true)
+    .action(async (id: string, commandOptions: Record<string, string | undefined>) => {
+      const { source, client } = await context(commandOptions);
+      const items = await client.listLeaderChangeCandidates(organizationId(id), commandOptions.keyword);
+      output({ items }, directApiMeta("organizations.leader-change.candidates", source.entry));
+    });
+  queryOptions(leader.command("status"))
+    .argument("<organizationId>").option("--json", "print stable JSON", true)
+    .action(async (id: string, commandOptions: Record<string, string | undefined>) => {
+      const { source, client } = await context(commandOptions);
+      output(await client.getLeaderChangeState(organizationId(id)), directApiMeta("organizations.leader-change.status", source.entry));
+    });
+  leaderInputOptions(queryOptions(leader.command("prepare")))
+    .description("Prepare the existing organization leader-change page and hand it to the user")
+    .argument("<organizationId>")
+    .action(async (id: string, commandOptions: Record<string, string | boolean | undefined>) => {
+      if (commandOptions.via !== "ego" || commandOptions.yes) invalid("Leader-change preparation requires --via ego and never accepts --yes");
+      const input = leaderInput(commandOptions, await readInput(commandOptions.input as string | undefined));
+      const result = await prepareOrganizationLeaderChangeInEgo({
+        input: { ...input, organizationId: id }, taskSpaceId: Number(commandOptions.egoTaskSpace),
+        page: commandOptions.egoPage as string | undefined, baseUrl: options.baseUrl, dryRun: commandOptions.dryRun === true,
+        selector: { levelNo: commandOptions.levelNo as string | undefined, unitNo: commandOptions.unitNo as string | undefined },
+      });
+      output(result, { operation: "organizations.leader-change.prepare", via: "ego", requestMode: "visible-ego-prepare",
+        verification: { contract: "public-source+controlled-iframe-dom", finalSubmission: "user-only" } });
+    });
+  leaderInputOptions(leader.command("submit"))
+    .description("Preview or explicitly submit an organization responsible-person change application")
+    .argument("<organizationId>").requiredOption("--via <source>", "independent API submission intent")
+    .action(async (id: string, commandOptions: Record<string, string | boolean | undefined>) => {
+      if (commandOptions.via !== "api") invalid("Leader-change submission requires independent --via api");
+      if (commandOptions.dryRun && commandOptions.yes || !commandOptions.dryRun && !commandOptions.yes) invalid("Use --dry-run or --yes for an API leader-change application");
+      const input = leaderInput(commandOptions, await readInput(commandOptions.input as string | undefined));
+      const { client } = await context({ via: "api" });
+      const prepared = await client.prepareLeaderChange({ ...input, organizationId: organizationId(id) });
+      const result = commandOptions.dryRun ? prepared : await client.submitLeaderChange(prepared, {
+        via: "api", intent: "submit-organization-leader-change", confirm: true,
+      });
+      output(result, { operation: "organizations.leader-change.submit", via: "api",
+        requestMode: commandOptions.dryRun ? "direct-api" : "api-write", dryRun: commandOptions.dryRun === true,
+        verification: { contract: "public-source+controlled-api" } });
+    });
 
   queryOptions(organizations.command("list"))
     .description("List organizations returned for the current account")

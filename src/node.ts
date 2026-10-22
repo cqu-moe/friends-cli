@@ -11,6 +11,7 @@ import { runEgoJson } from "./certification-ego.js";
 export * from "./draft-store.js";
 export * from "./certification-ego.js";
 export * from "./volunteer-offering-ego.js";
+export * from "./organization-leader-ego.js";
 
 export type SessionStorageType = "keyring" | "file";
 

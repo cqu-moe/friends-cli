@@ -127,6 +127,85 @@ export interface OrganizationApplicationDecisionIntent {
   confirm: true;
 }
 
+export interface OrganizationLeaderChangeCandidate {
+  id: string;
+  studentNo: string;
+  name: string;
+  postUuid: string | null;
+  postName: string | null;
+  isManager: boolean | null;
+  phone: string | null;
+}
+
+export interface OrganizationLeaderChangeApplication {
+  id: string;
+  newPostUuid: string | null;
+  newResponsiblePerson: string | null;
+  newResponsiblePhone: string | null;
+  newResponsiblePolitical: string | null;
+  organizationUuid: string | null;
+  postName: string | null;
+  reason: string | null;
+  responsiblePerson: string | null;
+  responsiblePhone: string | null;
+  flow: {
+    currentMessage: string | null;
+    currentNodeOperateRole: string | null;
+    currentNodeState: number | null;
+    nextNodeOperateRole: string | null;
+    overallState: number | null;
+    templateBranchNo: number | null;
+    templateUuid: string | null;
+  };
+  canSubmit: boolean;
+}
+
+export interface OrganizationLeaderChangeState {
+  organizationId: string;
+  currentResponsiblePerson: string | null;
+  currentResponsiblePhone: string | null;
+  currentPostUuid: string | null;
+  currentPostName: string | null;
+  application: OrganizationLeaderChangeApplication | null;
+  jobDivisionEnabled: boolean | null;
+  posts: Array<{ id: string; name: string | null }>;
+}
+
+export interface OrganizationLeaderChangeInput {
+  candidateStudentNo: string;
+  newResponsiblePhone: string;
+  newResponsiblePolitical: string;
+  newPostUuid?: string;
+  reason?: string;
+}
+
+export interface PreparedOrganizationLeaderChange {
+  status: "prepared";
+  submitted: false;
+  organizationId: string;
+  input: OrganizationLeaderChangeInput;
+  candidate: OrganizationLeaderChangeCandidate;
+  state: OrganizationLeaderChangeState;
+  payload: Readonly<Record<string, unknown>>;
+}
+
+export interface SubmittedOrganizationLeaderChange {
+  status: "submitted";
+  submitted: true;
+  serverAcknowledged: true;
+  applicationReadback: "matched";
+  organizationId: string;
+  application: OrganizationLeaderChangeApplication;
+  currentResponsiblePerson: string | null;
+  responsiblePersonChanged: boolean;
+}
+
+export interface OrganizationLeaderChangeSubmitIntent {
+  via: "api";
+  intent: "submit-organization-leader-change";
+  confirm: true;
+}
+
 export interface OrganizationProfileChanges {
   logo?: string;
   backgroundGroupUuid?: string;
@@ -185,6 +264,15 @@ export interface OrganizationClient {
     prepared: PreparedOrganizationApplicationDecision,
     intent: OrganizationApplicationDecisionIntent,
   ): Promise<DecidedOrganizationApplication>;
+  listLeaderChangeCandidates(id: OrganizationId, keyword?: string): Promise<OrganizationLeaderChangeCandidate[]>;
+  getLeaderChangeState(id: OrganizationId): Promise<OrganizationLeaderChangeState>;
+  prepareLeaderChange(input: {
+    organizationId: OrganizationId;
+  } & OrganizationLeaderChangeInput): Promise<PreparedOrganizationLeaderChange>;
+  submitLeaderChange(
+    prepared: PreparedOrganizationLeaderChange,
+    intent: OrganizationLeaderChangeSubmitIntent,
+  ): Promise<SubmittedOrganizationLeaderChange>;
   prepareProfileUpdate(input: {
     organizationId: OrganizationId;
     changes: OrganizationProfileChanges;
@@ -454,6 +542,81 @@ function relationFields(value: unknown): OrganizationApplicationRelation | null 
   };
 }
 
+function candidateFields(value: unknown): OrganizationLeaderChangeCandidate {
+  const raw = object(value);
+  if (raw === null) invalid("Unexpected leader-change candidate item");
+  const studentNo = text(raw.studentNo);
+  const name = text(raw.studentName);
+  if (studentNo === null || name === null) {
+    throw new FriendsError({
+      code: FriendsErrorCode.NetworkProtocol,
+      message: "Unexpected leader-change candidate identity",
+    });
+  }
+  return {
+    id: requiredId(raw.uuid, "candidate ID"),
+    studentNo,
+    name,
+    postUuid: nullableText(raw.postUuid),
+    postName: nullableText(raw.postName),
+    isManager: boolean(raw.isManager),
+    phone: nullableText(raw.phone),
+  };
+}
+
+function postFields(value: unknown): { id: string; name: string | null } {
+  const raw = object(value);
+  if (raw === null) {
+    throw new FriendsError({
+      code: FriendsErrorCode.NetworkProtocol,
+      message: "Unexpected organization post response",
+    });
+  }
+  return { id: requiredId(raw.uuid, "post ID"), name: nullableText(raw.postName) };
+}
+
+function leaderApplicationFields(value: unknown): OrganizationLeaderChangeApplication | null {
+  if (value === null || value === undefined) return null;
+  const raw = object(value);
+  if (raw === null) {
+    throw new FriendsError({
+      code: FriendsErrorCode.NetworkProtocol,
+      message: "Unexpected leader-change application response",
+    });
+  }
+  const currentMessage = nullableText(raw.flowCurrMsg);
+  const currentRole = nullableText(raw.flowCurrNodeOperateRole);
+  const nextRole = nullableText(raw.flowNextNodeOperateRole);
+  const currentState = number(raw.flowCurrNodeState);
+  const overallState = number(raw.flowOverallState);
+  const canSubmit =
+    currentMessage === "" ||
+    (currentRole === "XS01" && currentState === 3 && overallState === 3) ||
+    (nextRole?.includes("XS") === true && currentState === 5);
+  return {
+    id: requiredId(raw.uuid, "leader-change application ID"),
+    newPostUuid: nullableText(raw.newPostUuid),
+    newResponsiblePerson: nullableText(raw.newResponsiblePerson),
+    newResponsiblePhone: nullableText(raw.newResponsiblePhone),
+    newResponsiblePolitical: nullableText(raw.newResponsiblePolitical),
+    organizationUuid: nullableText(raw.organizationUuid),
+    postName: nullableText(raw.postName),
+    reason: nullableText(raw.reason),
+    responsiblePerson: nullableText(raw.responsiblePerson),
+    responsiblePhone: nullableText(raw.responsiblePhone),
+    flow: {
+      currentMessage,
+      currentNodeOperateRole: currentRole,
+      currentNodeState: currentState,
+      nextNodeOperateRole: nextRole,
+      overallState,
+      templateBranchNo: number(raw.flowTemplateBranchNo),
+      templateUuid: nullableText(raw.flowTemplateUuid),
+    },
+    canSubmit,
+  };
+}
+
 export function validateOrganizationMemberListInput(
   input: OrganizationMemberListInput = {},
 ): Required<Pick<OrganizationMemberListInput, "page" | "pageSize" | "keyword">> &
@@ -665,6 +828,83 @@ function validateSaveIntent(value: unknown): OrganizationProfileSaveIntent {
     );
   }
   return { via: "api", intent: "save-organization-profile", confirm: true };
+}
+
+function validateLeaderChangeInput(input: OrganizationLeaderChangeInput): OrganizationLeaderChangeInput {
+  const raw = object(input);
+  if (raw === null) invalid("Expected organization leader-change input");
+  const allowed = ["candidateStudentNo", "newResponsiblePhone", "newResponsiblePolitical", "newPostUuid", "reason"];
+  for (const key of Object.keys(raw)) {
+    if (!allowed.includes(key)) invalid(`Unknown organization leader-change input field: ${key}`);
+  }
+  if (typeof raw.candidateStudentNo !== "string" || raw.candidateStudentNo.trim() === "") {
+    invalid("candidateStudentNo must be a non-empty string");
+  }
+  if (typeof raw.newResponsiblePhone !== "string" || !/^1\d{10}$/.test(raw.newResponsiblePhone)) {
+    invalid("newResponsiblePhone must match the production rule ^1\\d{10}$");
+  }
+  if (typeof raw.newResponsiblePolitical !== "string" || raw.newResponsiblePolitical.trim() === "") {
+    invalid("newResponsiblePolitical is required because the candidate search response does not verify it");
+  }
+  if (raw.newPostUuid !== undefined && (typeof raw.newPostUuid !== "string" || raw.newPostUuid === "")) {
+    invalid("newPostUuid must be a non-empty string when supplied");
+  }
+  if (raw.reason !== undefined && (typeof raw.reason !== "string" || raw.reason.length > 256)) {
+    invalid("reason must be a string of at most 256 characters");
+  }
+  return {
+    candidateStudentNo: raw.candidateStudentNo,
+    newResponsiblePhone: raw.newResponsiblePhone,
+    newResponsiblePolitical: raw.newResponsiblePolitical,
+    newPostUuid: raw.newPostUuid,
+    reason: raw.reason ?? "",
+  };
+}
+
+function validateLeaderChangeSubmitIntent(value: unknown): OrganizationLeaderChangeSubmitIntent {
+  const raw = object(value);
+  if (raw === null) invalid("A leader-change write requires independent API intent");
+  for (const key of Object.keys(raw)) {
+    if (!["via", "intent", "confirm"].includes(key)) {
+      invalid(`Unknown leader-change write intent field: ${key}`);
+    }
+  }
+  if (raw.via !== "api" || raw.intent !== "submit-organization-leader-change" || raw.confirm !== true) {
+    invalid("Leader-change submission requires via=api, intent=submit-organization-leader-change, and confirm=true");
+  }
+  return { via: "api", intent: "submit-organization-leader-change", confirm: true };
+}
+
+function validatePreparedLeaderChange(value: unknown): {
+  organizationId: string;
+  input: OrganizationLeaderChangeInput;
+  payload: Record<string, unknown>;
+} {
+  const raw = object(value);
+  if (
+    raw === null ||
+    raw.status !== "prepared" ||
+    raw.submitted !== false ||
+    typeof raw.organizationId !== "string"
+  ) {
+    invalid("Expected an unsubmitted organization leader-change preparation");
+  }
+  const payload = object(raw.payload);
+  if (payload === null) invalid("Expected the exact leader-change payload");
+  return {
+    organizationId: organizationId(raw.organizationId),
+    input: validateLeaderChangeInput(raw.input as OrganizationLeaderChangeInput),
+    payload,
+  };
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    const raw = value as Record<string, unknown>;
+    return `{${Object.keys(raw).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(raw[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
 }
 
 function changesMatch(profile: OrganizationProfile, changes: OrganizationProfileChanges) {
@@ -922,6 +1162,106 @@ export function createVerifiedOrganizationClient(options: {
         recovery: { operation: "organizations.applications.read", organizationId: organization.id },
       });
     }
+  }
+
+  async function requirePrincipal(id: OrganizationId): Promise<OrganizationSummary> {
+    const organization = await requireOrganization(id);
+    if (organization.access !== "principal") {
+      throw new FriendsError({
+        code: FriendsErrorCode.PermissionDenied,
+        message: "Only the current organization responsible person can prepare a leader change",
+        recovery: { operation: "organizations.leader-change.select", organizationId: organization.id },
+      });
+    }
+    return organization;
+  }
+
+  async function leaderApplication(id: string): Promise<OrganizationLeaderChangeApplication | null> {
+    const envelope = await request(
+      `${organizationPrefix}/responsiblePersonChangeInfo/organization/${encodeURIComponent(id)}`,
+      { method: "GET", headers: headers(session) },
+    );
+    const application = leaderApplicationFields(envelope.data ?? null);
+    if (application !== null && application.organizationUuid !== id) {
+      throw new FriendsError({ code: FriendsErrorCode.PermissionDenied,
+        message: "The leader-change application belongs to another organization" });
+    }
+    return application;
+  }
+
+  async function organizationPosts(labelCode: string): Promise<Array<{ id: string; name: string | null }>> {
+    const envelope = await request(
+      `${organizationPrefix}/student-organization-info/post-list/${encodeURIComponent(labelCode)}`,
+      { method: "GET", headers: headers(session) },
+    );
+    if (!Array.isArray(envelope.data)) {
+      throw new FriendsError({
+        code: FriendsErrorCode.NetworkProtocol,
+        message: "Unexpected organization post list response",
+      });
+    }
+    return envelope.data.map(postFields);
+  }
+
+  async function leaderState(
+    organizationIdValue: string,
+    currentRaw: JsonObject,
+  ): Promise<OrganizationLeaderChangeState> {
+    const labelCode = text(currentRaw.labelCode);
+    if (labelCode === null) {
+      throw new FriendsError({
+        code: FriendsErrorCode.NetworkProtocol,
+        message: "Organization detail did not include the post label code",
+      });
+    }
+    const [application, posts, label] = await Promise.all([
+      leaderApplication(organizationIdValue),
+      organizationPosts(labelCode),
+      request(`${organizationPrefix}/labelInfo/code/${encodeURIComponent(labelCode)}`, {
+        method: "GET",
+        headers: headers(session),
+      }),
+    ]);
+    const labelRaw = object(label.data);
+    const jobDivision = labelRaw === null ? null : boolean(labelRaw.isJobDivision);
+    if (jobDivision === null) {
+      throw new FriendsError({
+        code: FriendsErrorCode.NetworkProtocol,
+        message: "Unexpected organization job-division response",
+      });
+    }
+    return {
+      organizationId: organizationIdValue,
+      currentResponsiblePerson: nullableText(currentRaw.responsiblePerson),
+      currentResponsiblePhone: nullableText(currentRaw.responsiblePhone),
+      currentPostUuid: nullableText(currentRaw.postUuid),
+      currentPostName: nullableText(currentRaw.postName),
+      application,
+      jobDivisionEnabled: jobDivision,
+      posts,
+    };
+  }
+
+  function applicationMatchesPayload(
+    application: OrganizationLeaderChangeApplication | null,
+    payload: Record<string, unknown>,
+  ): boolean {
+    if (application === null) return false;
+    const expected = {
+      newPostUuid: typeof payload.newPostUuid === "string" ? payload.newPostUuid : "",
+      newResponsiblePerson: payload.newResponsiblePerson,
+      newResponsiblePhone: payload.newResponsiblePhone,
+      newResponsiblePolitical: payload.newResponsiblePolitical,
+      organizationUuid: payload.organizationUuid,
+      postName: payload.postName,
+      reason: payload.reason,
+      responsiblePerson: payload.responsiblePerson,
+      responsiblePhone: payload.responsiblePhone,
+    } as Record<string, unknown>;
+    return (Object.keys(expected) as Array<keyof typeof expected>).every((key) => {
+      const actual = application[key as keyof OrganizationLeaderChangeApplication];
+      return (actual === null || actual === undefined ? "" : actual) === expected[key];
+    });
   }
 
   return {
@@ -1265,6 +1605,200 @@ export function createVerifiedOrganizationClient(options: {
         type: prepared.type,
         decision: prepared.decision,
         relation,
+      };
+    },
+    async listLeaderChangeCandidates(id: OrganizationId, keyword = "") {
+      await requirePrincipal(id);
+      if (typeof keyword !== "string") invalid("keyword must be a string");
+      const query = new URLSearchParams({ key: keyword });
+      const envelope = await request(
+        `${organizationPrefix}/responsiblePersonChangeInfo/new-response-person/${encodeURIComponent(id)}?${query}`,
+        { method: "GET", headers: headers(session) },
+      );
+      if (!Array.isArray(envelope.data)) {
+        throw new FriendsError({
+          code: FriendsErrorCode.NetworkProtocol,
+          message: "Unexpected leader-change candidate response",
+        });
+      }
+      return envelope.data.map(candidateFields);
+    },
+    async getLeaderChangeState(id: OrganizationId) {
+      const organization = await requireOrganization(id);
+      const current = await detail(organization.id);
+      return leaderState(organization.id, current.raw);
+    },
+    async prepareLeaderChange(input: {
+      organizationId: OrganizationId;
+    } & OrganizationLeaderChangeInput) {
+      const { organizationId: _organizationId, ...leaderChangeRaw } = input ?? {};
+      const leaderInput = validateLeaderChangeInput(leaderChangeRaw);
+      await refreshWriteAuthorization();
+      const organization = await requirePrincipal(organizationId(input?.organizationId));
+      const current = await detail(organization.id);
+      if (current.raw.responsiblePerson !== session.account.userNo) {
+        throw new FriendsError({ code: FriendsErrorCode.PermissionDenied,
+          message: "The current organization responsible person changed" });
+      }
+      const state = await leaderState(organization.id, current.raw);
+      if (state.application !== null && !state.application.canSubmit) {
+        throw new FriendsError({
+          code: FriendsErrorCode.UpstreamBusiness,
+          message: "The school does not allow a new leader-change submission in the current application state",
+          recovery: {
+            operation: "organizations.leader-change.prepare",
+            organizationId: organization.id,
+            applicationId: state.application.id,
+          },
+        });
+      }
+      const exactCandidates = (
+        await this.listLeaderChangeCandidates(organizationId(organization.id), leaderInput.candidateStudentNo)
+      )
+        .filter((candidate) => candidate.studentNo === leaderInput.candidateStudentNo);
+      if (exactCandidates.length !== 1) {
+        throw new FriendsError({
+          code: FriendsErrorCode.UpstreamBusiness,
+          message: exactCandidates.length === 0
+            ? "The organization has no exact eligible candidate for that student number"
+            : "The organization candidate search returned multiple exact student numbers",
+          recovery: { operation: "organizations.leader-change.candidate", organizationId: organization.id },
+        });
+      }
+      const candidate = exactCandidates[0];
+      if (state.jobDivisionEnabled === true) {
+        if (leaderInput.newPostUuid === undefined) {
+          invalid("newPostUuid is required because the organization enables job division");
+        }
+        if (!state.posts.some((post) => post.id === leaderInput.newPostUuid)) {
+          invalid("newPostUuid does not belong to the organization post list");
+        }
+      } else if (leaderInput.newPostUuid !== undefined) {
+        invalid("newPostUuid is not accepted when the organization disables job division");
+      }
+      const payload = {
+        newPostUuid: leaderInput.newPostUuid ?? "",
+        newResponsiblePerson: candidate.studentNo,
+        newResponsiblePhone: leaderInput.newResponsiblePhone,
+        newResponsiblePolitical: leaderInput.newResponsiblePolitical,
+        organizationUuid: organization.id,
+        postName: state.currentPostName ?? "",
+        reason: leaderInput.reason,
+        responsiblePerson: state.currentResponsiblePerson ?? "",
+        responsiblePhone: state.currentResponsiblePhone ?? "",
+        uuid: state.application?.id ?? "",
+      };
+      return {
+        status: "prepared" as const,
+        submitted: false as const,
+        organizationId: organization.id,
+        input: leaderInput,
+        candidate,
+        state,
+        payload,
+      };
+    },
+    async submitLeaderChange(
+      value: PreparedOrganizationLeaderChange,
+      intentInput: OrganizationLeaderChangeSubmitIntent,
+    ) {
+      validateLeaderChangeSubmitIntent(intentInput);
+      const prepared = validatePreparedLeaderChange(value);
+      const refreshed = await this.prepareLeaderChange({
+        organizationId: organizationId(prepared.organizationId),
+        ...prepared.input,
+      });
+      if (
+        canonicalJson(refreshed.payload) !== canonicalJson(prepared.payload) ||
+        canonicalJson(refreshed.candidate) !== canonicalJson(value.candidate) ||
+        canonicalJson(refreshed.state) !== canonicalJson(value.state)
+      ) {
+        throw new FriendsError({
+          code: FriendsErrorCode.UpstreamBusiness,
+          message: "The organization, candidate, post configuration, or leader-change application changed before submission",
+          recovery: { operation: "organizations.leader-change.submit", organizationId: prepared.organizationId },
+        });
+      }
+
+      const knownApplicationId = typeof prepared.payload.uuid === "string" && prepared.payload.uuid !== "" ? prepared.payload.uuid : undefined;
+      try {
+        await request(`${organizationPrefix}/responsiblePersonChangeInfo/apply`, {
+          method: "POST",
+          headers: headers(session),
+          body: JSON.stringify(prepared.payload),
+        });
+      } catch (error) {
+        if (!(error instanceof FriendsError) || error.code !== FriendsErrorCode.NetworkProtocol) throw error;
+        let applicationId = knownApplicationId;
+        let applicationReadback: "matched" | "unmatched" | "unavailable" = "unavailable";
+        try {
+          const readbackApplication = await leaderApplication(prepared.organizationId);
+          applicationId = readbackApplication?.id ?? applicationId;
+          applicationReadback = applicationMatchesPayload(readbackApplication, prepared.payload)
+            ? "matched"
+            : "unmatched";
+        } catch {
+          applicationReadback = "unavailable";
+        }
+        throw new FriendsError({
+          code: FriendsErrorCode.UnknownOutcome,
+          message: "The leader-change submission response was lost; do not submit it again without school-side confirmation",
+          recovery: {
+            operation: "organizations.leader-change.submit",
+            organizationId: prepared.organizationId,
+            applicationId,
+            completed: [`server-request:unknown`, `application-readback:${applicationReadback}`],
+            serverAcknowledged: "unknown",
+            applicationReadback,
+            submitRetries: 0,
+          },
+        });
+      }
+
+      let application: OrganizationLeaderChangeApplication | null = null;
+      let currentRaw: JsonObject;
+      try {
+        application = await leaderApplication(prepared.organizationId);
+        currentRaw = (await detail(organizationId(prepared.organizationId))).raw;
+      } catch {
+        throw new FriendsError({
+          code: FriendsErrorCode.UnknownOutcome,
+          message: "The school acknowledged the leader-change submission, but the required read-only result check was unavailable",
+          recovery: {
+            operation: "organizations.leader-change.submit",
+            organizationId: prepared.organizationId,
+            applicationId: application?.id ?? knownApplicationId,
+            completed: ["server-acknowledged", "readback:unavailable"],
+            serverAcknowledged: true,
+            applicationReadback: "unavailable",
+            submitRetries: 0,
+          },
+        });
+      }
+      if (application === null || !applicationMatchesPayload(application, prepared.payload)) {
+        throw new FriendsError({
+          code: FriendsErrorCode.UnknownOutcome,
+          message: "The school acknowledged the leader-change submission, but its outcome remains unknown because the application readback did not match it",
+          recovery: {
+            operation: "organizations.leader-change.submit",
+            organizationId: prepared.organizationId,
+            applicationId: application?.id ?? knownApplicationId,
+            completed: ["server-acknowledged", "readback:unmatched"],
+            serverAcknowledged: true,
+            applicationReadback: "unmatched",
+            submitRetries: 0,
+          },
+        });
+      }
+      return {
+        status: "submitted" as const,
+        submitted: true as const,
+        serverAcknowledged: true,
+        applicationReadback: "matched" as const,
+        organizationId: prepared.organizationId,
+        application,
+        currentResponsiblePerson: nullableText(currentRaw.responsiblePerson),
+        responsiblePersonChanged: nullableText(currentRaw.responsiblePerson) === prepared.input.candidateStudentNo,
       };
     },
     async prepareProfileUpdate(input: { organizationId: OrganizationId; changes: OrganizationProfileChanges }) {
