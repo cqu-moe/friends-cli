@@ -33,7 +33,8 @@
 
 ## 自动化与未验收范围
 
-- 2026-10-22 在 macOS / Node.js 22 下运行 `npm run build && node --test tests/course-participation.test.js`，7 项本票测试全部通过，0 失败、0 跳过。合并最新 integration 后的全量结果见下文最终记录。
+- 2026-10-22 在 macOS / Node.js 22 下运行 `npm run build && node --test tests/course-participation.test.js`，7 项本票测试全部通过，0 失败、0 跳过。
+- 合并 `feat/issue-2-integration` `7d5850c` 后运行 `npm test`，TypeScript 构建和全部 74 项 Node 测试通过，0 失败、0 跳过；其中包含 #6 strict Ego fixture、OAuth、志愿认证 API、组织与课程报名相邻回归。
 - 本票未执行真实学校课程报名、撤销或退出，未对生产业务发起任何写入，也未代用户点击 Ego 最终提交。真实 Ego 写入准备和用户亲自提交需由集中控制的 Ego 验收另行记录。
 - `student-apply/can-apply/{courseId}` 的副作用、附件上传/分组生命周期、教师/管理员路径和生产角色选择行为仍未验收，不能宣称支持。
 - 本线程未访问 TaskSpace16，未执行真实 Ego、真实学校课程报名/撤销/退出或任何生产业务写入。实际 Ego 受控 fixture 验收、可见页面选择器实测和用户亲自最终提交由主 agent 集中处理；本测试只证明受控 bridge 脚本边界，不能替代真实页面验收。
