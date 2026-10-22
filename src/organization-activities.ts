@@ -145,7 +145,7 @@ export function createOrganizationActivityClient(options: {baseUrl?: string; ses
   }
   async function organization(id: string) {
     await verify();
-    const data = (await request(`${prefix}/apply-info/chose-type`,'GET')).data;
+    const data = (await request(`${prefix}/apply-info/drop-down-list`,'POST',{isTeacher:false})).data;
     if (!Array.isArray(data)) protocol('Invalid organization activity permissions');
     const matches = data.map(object).filter(row => row?.uuid === id);
     if (matches.length !== 1) throw new FriendsError({code:FriendsErrorCode.PermissionDenied,message:'This organization is not available for activity offering'});
@@ -164,7 +164,7 @@ export function createOrganizationActivityClient(options: {baseUrl?: string; ses
     const firstStep = {beginYear:term.beginYear,endYear:term.endYear,termNo:term.termNo,activityName:input.activityName,activityContent:input.activityContent,activityPlace:input.activityPlace,
       beginTime:input.beginTime,endTime:input.endTime,organizationId:input.organizationId,organizationName:selected.organizationName,organizationType:selected.organizationType === 'CCYL' ? 1 : 3,
       attachmentGroupUuid:'',publicityPicturesGroupUuid:'',uuid:''};
-    const settings = {...input.registration,organizationId:input.organizationId,isEnrollPowerStr:'1',beginEndFlagStr:'1',openType:'TIMING_ON',finishType:'TIMING_ON',applyNumber:0,draft:false,push:true,addOrUpdate:2,questionnaireInfoRespDtoList:[]};
+    const settings = {...input.registration,organizationId:input.organizationId,activityName:input.activityName,beginTime:input.beginTime,isEnrollPowerStr:'1',beginEndFlagStr:'1',openType:'TIMING_ON',finishType:'TIMING_ON',applyNumber:0,draft:false,push:true,addOrUpdate:2,questionnaireInfoRespDtoList:[]};
     const plan = {status:'materials-required' as const,submitted:false as const,binding:{accountUserNo:session.account.userNo,levelNo:session.context.levelNo,unitNo:session.context.unit.unitNo,organizationId:input.organizationId},firstStep,settings,
       materials:{publicityPictures:input.materials.publicityPictures.map(file => ({name:file.name,size:file.size,type:file.type})),attachments:input.materials.attachments!.map(file => ({name:file.name,size:file.size,type:file.type}))}};
     return {input,plan};

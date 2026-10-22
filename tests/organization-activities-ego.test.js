@@ -10,9 +10,18 @@ test('public Node SDK prepares the real iframe DOM, preserves human and readonly
  const options={input:offeringInput(),taskSpaceId:7,page:'p2',command:f.command,baseUrl:api.baseUrl};
  const preview=await run(f,()=>nodeSdk.prepareOrganizationActivityOfferingInEgo({...options,dryRun:true}));assert.equal(preview.submitted,false);assert.equal((await f.observed()).fills.length,0);assert.equal((await f.observed()).handoffs,0);
  const result=await run(f,()=>nodeSdk.prepareOrganizationActivityOfferingInEgo(options));
- assert.equal(result.status,'awaiting-user');assert.equal(result.submitted,false);assert.equal(result.handoff,'completed');assert.ok(result.preservedFields.includes('activityName'));assert.ok(result.preservedFields.includes('activityPlace'));
+ assert.equal(result.status,'awaiting-user');assert.equal(result.submitted,false);assert.equal(result.handoff,'completed');assert.ok(result.preservedFields.includes('activityName'));assert.ok(result.preservedFields.includes('activityPlace'));assert.equal(result.manualFields.includes('organization'),false);
  const observed=await f.observed();assert.equal(observed.handoffs,1);assert.equal(observed.submits,0);assert.equal(observed.navigations,0);assert.equal(observed.clicks.length,0);
  assert.ok(observed.fieldValues.some(field=>field.value==='人工草稿标题'));assert.ok(observed.fieldValues.some(field=>field.value==='活动简介'));assert.match(observed.html,/data-model="活动简介"/);
+ const different=await setupOrganizationActivityEgo(t,api.baseUrl,{organizationName:'人工另选组织'});
+ const held=await run(different,()=>nodeSdk.prepareOrganizationActivityOfferingInEgo({...options,command:different.command}));
+ assert.equal(held.submitted,false);assert.equal(held.manualFields.includes('organization'),true);assert.deepEqual(held.completedActions,[]);
+ const preserved=await different.observed();assert.deepEqual(preserved.fills,[]);assert.equal(preserved.clicks.length,0);assert.equal(preserved.handoffs,1);assert.match(preserved.html,/id="selected-organization">人工另选组织/);
+ const unselected=await setupOrganizationActivityEgo(t,api.baseUrl,{organizationName:'请选择'});
+ const pending=await run(unselected,()=>nodeSdk.prepareOrganizationActivityOfferingInEgo({...options,command:unselected.command}));
+ assert.equal(pending.manualFields.includes('organization'),true);assert.equal(pending.completedActions.length,2);assert.equal(pending.completedActions.includes('organization'),false);
+ assert.match((await unselected.observed()).html,/id="selected-organization">请选择/);
+
  assert.equal(api.state.uploads+api.state.firstWrites+api.state.finalWrites,0);
 });
 

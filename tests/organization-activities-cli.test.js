@@ -27,7 +27,7 @@ test('real CLI covers every organization activity API command, file/stdin, schem
   const result=body(await run([operation,'activity-1']));
   if(operation==='status')assert.deepEqual(result.data.flow,{nodeList:[{activityname:'组织审核',state:'UNKNOWN_NODE_STATE'}],evaluationRecords:[{msg:'等待学校处理',state:'UNKNOWN_RECORD_STATE'}]});
  }
- assert.equal(body(await run(['prepare','--input','-'],JSON.stringify(f.input))).data.submitted,false);
+ const prepared=body(await run(['prepare','--input','-'],JSON.stringify(f.input))).data;assert.equal(prepared.submitted,false);assert.equal(prepared.firstStep.organizationId,'organization-1');assert.equal(prepared.firstStep.termNo,'1');
  body(await run(['materials','--input',f.path,'--dry-run']));body(await run(['submit','--input',f.path,'--dry-run']));
  const denied=await run(['materials','--input',f.path]);assert.equal(denied.code,2);assert.equal(JSON.parse(denied.stdout).error.code,'INVALID_INPUT');assert.equal(f.api.state.uploads,0);
  const uploaded=await run(['materials','--input',f.path,'--confirm']);assert.equal(body(uploaded).data.status,'materials-ready');
@@ -49,7 +49,7 @@ test('real CLI reuses Ego sessions for all queries and prepares editable control
  const unavailable=body(await run(['status','activity-1',...ego]));assert.deepEqual(unavailable.data.flow,{nodeList:[],evaluationRecords:null});
  assert.equal(unavailable.meta.selectedEntry,'ego');assert.equal(unavailable.meta.requestMode,'direct-api');
  const preview=body(await run(['prepare','--input',f.path,...ego,'--dry-run']));assert.equal(preview.data.submitted,false);assert.equal((await f.ego.observed()).fills.length,0);
- const prepared=body(await run(['prepare','--input','-',...ego],JSON.stringify(f.input)));assert.equal(prepared.data.status,'awaiting-user');assert.equal(prepared.data.submitted,false);assert.equal(prepared.data.handoff,'completed');assert.ok(prepared.data.manualFields.includes('registration-settings'));
+ const prepared=body(await run(['prepare','--input','-',...ego],JSON.stringify(f.input)));assert.equal(prepared.data.status,'awaiting-user');assert.equal(prepared.data.submitted,false);assert.equal(prepared.data.handoff,'completed');assert.ok(prepared.data.manualFields.includes('registration-settings'));assert.equal(prepared.data.manualFields.includes('organization'),false);
  const observed=await f.ego.observed();assert.equal(observed.fills.length,2);assert.equal(observed.clicks.length,0);assert.equal(observed.handoffs,1);assert.match(observed.html,/data-model="活动简介"/);
  assert.ok(f.api.requests.some(r=>r.headers['h-zove-token']==='ego-fixture-token'));
  const before=f.api.requests.length;
@@ -67,6 +67,7 @@ test('real CLI rejects malformed inputs and permissions with versioned errors be
  for(const [args,input] of [ [['prepare','--input','-'],'{bad'],[['list','--page','0'],undefined],[['prepare','--input','-'],JSON.stringify({...f.input,unverifiedField:true})],[['prepare','--input','-'],JSON.stringify({...f.input,materials:{publicityPictures:[]}})]]){
   const result=await run(args,input);assert.equal(result.code,2);assert.equal(JSON.parse(result.stdout).schemaVersion,1);assert.equal(JSON.parse(result.stdout).error.code,'INVALID_INPUT');assert.notEqual(result.stderr,'');
  }
+ f.api.state.permission=false;const unavailable=await run(['prepare','--input',f.path]);assert.equal(unavailable.code,4);assert.equal(JSON.parse(unavailable.stdout).error.code,'PERMISSION_DENIED');f.api.state.permission=true;
  f.api.state.mode='denied';const denied=await run(['show','activity-1']);assert.equal(denied.code,4);assert.equal(JSON.parse(denied.stdout).error.code,'PERMISSION_DENIED');
  f.api.state.mode='normal';f.api.state.account='changed';const expired=await run(['status','activity-1']);assert.equal(expired.code,3);assert.equal(JSON.parse(expired.stdout).error.code,'AUTH_REQUIRED');
  assert.equal(f.api.state.uploads+f.api.state.firstWrites+f.api.state.finalWrites,0);

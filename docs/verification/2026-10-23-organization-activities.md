@@ -12,7 +12,7 @@
 
 - SDK：organizationActivityId、createFriendsSdk().createOrganizationActivityClient，及可直接使用的 createOrganizationActivityClient；list/get/requirements/status/prepare/uploadMaterials/submit。
 - Node SDK：prepareOrganizationActivityOfferingInEgo。CLI：organization-activities list/show/requirements/status/prepare/materials/submit，全都有 help/schema。
-- API 查询与 Ego 会话查询使用同一 SDK。权限来自每次学校账号/上下文核验与 chose-type 中的组织，组织名/类型和学期从学校读取。未知状态保留原值，不用志愿或课程枚举解释。
+- API 查询与 Ego 会话查询使用同一 SDK。权限来自每次学校账号/上下文核验与 drop-down-list({isTeacher:false}) 中的组织，组织名/类型和学期从学校读取。未知状态保留原值，不用志愿或课程枚举解释。
 - API 材料上传、第一步保存与最终设置提交分开。材料上传需独立确认；第一步 PUT next-update 返回新 UUID 后才允许最终 PUT set-update，中间重新核验组织权限。上传/保存/最终响应丢失立即停止后续写入；只读回查匹配不能清除 UNKNOWN_OUTCOME。
 - 恢复证据中的 publicity-group/attachment-group 是本地分配的组标识，upload:resourceId 才表示收到该资源的上传回执；已确认的第一步另保留申请 UUID。没有自动回滚或跨路径补交。
 - Ego 只在初始活动信息页填空白可编辑文本；所有实际 DOM evaluate 与 input/change 回调在同源 iframe 中执行。人工文本与只读控件保留，部分中断返回 completed/inProgress 和页面 label，始终 submitted=false。下一步、上传、第二步和最终提交交给用户；没有最终按钮或写 API 绕过。
@@ -37,6 +37,8 @@ CLI 覆盖所有命令 help/schema、文件与 stdin、版本化单 JSON stdout�
 修复将 status 对齐前端 approve-list，不把无状态节点数组伪装成审批历史、不以空数组掩盖历史缺失。节点与记录中的未知状态保留；缺失或非数组字段为 null，学校明确返回空数组时保留 []。SDK 和真实 CLI 的回归测试在旧代码准确复现同一 NETWORK_PROTOCOL_ERROR（CLI exit 6），再通过修复验证 API/Ego 查询的版本化输出与缺失历史。实际学校修复后复测由主线程执行。本次定向测试 18/18，全量 npm test 224/224 通过（0 failed/skipped，含构建）。
 
 主线程后续通过现有 Ego 查询入口实测：修正后的 status 成功，nodeList 为 3 项、evaluationRecords 为 2 项。这里只记录数量与只读查询结论，不保存真实节点、审批人员或记录内容；它不代表开办写入或人工最终提交验收。
+
+完整模块端点、字段与 fixture 审计见 [有界来源审计](2026-10-23-organization-activity-source-audit.md)。主线程以真实组织和当前学校学期执行修正后的 SDK prepare 已成功（materials-required，零上传/写入）。
 
 ## 尚未验收与风险
 

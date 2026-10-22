@@ -23,4 +23,6 @@
 
 本工作线程没有真实浏览器、生产 API 或任何真实业务写入；主线程会独立复测修复后的只读行为。来源检查与受控测试不能替代真实写入验收。
 
-定向验证：TypeScript 构建及志愿 SDK/CLI 测试 7/7 通过，0 failed/skipped；全量集成测试另行记录。
+定向验证：TypeScript 构建及志愿 SDK/CLI 测试 7/7 通过，0 failed/skipped；合入当时最新 integration 后完整 npm test 241/241 通过，0 failed/skipped（含构建）。
+
+主线程后续实际 CLI 只读复测 fa994fe 已通过：identity 为 ok:true，成员证据 present:false/ interpreted:false，资格 null/business-rejected、学校业务码 10000；活动列表 ok:true、1 项。这里只记录结果形状与数量，不保存真实成员、活动或凭据；未进行任何实际业务写入。

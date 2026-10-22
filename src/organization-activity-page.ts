@@ -20,7 +20,9 @@ async function facts(page: Page) {
     const inputs = [...d.querySelectorAll('input')];
     const label = (input: HTMLInputElement) => input.closest('.van-field')?.querySelector('.van-field__label')?.textContent?.trim();
     const place = inputs.find(input => input.name === 'activityPlace' || label(input) === '活动地址');
-    const organization = inputs.find(input => label(input) === '发起组织');
+    const organization = [...d.querySelectorAll('.van-field')]
+      .find(field => field.querySelector('.van-field__label')?.textContent?.trim() === '发起组织')
+      ?.querySelector('.van-field__control--custom')?.textContent?.trim() ?? '';
     const selector = (element: Element | undefined) => {
       if (!element) return '';
       const parts: string[] = [];
@@ -36,7 +38,7 @@ async function facts(page: Page) {
       const raw = w.localStorage.getItem(key); if (!raw) return [];
       try { const value = JSON.parse(raw); return [value?.userNo,value?.account].filter(value => typeof value === 'string'); } catch { return [raw]; }
     });
-    return {url:w.location.href,token:w.localStorage.getItem('token_str'),userLevel:w.localStorage.getItem('userLevel_str'),accounts,fields,organizationName:organization?.value ?? ''};
+    return {url:w.location.href,token:w.localStorage.getItem('token_str'),userLevel:w.localStorage.getItem('userLevel_str'),accounts,fields,organizationName:organization === '请选择' ? '' : organization};
   },null);
 }
 /** First-step text changes are local; Next saves remotely and remains a human action. */
