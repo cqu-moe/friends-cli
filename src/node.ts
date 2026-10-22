@@ -11,6 +11,22 @@ import {
   type LoginContext,
   type VerifiedVolunteerSession,
 } from "./index.js";
+import {
+  prepareVisibleVolunteerRegistration,
+  prepareVisibleVolunteerWithdrawal,
+  type VisibleVolunteerAnswer,
+} from "./volunteer-ego.js";
+import {
+  createVolunteerClient,
+  validateVolunteerRegisterInput,
+  volunteerActivityId,
+  volunteerRegistrationId,
+  type VolunteerActivityDetail,
+  type VolunteerActivityPost,
+  type VolunteerRegisterInput,
+  type VolunteerRegisterPayload,
+  type VolunteerRegistration,
+} from "./volunteer.js";
 import { FriendsError, FriendsErrorCode, type WriteRecovery } from "./errors.js";
 import { courseRegistrationId, type CourseParticipationSession, type CourseRegistrationSummary, type CourseQuestionnaireDefinition, type PreparedCourseApply } from "./course-participation.js";
 import { loadCourseQuestionnaireFiles } from "./course-questionnaire-files.js";
@@ -778,6 +794,220 @@ export async function readVerifiedEgoSession(options: {
   };
 }
 
+export interface VolunteerRegistrationEgoPreparation {
+  status: "awaiting-user";
+  submitted: false;
+  handoff: true;
+  activityId: string;
+  pageLabel: string;
+  completedActions: string[];
+  preservedFields: string[];
+  activity: VolunteerActivityDetail;
+  posts: VolunteerActivityPost[];
+  payload: VolunteerRegisterPayload;
+  verification: {
+    account: { userNo: string };
+    context: { levelNo: string; unit: { unitNo: string } };
+  };
+}
+
+export interface VolunteerWithdrawalEgoPreparation {
+  status: "awaiting-user";
+  submitted: false;
+  handoff: true;
+  activityId: string;
+  pageLabel: string;
+  completedActions: string[];
+  preservedFields: string[];
+  activity: VolunteerActivityDetail;
+  registration: VolunteerRegistration;
+  verification: {
+    account: { userNo: string };
+    context: { levelNo: string; unit: { unitNo: string } };
+  };
+}
+
+function validateEgoSdkOptions(options: {
+  taskSpaceId: number;
+  timeoutMs?: number;
+  schoolTimeoutMs?: number;
+}) {
+  if (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1) {
+    throw safeError("Invalid Ego task space", FriendsErrorCode.InvalidInput);
+  }
+  for (const value of [options.timeoutMs, options.schoolTimeoutMs]) {
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) {
+      throw safeError("Timeout must be a positive integer", FriendsErrorCode.InvalidInput);
+    }
+  }
+}
+
+export async function prepareVolunteerRegistrationInEgo(options: {
+  activityId: string;
+  input: VolunteerRegisterInput;
+  taskSpaceId: number;
+  page?: string;
+  levelNo?: string;
+  unitNo?: string;
+  baseUrl?: string;
+  fetch?: typeof fetch;
+  command?: string;
+  timeoutMs?: number;
+  schoolTimeoutMs?: number;
+}): Promise<VolunteerRegistrationEgoPreparation> {
+  validateEgoSdkOptions(options);
+  const activityId = volunteerActivityId(options.activityId);
+  validateVolunteerRegisterInput(options.input);
+  const baseUrl = options.baseUrl ?? "https://friends.cqu.edu.cn/gateway";
+  const session = await readVerifiedEgoSession({
+    taskSpaceId: options.taskSpaceId,
+    page: options.page,
+    timeoutMs: options.timeoutMs,
+    command: options.command,
+    baseUrl,
+    selector: options.levelNo === undefined && options.unitNo === undefined
+      ? undefined
+      : { levelNo: options.levelNo, unitNo: options.unitNo },
+  });
+  const client = createVolunteerClient({
+    session,
+    baseUrl,
+    fetch: options.fetch,
+    timeoutMs: options.schoolTimeoutMs,
+  });
+  const preparation = await client.prepareRegistration(activityId, options.input);
+  const postName = preparation.posts.find((post) => post.id === preparation.payload.postId)?.name;
+  if (postName === null || postName === undefined || postName === "") {
+    throw safeError("Ego preparation requires a visible volunteer post name", FriendsErrorCode.InvalidInput);
+  }
+  if (preparation.activity.name === null || preparation.activity.name === "") {
+    throw safeError("Ego preparation requires a visible volunteer activity name", FriendsErrorCode.InvalidInput);
+  }
+  const visibleAnswers: VisibleVolunteerAnswer[] = [];
+  for (const answer of options.input.questionnaireAnswers ?? []) {
+    const question = preparation.activity.questionnaires.find((item) => item.id === answer.itemUuid);
+    if (question === undefined) throw safeError("Questionnaire answer does not belong to this activity", FriendsErrorCode.InvalidInput);
+    if (question.title === null || question.title === "") {
+      throw safeError("Ego preparation requires a visible questionnaire title", FriendsErrorCode.InvalidInput);
+    }
+    if (answer.type === "DATE") {
+      throw safeError("DATE questionnaire Ego preparation is not implemented", FriendsErrorCode.InvalidInput);
+    }
+    if (answer.type === "CHOICE") {
+      const option = question.options.find((item) => item.id === answer.optionUuid);
+      if (option?.name === null || option?.name === undefined || option.name === "") {
+        throw safeError("Ego preparation requires a visible questionnaire option label", FriendsErrorCode.InvalidInput);
+      }
+      visibleAnswers.push({ title: question.title, type: answer.type, optionLabels: [option.name] });
+    } else if (answer.type === "MULTIPLE_CHOICE") {
+      visibleAnswers.push({
+        title: question.title,
+        type: answer.type,
+        optionLabels: answer.optionUuids.map((optionId) => {
+          const option = question.options.find((item) => item.id === optionId);
+          if (option?.name === null || option?.name === undefined || option.name === "") {
+            throw safeError("Ego preparation requires a visible questionnaire option label", FriendsErrorCode.InvalidInput);
+          }
+          return option.name;
+        }),
+      });
+    } else {
+      visibleAnswers.push({ title: question.title, type: answer.type, inputContent: answer.inputContent });
+    }
+  }
+  const execution = await prepareVisibleVolunteerRegistration({
+    activityId,
+    activityName: preparation.activity.name,
+    postName,
+    answers: visibleAnswers,
+    taskSpaceId: options.taskSpaceId,
+    baseUrl,
+    expectedSession: {
+      token: session.token,
+      userLevel: session.userLevel,
+      accountUserNo: session.account.userNo,
+    },
+    command: options.command,
+    timeoutMs: options.timeoutMs,
+  });
+  return {
+    status: "awaiting-user",
+    submitted: false,
+    handoff: true,
+    activityId,
+    pageLabel: execution.pageLabel,
+    completedActions: execution.completedActions,
+    preservedFields: execution.preservedFields,
+    activity: preparation.activity,
+    posts: preparation.posts,
+    payload: preparation.payload,
+    verification: { account: { userNo: session.account.userNo }, context: session.context },
+  };
+}
+
+export async function prepareVolunteerWithdrawalInEgo(options: {
+  activityId: string;
+  registrationId: string;
+  taskSpaceId: number;
+  page?: string;
+  levelNo?: string;
+  unitNo?: string;
+  baseUrl?: string;
+  fetch?: typeof fetch;
+  command?: string;
+  timeoutMs?: number;
+  schoolTimeoutMs?: number;
+}): Promise<VolunteerWithdrawalEgoPreparation> {
+  validateEgoSdkOptions(options);
+  const activityId = volunteerActivityId(options.activityId);
+  const registrationId = volunteerRegistrationId(options.registrationId);
+  const baseUrl = options.baseUrl ?? "https://friends.cqu.edu.cn/gateway";
+  const session = await readVerifiedEgoSession({
+    taskSpaceId: options.taskSpaceId,
+    page: options.page,
+    timeoutMs: options.timeoutMs,
+    command: options.command,
+    baseUrl,
+    selector: options.levelNo === undefined && options.unitNo === undefined
+      ? undefined
+      : { levelNo: options.levelNo, unitNo: options.unitNo },
+  });
+  const preparation = await createVolunteerClient({
+    session,
+    baseUrl,
+    fetch: options.fetch,
+    timeoutMs: options.schoolTimeoutMs,
+  }).prepareWithdrawal(activityId, registrationId);
+  if (preparation.activity.name === null || preparation.activity.name === "") {
+    throw safeError("Ego preparation requires a visible volunteer activity name", FriendsErrorCode.InvalidInput);
+  }
+  const execution = await prepareVisibleVolunteerWithdrawal({
+    activityId,
+    activityName: preparation.activity.name,
+    taskSpaceId: options.taskSpaceId,
+    baseUrl,
+    expectedSession: {
+      token: session.token,
+      userLevel: session.userLevel,
+      accountUserNo: session.account.userNo,
+    },
+    command: options.command,
+    timeoutMs: options.timeoutMs,
+  });
+  return {
+    status: "awaiting-user",
+    submitted: false,
+    handoff: true,
+    activityId,
+    pageLabel: execution.pageLabel,
+    completedActions: execution.completedActions,
+    preservedFields: execution.preservedFields,
+    activity: preparation.activity,
+    registration: preparation.registration,
+    verification: { account: { userNo: session.account.userNo }, context: session.context },
+  };
+}
+
 export interface CourseRegistrationEgoPreparation {
   operation: string;
   execution: "ego-visible-prepare";
@@ -1055,6 +1285,8 @@ export async function loadSession(): Promise<StoredSession> {
 
 export * from "./certification-capture.js";
 export {prepareVolunteerActivityReviewInEgo} from './volunteer-activity-review-ego.js';
+export * from './organization-activity-ego.js';
+
 
 export {prepareOrganizationParticipationInEgo} from "./organization-participation-ego.js";
 export { prepareOrganizationActivityReviewInEgo } from "./organization-activity-review-ego.js";

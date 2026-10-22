@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import {organizationActivitySchemas,registerOrganizationActivityCommands} from "./organization-activities.js";
+
 import {courseReviewSchemas, registerCourseReviewCommands} from "./course-reviews.js";
 import {volunteerActivityReviewSchemas,registerVolunteerActivityReviewCommands} from "./volunteer-activity-reviews.js";
 import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
@@ -34,6 +36,7 @@ import {
   registerCourseParticipationCommands,
 } from "./course-participation.js";
 import { organizationSchemas, registerOrganizationCommands } from "./organizations.js";
+import { registerVolunteerCommands, volunteerSchemas } from "./volunteer.js";
 import { registerVolunteerReviewCommands, volunteerReviewSchemas } from "./volunteer-reviews.js";
 import { offeringSchemas, registerOfferingCommands } from "./offerings.js";
 
@@ -41,6 +44,8 @@ import {organizationParticipationSchemas,registerOrganizationParticipationComman
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
+  ...organizationActivitySchemas,
+
   ...organizationParticipationSchemas,
   ...courseReviewSchemas,
   ...offeringSchemas,
@@ -50,6 +55,8 @@ const schemas = {
   ...draftSchemas,
   ...courseParticipationSchemas,
   ...organizationSchemas,
+  ...volunteerSchemas,
+
   ...organizationActivityReviewSchemas,
   ...volunteerReviewSchemas,
   errors: {
@@ -182,7 +189,7 @@ async function createQueryCourseClient(
 
 const program = new Command()
   .name("friends")
-  .description("Query courses and manage local volunteer certification drafts and student organizations")
+  .description("Query Second Classroom data and manage volunteer and organization workflows")
   .version("0.1.0")
   .configureOutput({
     writeOut: (text) => process.stdout.write(text),
@@ -439,6 +446,13 @@ registerOrganizationCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
 });
 
+registerVolunteerCommands(program, {
+  sdk,
+  output,
+  selectedSession: (options) =>
+    resolveQuerySession(options, process.env.FRIENDS_BASE_URL ?? productionBaseUrl),
+});
+
 registerCourseOfferingCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
 });
@@ -446,6 +460,8 @@ registerCourseOfferingCommands(program, {
 registerVolunteerReviewCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
 });
+
+registerOrganizationActivityCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 
 program.parseAsync(process.argv).catch(async (error: unknown) => {
   const code = (error as { code?: string }).code;

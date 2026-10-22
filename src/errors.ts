@@ -17,10 +17,13 @@ export interface WriteRecovery {
   applicationId?: string;
   organizationId?: string;
   draftId?: string;
+  pageLabel?: string;
+
   attachmentGroupUuids?: string[];
   resourceIds?: string[];
   input?: unknown;
   completed?: string[];
+  inProgress?: string;
   serverAcknowledged?: boolean | "unknown";
   readback?: "matched" | "unmatched" | "unavailable";
   materialGroups?: {
