@@ -68,7 +68,7 @@ function active(){if(saved.ownership==='user'||stats.handoffs)throw new Error('B
 const page={
   label:'p1',
   async url(){active();return configuration.outerUrl??configuration.url;},
-  async goto(){active();stats.navigations++;if(stats.newPages===0)throw new Error('Unexpected navigation would discard fixture edits');},
+  async goto(){active();stats.navigations++;throw new Error('Unexpected navigation would discard fixture edits');},
   async waitForLoadState(){active();stats.loadStates++;},
   async snapshot(){
     active();
@@ -125,7 +125,7 @@ const page={
 };
 const task={
   page(){return page;},
-  async newPage(){stats.newPages++;return page;},
+  async newPage(){active();stats.newPages++;return {...page,async goto(){active();stats.navigations++;}};},
   async handOff(){active();stats.handoffs++;saved.ownership='user';},
 };
 try {
