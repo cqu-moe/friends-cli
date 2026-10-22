@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
 import { Command } from "commander";
 import {
   courseId,
@@ -21,6 +22,7 @@ import { organizationSchemas, registerOrganizationCommands } from "./organizatio
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
+  ...certificationApiSchemas,
   ...draftSchemas,
   ...organizationSchemas,
   errors: {
@@ -290,6 +292,8 @@ courses
       ...queryMeta(source),
     });
   });
+
+registerCertificationApiCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 
 registerDraftCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,

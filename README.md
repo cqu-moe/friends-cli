@@ -98,6 +98,19 @@ const members = await organizationClient.listMembers(organizationId(organization
 
 课程与草稿的学校查询共用 `--via api|ego`：Ego 模式直接核验现有页面会话后调用查询 API，不导航或读取本地会话。新增学号的草稿编辑也支持同样的来源选项。
 
+## 志愿认证 API 提交
+
+志愿认证 API 提交必须独立明确选择，Ego 交接不产生提交授权：
+
+```sh
+friends certification submit <draftId> --via api --dry-run
+friends certification submit <draftId> --via api --confirm
+friends certification submit --input draft.json --via api --confirm
+friends certification status <activityId> --via ego --ego-task-space 16
+```
+
+`--input -` 读取 stdin 导出的草稿。当前认证表单没有附件入口，带材料的草稿会在写入前拒绝。`UNKNOWN_OUTCOME`（退出码 7）时保留草稿，先用 `certification status` 回查，不自动重交。业务确认与回查结果分别返回；已有认证不会被这个新建命令覆盖。
+
 ## 学生组织
 
 组织查询先通过生产前端已核实的 `POST /student-organization-info/my` 获取当前账号上下文返回的组织，再按返回对象推导 `principal`、`manager` 或 `member`。成员列表只调用已核实的 `organizational-members-list`，请求固定绑定 `organizationId` 和在岗状态，输出仅投影学号、姓名、职务与负责人/管理员标志，不透传学校返回的其他字段。

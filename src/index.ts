@@ -24,6 +24,7 @@ export type {
   PreparedOrganizationProfileUpdate,
   SavedOrganizationProfile,
 } from "./organizations.js";
+export * from "./certification-api.js";
 
 declare const courseIdBrand: unique symbol;
 export type CourseId = string & { readonly [courseIdBrand]: true };
