@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import {organizationActivitySchemas,registerOrganizationActivityCommands} from "./organization-activities.js";
+
 import {courseReviewSchemas, registerCourseReviewCommands} from "./course-reviews.js";
 import {volunteerActivityReviewSchemas,registerVolunteerActivityReviewCommands} from "./volunteer-activity-reviews.js";
 import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
@@ -42,6 +44,8 @@ import {organizationParticipationSchemas,registerOrganizationParticipationComman
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
+  ...organizationActivitySchemas,
+
   ...organizationParticipationSchemas,
   ...courseReviewSchemas,
   ...offeringSchemas,
@@ -51,8 +55,9 @@ const schemas = {
   ...draftSchemas,
   ...courseParticipationSchemas,
   ...organizationSchemas,
-  ...organizationActivityReviewSchemas,
   ...volunteerSchemas,
+
+  ...organizationActivityReviewSchemas,
   ...volunteerReviewSchemas,
   errors: {
     operation: "errors", readonly:true, permission:"none", phases:["inspect"], supportedVia:["local"],
@@ -455,6 +460,8 @@ registerCourseOfferingCommands(program, {
 registerVolunteerReviewCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
 });
+
+registerOrganizationActivityCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 
 program.parseAsync(process.argv).catch(async (error: unknown) => {
   const code = (error as { code?: string }).code;

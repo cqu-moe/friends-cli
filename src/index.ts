@@ -1,3 +1,5 @@
+import {createOrganizationActivityClient} from "./organization-activities.js";
+export * from "./organization-activities.js";
 import { FriendsError, FriendsErrorCode } from "./errors.js";
 import {
   createCourseParticipationClient,
@@ -7,6 +9,7 @@ import {
   type OrganizationSession,
 } from "./organizations.js";
 import { createVolunteerClient } from "./volunteer.js";
+
 import {
   createCourseOfferingClient,
   type CourseOfferingSession,
@@ -115,6 +118,7 @@ export type {
   VolunteerWriteResult,
   VolunteerRegistrationPreparation,
 } from "./volunteer.js";
+
 
 export * from "./volunteer-offering.js";
 export * from "./volunteer-offering-api.js";
@@ -678,6 +682,9 @@ export function createFriendsSdk(options: {
           }};
         },
       };
+    },
+    async createOrganizationActivityClient(input: VerifiedCourseSession) {
+      return createOrganizationActivityClient({baseUrl,fetch:fetchImpl,timeoutMs,session:snapshotSession(input)});
     },
     async createCourseParticipationClient(input: VerifiedCourseSession) {
       const session = snapshotSession(input);

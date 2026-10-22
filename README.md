@@ -265,6 +265,12 @@ Ego 资料修改只执行可见 prepare：先经现有页面会话核验权限�
 
 加入/退出申请查询分别调用生产前端已核实的 `POST /student-organization-apply/approve-list`：加入使用 `applyType: 1`，退出使用 `applyType: 0`，并绑定已验证组织 UUID。输出仅投影申请 UUID、组织 UUID、学号、姓名和当前流程消息。详情先调用 `GET /student-organization-apply/{uuid}`，要求返回的组织与学生标识存在，再按所选加入/退出列表分页核验申请类型，最后用 `organizationId + studentNo` 只读查询当前成员关系。普通成员上下文不能读取或审批申请。
 
+申请决定只允许 `approve -> AGREEMENT` 和 `reject -> ADJUSTMENT`；生产页面可见的 `REJECTION`（打回）未纳入本任务公开契约。决定输入只接受不超过 100 字符的 `message` 和 `yyyy-MM-dd` 的 `time`。准备阶段会重新核验身份、刷新可管理组织、读取学校完整申请详情、确认组织归属、确认指定类型仍处于唯一“等待”流程状态，并读取当前关系；这些检查都不写入。API 决定必须独立给出 `--via api` 和 `--yes`，提交 exact payload `{identified,msg,handleType:"XS02",studentOrganizationInfoApproveAddReqDto:{...学校详情,uuid:申请UUID},time,uuid}`，执行一次 POST 后只读回查待办与关系，不重试 POST。POST 响应丢失时即使待办已消失也保留不可重试的 `UNKNOWN_OUTCOME`（退出码 7）并报告 readback 证据；学校已确认但回查失败同样是不可重试的 `UNKNOWN_OUTCOME`，已确认但申请仍在待办中则返回业务拒绝。
+
+Ego 审批准备只执行可见步骤：先检查当前路由和可见非空人工输入，必要时才导航到对应加入/退出详情页；取得全页快照后用快照引用打开“通过”或“拒绝”弹窗，核验弹窗标题，并只填写空的审批意见。若意见已有相同值则保留，已有不同人工值则原样保留；日期留给用户复核，不替用户修改。随后命令把页面交接给用户，不点击“确认”，不调用审批 POST，`--yes` 会被拒绝。当前仓库只完成虚构 HTTP 与 strict DOM fixture 验收；真实 Ego、学校登录态只读查询、明确授权的 API 写入和用户人工提交未在本任务中执行。
+
+组织加入/退出审批的 Ego 准备方法 `prepareOrganizationApplicationDecisionInEgo` 从 Node 入口导出；调用必须包含 `organizationId`、`applicationId`、`type`、`decision`、`message`、`time` 及匹配的详情 `route`。公开方法自行重新验证现有 Ego 会话、组织管理权限、申请归属及等待状态，不依赖 CLI 先行校验。准备阶段读取同源 iframe 的实际表单，使用当前快照的 `[ref=N]` 定位可见动作，仅填空的审批意见，保留其他人工字段与已填意见；不覆盖其他申请页。返回 `submitted:false` 并把日期与最终确认交给用户。返回值不把固定计数当作真实零写入证据。
+
 ## 志愿身份、活动与个人报名
 
 志愿查询和写入使用 #5 已实测的 `zovecenter-saip-ek-app-young-volunteers` 网关服务。活动 UUID、报名记录 UUID、岗位 UUID 是不同领域 ID；CLI 和 SDK 均按对应方法校验，不能用报名 UUID 查活动，也不能把其他活动的岗位提交给当前活动。
@@ -284,12 +290,6 @@ npm run verify:volunteer-ego -- withdraw
 
 ## 捕获人工修改
 
-申请决定只允许 `approve -> AGREEMENT` 和 `reject -> ADJUSTMENT`；生产页面可见的 `REJECTION`（打回）未纳入本任务公开契约。决定输入只接受不超过 100 字符的 `message` 和 `yyyy-MM-dd` 的 `time`。准备阶段会重新核验身份、刷新可管理组织、读取学校完整申请详情、确认组织归属、确认指定类型仍处于唯一“等待”流程状态，并读取当前关系；这些检查都不写入。API 决定必须独立给出 `--via api` 和 `--yes`，提交 exact payload `{identified,msg,handleType:"XS02",studentOrganizationInfoApproveAddReqDto:{...学校详情,uuid:申请UUID},time,uuid}`，执行一次 POST 后只读回查待办与关系，不重试 POST。POST 响应丢失时即使待办已消失也保留不可重试的 `UNKNOWN_OUTCOME`（退出码 7）并报告 readback 证据；学校已确认但回查失败同样是不可重试的 `UNKNOWN_OUTCOME`，已确认但申请仍在待办中则返回业务拒绝。
-
-Ego 审批准备只执行可见步骤：先检查当前路由和可见非空人工输入，必要时才导航到对应加入/退出详情页；取得全页快照后用快照引用打开“通过”或“拒绝”弹窗，核验弹窗标题，并只填写空的审批意见。若意见已有相同值则保留，已有不同人工值则原样保留；日期留给用户复核，不替用户修改。随后命令把页面交接给用户，不点击“确认”，不调用审批 POST，`--yes` 会被拒绝。当前仓库只完成虚构 HTTP 与 strict DOM fixture 验收；真实 Ego、学校登录态只读查询、明确授权的 API 写入和用户人工提交未在本任务中执行。
-
-组织加入/退出审批的 Ego 准备方法 `prepareOrganizationApplicationDecisionInEgo` 从 Node 入口导出；调用必须包含 `organizationId`、`applicationId`、`type`、`decision`、`message`、`time` 及匹配的详情 `route`。公开方法自行重新验证现有 Ego 会话、组织管理权限、申请归属及等待状态，不依赖 CLI 先行校验。准备阶段读取同源 iframe 的实际表单，使用当前快照的 `[ref=N]` 定位可见动作，仅填空的审批意见，保留其他人工字段与已填意见；不覆盖其他申请页。返回 `submitted:false` 并把日期与最终确认交给用户。返回值不把固定计数当作真实零写入证据。
-
 命令重新核验当前身份、组织和活动，通过可见编辑弹窗只读核对学号、岗位及小时，保存本地新修订。它不会点击弹窗“保存”、上传或提交认证。过期修订保留冲突文件；未完成输入、页面缺失人员和不可恢复材料会列出待处理项。未捕获的网页修改不保证在关闭浏览器后保留。
 
 按需要用 `drafts edit` 明确修改选择和时长，再单独 `drafts prepare` 恢复录入。用户最终提交后只用 `certification status` 查询。详见[捕获验收](docs/verification/2026-10-22-certification-capture.md)。
@@ -304,6 +304,53 @@ friends volunteer activity-reviews decide <申请UUID> --type offering --decisio
 ```
 
 `review.json` 含 `message`、`time`（YYYY-MM-DD）；开办审批还需 `isSafeEducation: 0|1`，打回多个节点时需 `callbackActivityId`。API 实际决定须显式 `--yes`；Ego 仅准备并交接，用户亲自点最终确定。响应不确定返回 exit 7，不会自动重试。见 [#11 验收记录](docs/verification/2026-10-22-volunteer-activity-reviews.md)。
+
+## 组织活动查询与开办（#18）
+
+组织活动是独立领域，通过 `organization-activities` 操作；志愿服务活动仍使用 `volunteers`。`list --kind public` 查询公开活动，`--kind manageable` 查询当前账号开办记录；支持分页和学校 `key` 关键词。`show`、`requirements`、`status` 分别读取详情、参与要求和开办状态/流程记录，学校未知状态原样保留。
+
+```sh
+friends organization-activities list --kind public --keyword 示例 --page 1
+friends organization-activities show <organizationActivityUuid> --via ego --ego-task-space 7
+friends organization-activities requirements <organizationActivityUuid>
+friends organization-activities status <organizationActivityUuid>
+friends organization-activities prepare --input application.json
+friends organization-activities materials --input application.json --dry-run
+friends organization-activities materials --input application.json --confirm > materials.json
+friends organization-activities submit --input application.json --materials materials.json --confirm
+friends organization-activities prepare --input application.json --via ego --ego-task-space 7 --ego-page p2
+```
+
+最小开办输入如下；`--input -` 可从 stdin 读取。`term` 可省略并采用学校唯一当前学期，有歧义时需明确选择学校返回的学期。
+
+```json
+{
+  "organizationId": "organization-example",
+  "activityName": "示例组织活动",
+  "activityContent": "活动简介",
+  "activityPlace": "示例活动室",
+  "beginTime": "2099-11-02 10:00",
+  "endTime": "2099-11-02 12:00",
+  "registration": {
+    "isOpenEnrollment": true,
+    "isHideList": false,
+    "isEnrollExamine": true,
+    "isEnrollPower": false,
+    "signinNum": 1,
+    "openTime": "2099-10-01 10:00",
+    "deadline": "2099-11-01 18:00"
+  },
+  "materials": {"publicityPictures": [{"path": "/path/to/poster.png"}], "attachments": []}
+}
+```
+
+SDK 使用 `createFriendsSdk().createOrganizationActivityClient(session)`，材料为标准 `File` 数组。`prepare` 仅验证/读取；`uploadMaterials` 要求 `confirmation:"organization-activities.materials"`，`submit` 要求 `confirmation:"organization-activities.submit"` 和材料回执。海报需 1–5 张，附件可选；上传后查询资源组核对资源 ID 和文件名，提交前再次核对。此核对不证明服务器文件字节散列。当前最小设置支持定时开启/截止、1–8 次签到、可见名单/报名审核/成员限制开关；不接受任意问卷或未知字段透传。
+
+API 提交先执行 `next-update` 保存第一步，再重新核验组织权限后执行 `set-update`。任一写响应不明确都停止，不重试、不切换路径；即使只读回查匹配仍为 `UNKNOWN_OUTCOME`/退出码 7，保留资源组、已发生步骤和已知申请 ID。成功回执仅表示学校确认收到，`approved:null`，进度需独立查询。
+
+Ego 查询复用现有会话并直接 API。Node SDK `prepareOrganizationActivityOfferingInEgo` 每次重新核验账号和组织权限，再验证同源 iframe 内的创建路由和账号。当前阶段填写空白且可编辑的标题、简介和地址，保留人工与只读值；组织、时间、海报/附件及第二步设置以 `manualFields` 和 `requested` 交给用户处理。**“下一步”已经写入学校，必须由用户亲自操作；最终提交同样由用户亲自完成。** Ego 不上传、不点击下一步或最终按钮，也不接受 `--yes`、API 确认或自动重试绕过。`--dry-run` 无填写和交接。
+
+实现证据仅为公开源码、受控 SDK 与真实 CLI 子进程测试；本工作线程未访问真实 Ego 或生产服务，见[验收与限制](docs/verification/2026-10-23-organization-activities.md)。
 
 ### 组织活动参与
 

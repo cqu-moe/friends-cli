@@ -18,6 +18,7 @@ export interface WriteRecovery {
   organizationId?: string;
   draftId?: string;
   pageLabel?: string;
+
   attachmentGroupUuids?: string[];
   resourceIds?: string[];
   input?: unknown;

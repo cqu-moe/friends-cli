@@ -8,12 +8,12 @@ if(!configuration.executeSession&&script.includes('FRIENDS_CLI_EGO_SESSION:')) {
   console.log('FRIENDS_CLI_EGO_SESSION:'+JSON.stringify({token:'ego-fixture-token',userLevel:'XS'}));
   process.exit(0);
 }
-const stats={clicks:[],fills:[],handoffs:0,newPages:0,navigations:0,loadStates:0,submits:0,finalRequests:0,remoteWrites:0,snapshots:0};
+const stats={clicks:[],fills:[],handoffs:0,newPages:0,navigations:0,loadStates:0,submits:0,remoteWrites:0,finalRequests:0,snapshots:0};
 const html=await readFile(configuration.html,'utf8');
 function initialize(w){
   w.fetch=async(url,init)=>{
-    const method=init?.method??'GET';
-    if(['POST','PUT','PATCH','DELETE'].includes(method.toUpperCase()))stats.remoteWrites++;
+    const method=(init?.method??'GET').toUpperCase();
+    if(['POST','PUT','PATCH','DELETE'].includes(method))stats.remoteWrites++;
     if(method==='POST')stats.submits++;
     if(['/write','/quit'].includes(new URL(url,configuration.url).pathname)&&method!=='GET')stats.finalRequests++;
     return fetch(new URL(url,configuration.url),init);
@@ -68,7 +68,7 @@ function active(){if(saved.ownership==='user'||stats.handoffs)throw new Error('B
 const page={
   label:'p1',
   async url(){active();return configuration.outerUrl??configuration.url;},
-  async goto(){active();stats.navigations++;},
+  async goto(){active();stats.navigations++;if(stats.newPages===0)throw new Error('Unexpected navigation would discard fixture edits');},
   async waitForLoadState(){active();stats.loadStates++;},
   async snapshot(){
     active();
@@ -110,6 +110,7 @@ const page={
     element.value=value;
     element.dispatchEvent(new content.Event('input',{bubbles:true}));
     element.dispatchEvent(new content.Event('change',{bubbles:true}));
+    if(configuration.failAfterFill===stats.fills.length)throw new Error('Lost visible fill acknowledgement');
   },
   async waitForSelector(selector,{state='visible'}={}){
     active();
@@ -140,8 +141,8 @@ try {
   }
   await writeFile(configuration.result,JSON.stringify({
     ...stats,
-    html:d.body.innerHTML,
     model:content.__courseForm??null,
+    html:d.body.innerHTML,
     fieldValues:[...d.querySelectorAll('input,textarea')].map(e=>({id:e.id||null,ariaLabel:e.getAttribute('aria-label'),value:e.value})),
   }));
   dom.window.close();
