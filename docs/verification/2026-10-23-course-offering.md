@@ -70,3 +70,10 @@ picker 的打开与关闭等待改用 `waitForFunction`：直接读取同源 ifr
 公共 Node SDK 不再把非空 `executionError` 作为成功结果返回；它在页面交接后抛出非重试的 `UNKNOWN_OUTCOME`，真实 CLI 子进程输出 `ok:false`、退出码 7。`error.recovery` 包含已完成字段、已有课程 ID、输入副本、页面值、缺项、底层错误及实际交接状态。底层 helper 的诊断对象保留，但不再被公开 SDK/CLI 包装成成功。
 
 受控测试在外部 Ego 边界模拟主任务观测到的 locator-wait 故障，仍执行实际 DOM 回调；popup 延迟打开、延迟隐藏并保留隐藏节点，jsdom 的测试几何值显式提供，不能据此证明真实浏览器几何或时序。已观察旧实现失败，再验证 SDK/CLI 成功路径、部分失败的 exit 7 与恢复信息、已打开人工 picker 的零填充/零点击交接。真实补丁复验仍须由主任务执行并另记，不能把这些受控结果当成真实页面通过。
+
+
+## 直接 evaluate 轮询修复
+
+主任务实测 `5db6cda` 后，名称、地址、介绍和类型均保留正确值，级别打开等待再次超时。失败后实测恰好一个可见级别 picker（国家、省市、校、院），旧类型 popup 为 display:none 且矩形为零，当前 picker 无隐藏祖先。主任务取消后重新点击级别，同轮直接 `page.evaluate` 在第一次观测即确认可见（596ms）；这证明这次具体失败不能用多个可见 picker 解释，Ego 等待 API 与直接 evaluate 的观察存在差异。
+
+只将 picker 打开/关闭等待改成 Node 中有界 `page.evaluate(pickerVisibility, ...)` 轮询：截止时间 15 秒，观测间隔最多 100ms，超时仍记录 `UNKNOWN_OUTCOME` 并停止，保留交接。它不重试 click、confirm、填写或任何写操作，也不绕过已打开人工 popup 的守卫；选项选中与动画结束的原有等待保持不变。严格 fixture 注入 popup 可见性 function-wait 故障后，旧公开 SDK/CLI 成功路径均复现失败；修复后使用实际 DOM 判断和回调验证。受控结果不能替代主任务对本补丁的再次实测。

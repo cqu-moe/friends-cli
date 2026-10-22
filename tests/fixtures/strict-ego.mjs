@@ -87,6 +87,10 @@ const page={
   },
   async waitForFunction(fn,arg){
     active();
+    if(configuration.unreliablePickerWait&&typeof arg==='boolean'){
+      await new Promise(resolve=>setTimeout(resolve,30));
+      throw new Error('Fixture function wait lost the live iframe popup transition');
+    }
     w.__argument=structuredClone(arg);
     for(let attempt=0;attempt<30;attempt++){
       if(await w.eval(`(${fn.toString()})(__argument)`))return;

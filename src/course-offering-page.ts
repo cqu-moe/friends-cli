@@ -45,6 +45,19 @@ function pickerVisibility(visible: boolean): boolean {
   return visible ? shown.length === 1 : shown.length === 0;
 }
 
+async function waitForPicker(page: Page, visible: boolean) {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (await page.evaluate(pickerVisibility, visible)) return;
+    const remaining = deadline - Date.now();
+    if (remaining > 0) await new Promise(resolve => setTimeout(resolve, Math.min(100, remaining)));
+  }
+  throw new FriendsError({
+    code: FriendsErrorCode.UnknownOutcome,
+    message: `Timed out after 15000ms waiting for the course picker to ${visible ? "open" : "close"}`,
+  });
+}
+
 async function choose(page: Page, column: number, expected: string) {
   const selector = `${activePicker} .van-picker-column:nth-child(${column})`;
   // Vant clips distant options; move through visible neighbours and wait for its transition.
@@ -152,12 +165,12 @@ export async function prepareCourseOfferingPage(task: Task, input: Input) {
         actions.push({ field, action: "filled" });
       } else {
         await page.click(selector(field));
-        await page.waitForFunction(pickerVisibility, true, { timeout: 15_000 });
+        await waitForPicker(page, true);
         await page.snapshot();
         const columns = isDate ? expected.slice(0, 16).split(/[- :]/) : [expected];
         for (const [i, label] of columns.entries()) await choose(page, i + 1, label);
         await page.click(`loc=css:${activePicker} .van-picker__confirm`);
-        await page.waitForFunction(pickerVisibility, false, { timeout: 15_000 });
+        await waitForPicker(page, false);
         const actual = (await capture()).fields[field];
         if (actual !== expected && !(isDate && actual === expected.slice(0, 16))) throw new Error(`Course picker did not retain its value: ${field}`);
         actions.push({ field, action: "filled" });
