@@ -113,10 +113,16 @@ const page = {
 };
 const strictPage = new Proxy(page, { get(target, key) { if (!(key in target)) throw new Error("Undocumented Page API " + String(key)); return target[key]; } });
 const task = { page() { return strictPage; }, async handOff() { active(); evidence.handedOff = true; } };
+const originalLog = console.log;
+if (mode === "lost-result") console.log = (...args) => {
+  if (String(args[0]).startsWith("FRIENDS_CLI_EGO_PREPARED:")) originalLog("FRIENDS_CLI_EGO_PREPARED:{invalid");
+  else originalLog(...args);
+};
 try {
   const source = await readFile(scriptPath, "utf8");
   await new Function("taskSpace", "return (async()=>{" + source + "})()")(async() => task);
 } finally {
+  console.log = originalLog;
   const document = iframe.contentDocument;
   await writeFile(evidencePath, JSON.stringify({ ...evidence,
     finalMessage: document.querySelector('[name="msg"]')?.value,

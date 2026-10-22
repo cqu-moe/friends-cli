@@ -445,17 +445,29 @@ try {
   console.log("FRIENDS_CLI_EGO_PREPARED:" + JSON.stringify({ error: error.message, errorCode: "UNKNOWN_OUTCOME" }));
 }
 `;
-  const result = await runEgoJson<{
+  type Result = {
     status: "awaiting-user"; submitted: false; route: string; navigated: boolean;
     decisionAction: "opened-from-snapshot-ref" | "already-open";
     messageAction: "filled" | "already-matching" | "human-value-preserved";
     timeAction: "left-for-human-review";
-  }>({ script, command: options.command ?? "ego-browser", timeoutMs: timeoutMs + 30_000,
+  };
+  let result: Result;
+  try {
+    result = await runEgoJson<Result>({ script, command: options.command ?? "ego-browser", timeoutMs: timeoutMs + 30_000,
     marker: "FRIENDS_CLI_EGO_PREPARED:", failure: "Inspect the organization application page before any further action" });
-  if (result.status !== "awaiting-user" || result.submitted !== false || result.route !== options.route ||
+  } catch {
+    throw new FriendsError({ code: FriendsErrorCode.UnknownOutcome,
+      message: "The organization review preparation result was lost or invalid; inspect the existing form before continuing",
+      recovery: { operation: "organizations.approvals.prepare", organizationId: organizationIdValue,
+        applicationId: applicationIdValue, completed: ["visible-preparation-started"] } });
+  }
+  if (typeof result !== "object" || result === null || result.status !== "awaiting-user" || result.submitted !== false || result.route !== options.route ||
       typeof result.navigated !== "boolean" || !["opened-from-snapshot-ref", "already-open"].includes(result.decisionAction) ||
       !["filled", "already-matching", "human-value-preserved"].includes(result.messageAction) || result.timeAction !== "left-for-human-review") {
-    throw safeError("The Ego organization preparation result is ambiguous", FriendsErrorCode.UnknownOutcome);
+    throw new FriendsError({ code: FriendsErrorCode.UnknownOutcome,
+      message: "The Ego organization preparation result is ambiguous",
+      recovery: { operation: "organizations.approvals.prepare", organizationId: organizationIdValue,
+        applicationId: applicationIdValue, completed: ["visible-preparation-started"] } });
   }
   return result;
 }

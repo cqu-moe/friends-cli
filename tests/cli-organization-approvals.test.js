@@ -343,6 +343,15 @@ test("real CLI queries, previews, and confirms organization application decision
     await assert.rejects(() => prepareOrganizationApplicationDecisionInEgo(directOptions),
       error => error.code === FriendsErrorCode.UpstreamBusiness);
     readbackPhase = false;
+    const lostEgo = await egoFixture("lost-result");
+    await assert.rejects(() => prepareOrganizationApplicationDecisionInEgo({ ...directOptions, command: join(lostEgo.root, "ego-browser") }),
+      error => error.code === FriendsErrorCode.UnknownOutcome && !error.retryable &&
+        error.recovery.organizationId === "org-cli" && error.recovery.applicationId === "join-cli");
+    const partial = JSON.parse(await readFile(lostEgo.evidencePath, "utf8"));
+    assert.equal(partial.finalMessage, "SDK同意");
+    assert.equal(partial.externalWrites, 0);
+    assert.equal(partial.finalSubmitActions, 0);
+    await rm(lostEgo.root, { recursive: true, force: true });
   } finally {
     if (previousBaseUrl === undefined) delete process.env.FRIENDS_BASE_URL;
     else process.env.FRIENDS_BASE_URL = previousBaseUrl;
