@@ -40,9 +40,9 @@ SDK 名称指 npm 根入口；页面/存储适配器从 `/node` 导入，原生�
 
 | Ticket | 已知来源 | 受控覆盖 | 真实证据与保留限制 |
 | --- | --- | --- | --- |
-| #2 | [学校登录、课程请求](2026-10-22-local-courses.md) | SDK 身份/固定上下文；真实 CLI 登录/恢复/JSON/错误；存储与安装包 | 10-22 已安装 SDK/CLI：学校登录 → status → 关键词分页 1 项 → 详情；文件及 macOS Keychain 均成功。教师/多身份与 Linux 系统库成功路径未验收 |
+| #2 | [学校登录、课程请求](2026-10-22-local-courses.md) | SDK 身份/固定上下文；真实 CLI 登录/恢复/JSON/错误；存储与安装包 | 10-22 已安装 SDK/CLI：学校登录 → status → 关键词分页 1 项 → 详情；文件及 macOS Keychain 均成功。教师/多身份未验收；该次安装证据为 macOS，Linux 受控运行结果以 [PR #25](https://github.com/cqu-moe/friends-cli/pull/25) 最终提交的 CI 为准 |
 | #3 | [Ego 课程查询](2026-10-22-ego-course-query.md) | 现有会话重新核验、API/Ego 列表/详情与失败 | 10-22 真实 SDK/CLI Ego 查询 1 项及详情；不构成报名证据 |
-| #4 | [原生认证与阻塞](2026-10-22-auth-native.md) | oauth4webapi 协议、PKCE/DPoP/nonce、refresh/ST、真实 CLI 挑战错误 | Auth PR #95 于 10-22 合并；浏览器 discovery 成功。10-23 Node discovery 仍 403 `cf-mitigated: challenge`；生产授权/交换/刷新/ST/学校换会话未完成 |
+| #4 | [原生认证与阻塞](2026-10-22-auth-native.md) | oauth4webapi 协议、PKCE/DPoP/nonce、refresh/ST、真实 CLI 挑战错误 | Auth PR #95 于 10-22 合并，已有浏览器 discovery 成功记录；原生 Node v22.22.3 在 `2026-10-22T18:35:40.675Z` 重查仍为 HTTP 403 `cf-mitigated: challenge`、HTML。生产授权/交换/刷新/ST/学校换会话未验收，#4 保持未完成 |
 | #5 | [AddStu/SetStu、活动与名单来源](2026-10-22-volunteer-drafts.md) | 公共 draft/store、跨进程恢复、材料/冲突/写中断保护 | 10-22 学校管理列表 5 项、选定详情/岗位成功；真实 CLI API/Ego 建立并读取本地草稿。未知认证模式保留未知；无学校写入 |
 | #6 | [认证页与局部编辑](2026-10-22-volunteer-certification-ego.md) | 真实 DOM 事件、人工值、交接后停止、Ego submit 拒绝 | 10-22 已安装 Ego 在**本地虚构页面**录入及零最终请求；该次 handoff 为记录包装器。真实学校只读检查控件；学校最终提交未验收 |
 | #7 | [人工捕获记录](2026-10-22-certification-capture.md) | SDK/真实 CLI 捕获、修订冲突、恢复与控制边界 | 10-22 本地虚构页面真实交接/交还与捕获；学校页面局部名单编辑/捕获、只读认证状态 absent，刷新后临时名单消失。学校实际准备使用交接记录包装器；无最终提交 |
@@ -60,27 +60,23 @@ SDK 名称指 npm 根入口；页面/存储适配器从 `/node` 导入，原生�
 | #21 | [组织查询/维护公开说明](../../README.md#学生组织)、组织管理公开 JS | SDK/CLI 组织/成员/允许字段、API 保存及页面保护 | 10-23 真实 CLI Ego `organizations list` 成功 5 项；真实 CLI `profile show` 只读成功，返回 id/name/type/logo/backgroundGroupUuid/blurb 键，`members --page-size 1` 返回 1 项。资料编辑、成员写入均未验收 |
 | #22 | [加入/退出审批与实际 DIV](2026-10-23-organization-approvals.md) | SDK/CLI API、公开 prepare 自行重验；实际 DIV 无 ref、textarea、人工值、外层冲突与丢失回执 | 10-23 真实 CLI 加入申请列表 page-size=1 返回 1 项；手动打开空“通过”意见弹窗后取消。所选申请已通过、关系 state=1，公开 SDK 正确 BUSINESS_REJECTED；另有未处理申请但当前角色无审批权，正确 PERMISSION_DENIED。两者均未进入 UI，未填意见。**当前无“待处理且有权”的实测目标，完整 public prepare 仅受控；真实预检保护已验证** |
 | #23 | [responsiblePersonChangeInfo 来源](2026-10-23-organization-leader-change.md) | SDK/CLI 候选人/资格/申请/状态、DOM 与不确定响应 | 10-23 真实 CLI Ego status 返回当前负责人、申请及岗位。无负责人变更申请写入或真实可见准备验收 |
-| #24 | [三领域现有查询及预算契约](2026-10-23-unified-search.md) | SDK/真实 CLI、类型/ID、独立预算、未知分页与部分失败已覆盖 | 10-23 `3be2468` 的真实 CLI Ego 统一搜索：三领域均 status=ok、各 1 项，complete=false 且 budget 停止符合预期；无点击/填表/导航。已合入；最终合并头安装验收尚待补充 |
+| #24 | [三领域现有查询及预算契约](2026-10-23-unified-search.md) | SDK/真实 CLI、类型/ID、独立预算、未知分页与部分失败已覆盖 | 10-23 `3be2468` 的真实 CLI Ego 统一搜索：三领域均 status=ok、各 1 项，complete=false 且 budget 停止符合预期；无点击/填表/导航。已合入；最终提交头的安装/CI 证据见 [PR #25](https://github.com/cqu-moe/friends-cli/pull/25) |
 
-通用公共接口必须使用 `/gateway/ek-agg-mob/biz-common/...` 与 `zovecenter-saip-ek-agg-mob`，不能退回 `/gateway/biz-common` 或换 AppKey 重试。历史测试数是各记录当时的本地结果，不能相加当作当前测试数；安装检查的适用提交与限制见下一节。
+通用公共接口必须使用 `/gateway/ek-agg-mob/biz-common/...` 与 `zovecenter-saip-ek-agg-mob`，不能退回 `/gateway/biz-common` 或换 AppKey 重试。历史测试数是各记录当时的本地结果，不能相加当作当前测试数；修复复核与最终安装/CI 的证据范围见下节。
 
-## 本次安装包验收
+## 修复复核与最终验收证据
 
-以下为已完成的**中间提交安装检查**；后续功能修复发生在该检查之后，不能当作最终 PR 头的安装验收。对应脚本为本地证据目录中的 `delivery-package-acceptance.mjs`；最终合并头的安装结果尚待补充。
+逐项修复与测试边界见 [最终审查修复与验收记录](2026-10-23-final-review-repairs.md)。首轮修复快照 `da00f4d38881fd25499d03121d87a5d693f55231` 合入 `6ed0c5dbfd5cfa53c1e007914dcc11755120da6f`；R1 补丁 `f428c6f67323f77324d5e34249cd4d0568b5607c` 合入 `49f6ba2522042371ec4ef165c00f4d89fb816cbb`。各合并树与对应快照一致。
 
-| 项目 | 已记录结果 |
+| 证据层 | 精确范围与结果 |
 | --- | --- |
-| 代码提交 / 当时 integration | `1cc70eb4f3f3096fe112fbb8d78fa5f78d92747b` / `b2adb95aefa0148c66be0cd664776419cd28f8d5` |
-| 环境 | macOS arm64、Node 22.22.3、npm 10.9.8 |
-| 产物 | `cqu-moe-friends-cli-0.1.0.tgz`，354775 字节，179 个文件 |
-| SHA-256 | `16c77623be5c7160b7dc1b331778e501a7411765f05e91fd344a3c65b74c9b00` |
-| 已安装 bin | 版本 0.1.0；107 个 help 入口、67 个 schema；成功输出无 stderr，schema 为单个版本化 JSON |
-| 已安装 SDK | 根入口、`/node`、`/auth`、`/auth-node` 在空 PATH 下导入及默认 SDK 构造成功 |
-| 普通导入/只读元数据副作用 | guard 未记录浏览器/子进程、网络/监听启动；未创建会话状态 |
-| 包内容 | 仅 `dist/`、README、package.json；无 tests/fixtures、私有会话或环境文件；59 个 sourcemap 无嵌入源内容或绝对路径 |
+| 本地受控全量 | R1 合并头 `49f6ba2`（与 `f428c6f` 同树）完整 `npm test` **279/279 通过，0 失败、0 取消、0 跳过**，含 TypeScript 构建、公开 SDK/真实 CLI 及故障注入；本次文档整理不改变源码或测试。首轮 `da00f4d` / `6ed0c5d` 各为 274 项；不是 CI |
+| SPEC 独立复核 | 精确 `da00f4d` 的 F1–F7 全部闭环，四组只读内存探针；精确 `f428c6f` 的 R1 源码追加复核通过，无新实质回归。不是完整 CLI 或真实浏览器复验 |
+| STANDARDS 独立复核 | 精确 `da00f4d` 的 S1–S5 通过，四项判断项可接受；精确 `f428c6f` 的 R1/P3 通过 26 项独立进程检查并核对 44 项 SDK/CLI 日志，已闭环，无剩余项；不是生产验收 |
+| 已知私有值对照 | `6ed0c5d` 的 195 个追踪文件对照 8 个已知私有值，0 匹配；仅对应该提交与对照集合 |
 
-实际执行 `npm pack`（含 prepack 构建），在源码仓库外临时 fixture home 正常 `npm install` 生成的 tarball，未跳过 lifecycle scripts；依赖版本、manifest、integrity、内容扫描及命令结果保存在 `delivery-installed-1cc70eb4f3f3/`。扫描未见凭据或私有个人数据；README 唯一手机号形状字面量与虚构负责人测试数据逐字核对，未将其当成真实联系方式。离线缓存元数据不足的一次安装没有计为通过；正常 registry 安装成功。未发现需修复的打包缺陷。
+最终源码/文档提交的安装包、包 hash、测试数和 exact-head CI 证据统一见 [PR #25](https://github.com/cqu-moe/friends-cli/pull/25)，以其中记录的精确 SHA 为准。本地测试、独立探针和历史安装检查均不能替代该最终头的包与 CI 验收。
 
-历史本地受控测试：`d079594c307fc6665d031edded437918b19335cb`（包含 integration `b292ccf91b44ddd8c51db4b8fab8e0644cf7a4cc`）运行完整 `npm test`（含 TypeScript 构建），**238 项通过，0 失败、0 跳过**。此结果不是 CI，也不是最终合并头的安装验收；上述中间包结果不能套用到后续修复头。
+历史中间安装检查只保留范围：`1cc70eb4f3f3096fe112fbb8d78fa5f78d92747b` 为 107 个 help / 67 个 schema；`da00f4d` 修复快照为 108 个 help / 68 个 schema，并通过已安装公开 draft store 的原生锁、保存/恢复和修订冲突检查。对应检查包含正常 pack/install，均为 macOS arm64 证据；它们不适用于后续源码/文档提交头，最终包结果不从旧包推定。
 
-当前仍未验收：CI、最终合并头安装包、真实 API 业务写入、用户最终提交及其生产回查。安装/受控测试不解除原生 Auth 的 WAF 阻塞；#4 仍未完成，SPEC 不能视为整体验收通过。
+原验收浏览器任务空间已关闭，最终修复头未进行实时浏览器复验；此前真实记录仍保留其版本边界。真实 API 业务最终写入、用户最终提交及生产回查仍未验收。本页安装证据为 macOS arm64；Linux 受控运行结果以 [PR #25](https://github.com/cqu-moe/friends-cli/pull/25) 最终提交的 CI 为准，Windows 未验收。原生 Auth 的 WAF 阻塞仍在，#4 未完成；本地修复与独立复核不等于 SPEC 整体生产验收通过。
