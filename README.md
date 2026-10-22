@@ -1,6 +1,6 @@
 # friends-cli
 
-重庆大学第二课堂平台的本地 CLI 与可复用 SDK。当前交付 Issue #2–#3 的最小只读课程链：Ego 浏览器本地登录、学校 API 身份/上下文核验、课程列表、关键词搜索、分页和详情，并允许从已验证 Ego 会话直接查询。不包含 OAuth、报名、认证、审批或任何业务写入。
+重庆大学第二课堂平台的本地 CLI 与可复用 SDK。当前交付 Issue #2–#3 的最小只读课程链，以及 Issue #5 的志愿认证本地草稿：Ego 浏览器本地登录、学校 API 身份/上下文核验、课程查询、可管理志愿活动/报名名单只读查询、草稿编辑与恢复。不包含 OAuth、报名、审批或学校认证提交。
 
 ## 安装与命令
 
@@ -24,6 +24,9 @@ friends auth status --json
 friends courses list --page 1 --page-size 10 --keyword 周周艺 --json
 friends courses show <courseUuid> --json
 friends courses list --via ego --ego-task-space 12 --ego-page p1 --json
+friends drafts activities --via ego --ego-task-space 16 --ego-page p1 --json
+friends drafts create --activity-id <activityUuid> --json
+friends drafts edit <draftId> --expected-revision 0 --input patch.json --json
 ```
 
 多身份/多单位时，命令会列出学校返回的 `levelNo/unitNo`，用 `--level-no` 与 `--unit-no` 显式选择。课程 UUID 只用于课程详情，不能替换报名记录、认证申请或其他领域 UUID。
@@ -54,6 +57,12 @@ await courses.list({ keyword: "周周艺" });
 
 课程列表使用实测的 `student-apply-page-list` 与 `key` 参数，不使用历史聚合接口的 `type: CURRICULUM` 过滤。详情只投影课程资料、报名限制和必要状态；未知状态保留标量原值并标记 `known: false`。详情保留岗位名称、积分与学时；非空问卷仅报告数量和 `unverified`，尚未解析其内容，不能据此宣称已展示全部报名要求。
 
+## 志愿认证草稿
+
+`drafts create` 只读查询当前上下文可管理的志愿活动、活动详情和报名名单，然后绑定账号/角色/身份单位/活动创建本地草稿。草稿保存在仓库外专用目录，目录 `0700`、JSON `0600`，每次编辑通过临时文件和原子替换保存；过期 revision 的完整并发结果或 CLI patch 会保存为可恢复 conflict 文件。材料只记录本地路径、大小和 SHA-256，恢复时检查存在性与哈希；当前生产认证页面没有材料上传字段，包含材料的草稿不能通过正式完整校验。
+
+草稿保存和恢复不调用志愿认证提交接口，也不上传材料。`drafts validate --mode complete` 只表示本地 payload 完整，不表示学校已接收或批准认证。
+
 ## 输出与错误
 
 业务命令与 schema 输出为一个版本化 JSON 文档；`--help`/`--version` 使用普通文本，错误诊断写 stderr。退出码：0 成功，2 输入错误，3 认证失效，4 权限不足，5 业务拒绝/状态冲突，6 网络或协议错误。HTTP 200 但 `code !== "0"` 不是成功；HTTP 非 2xx 即使业务码为 0 也不是成功。
@@ -65,3 +74,13 @@ await courses.list({ keyword: "周周艺" });
 - 本仓库测试使用虚构 HTTP/Ego 场景。学校登录与只读查询单独记录于 [验收记录](docs/verification/2026-10-22-local-courses.md)，CI 通过不代表生产写入能力。
 - 查询类操作可使用 API；后续 Ego 写操作按阶段执行，需要审阅的表单只录入并交接，由用户亲自最终提交。
 - Ego 查询的受控 SDK/CLI 验收见 [Ego 课程查询验收](docs/verification/2026-10-22-ego-course-query.md)；真实已安装 Ego 与学校登录态实测由集中操作另行记录，不能由本仓库受控测试替代。
+
+志愿草稿可用 `friends drafts edit <id> --expected-revision <n> --input patch.json` 增补尚未报名的人员：
+
+```json
+{"addStudentNos":["20210002"],"includedStudentNos":["20210002"],"postIds":{"20210002":"post-id-from-school"},"durations":{"20210002":1.5}}
+```
+
+新增人员先通过当前学校会话只读核对姓名和草稿账号/组织/活动绑定，再保存在本地。`includedStudentNos` 始终是本次指定名单，不隐含全部认证。普通编辑和材料检查可以离线使用；新增学号需要可用学校会话。没有报名 UUID 的手动人员保留这一事实，不伪造报名记录。
+
+课程与草稿的学校查询共用 `--via api|ego`：Ego 模式直接核验现有页面会话后调用查询 API，不导航或读取本地会话。新增学号的草稿编辑也支持同样的来源选项。
