@@ -169,3 +169,14 @@ friends drafts capture <draftId> --via ego --ego-task-space 16 \
 命令重新核验当前身份、组织和活动，通过可见编辑弹窗只读核对学号、岗位及小时，保存本地新修订。它不会点击弹窗“保存”、上传或提交认证。过期修订保留冲突文件；未完成输入、页面缺失人员和不可恢复材料会列出待处理项。未捕获的网页修改不保证在关闭浏览器后保留。
 
 按需要用 `drafts edit` 明确修改选择和时长，再单独 `drafts prepare` 恢复录入。用户最终提交后只用 `certification status` 查询。详见[捕获验收](docs/verification/2026-10-22-certification-capture.md)。
+
+志愿活动开办和报名审批是两个独立对象，用 `--type` 明确选择。查询可以使用 API 或当前 Ego 会话：
+
+```sh
+friends volunteer activity-reviews list --type registration --via ego --ego-task-space 16 --ego-page p3
+friends volunteer activity-reviews show <申请UUID> --type offering
+friends volunteer activity-reviews prepare <申请UUID> --type offering --decision pass --via ego --ego-task-space 16 --input review.json
+friends volunteer activity-reviews decide <申请UUID> --type offering --decision pass --via api --input review.json --dry-run
+```
+
+`review.json` 含 `message`、`time`（YYYY-MM-DD）；开办审批还需 `isSafeEducation: 0|1`，打回多个节点时需 `callbackActivityId`。API 实际决定须显式 `--yes`；Ego 仅准备并交接，用户亲自点最终确定。响应不确定返回 exit 7，不会自动重试。见 [#11 验收记录](docs/verification/2026-10-22-volunteer-activity-reviews.md)。

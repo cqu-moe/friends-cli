@@ -783,3 +783,4 @@ export async function loadSession(): Promise<StoredSession> {
 }
 
 export * from "./certification-capture.js";
+export {prepareVolunteerActivityReviewInEgo} from './volunteer-activity-review-ego.js';

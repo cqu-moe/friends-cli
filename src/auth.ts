@@ -218,6 +218,15 @@ export function createCquAuthClient(options: CreateCquAuthClientOptions) {
     } catch {
       throw error("Could not discover CQU Auth", FriendsErrorCode.NetworkProtocol);
     }
+    if (response.headers.get("cf-mitigated") === "challenge") {
+      throw error("CQU Auth discovery was blocked by a Cloudflare browser challenge; the Auth operator must allow native OAuth requests", FriendsErrorCode.NetworkProtocol);
+    }
+    if (response.status !== 200) {
+      throw error(`CQU Auth discovery returned HTTP ${response.status}`, FriendsErrorCode.NetworkProtocol);
+    }
+    if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
+      throw error("CQU Auth discovery did not return JSON metadata", FriendsErrorCode.NetworkProtocol);
+    }
     try {
       discovered = await oauth.processDiscoveryResponse(issuer, response);
       return discovered;
