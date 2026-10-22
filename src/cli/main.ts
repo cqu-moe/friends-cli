@@ -20,7 +20,7 @@ const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
   errors: {
     operation: "errors", readonly:true, permission:"none", phases:["inspect"], supportedVia:["local"],
-    exitCodes: {0:"success", 2:"INVALID_INPUT", 3:"AUTH_REQUIRED", 4:"PERMISSION_DENIED", 5:"BUSINESS_REJECTED", 6:"NETWORK_PROTOCOL_ERROR", 7:"reserved: write outcome unknown; writes not implemented"},
+    exitCodes: {0:"success", 2:"INVALID_INPUT", 3:"AUTH_REQUIRED", 4:"PERMISSION_DENIED", 5:"BUSINESS_REJECTED", 6:"NETWORK_PROTOCOL_ERROR", 7:"UNKNOWN_OUTCOME"},
   },
   "auth.login": {
     operation: "auth.login",
@@ -285,6 +285,7 @@ program.parseAsync(process.argv).catch((error: unknown) => {
           retryable: friendsError.retryable,
           upstreamCode: friendsError.upstreamCode,
           requestId: friendsError.requestId,
+          recovery: friendsError.recovery,
           nextAction,
         },
       },

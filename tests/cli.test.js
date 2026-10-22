@@ -43,7 +43,7 @@ test("CLI help and schema are discoverable from the installed entry point", asyn
     4: "PERMISSION_DENIED",
     5: "BUSINESS_REJECTED",
     6: "NETWORK_PROTOCOL_ERROR",
-    7: "reserved: write outcome unknown; writes not implemented",
+    7: "UNKNOWN_OUTCOME",
   });
 });
 

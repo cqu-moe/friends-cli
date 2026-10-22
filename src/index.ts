@@ -1,6 +1,7 @@
 import { FriendsError, FriendsErrorCode } from "./errors.js";
 
 export { FriendsError, FriendsErrorCode, exitCodeFor } from "./errors.js";
+export type { WriteRecovery } from "./errors.js";
 
 declare const courseIdBrand: unique symbol;
 export type CourseId = string & { readonly [courseIdBrand]: true };
