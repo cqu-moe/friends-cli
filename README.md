@@ -259,9 +259,9 @@ Ego 资料修改只执行可见 prepare：先经现有页面会话核验权限�
 
 申请决定只允许 `approve -> AGREEMENT` 和 `reject -> ADJUSTMENT`；生产页面可见的 `REJECTION`（打回）未纳入本任务公开契约。决定输入只接受不超过 100 字符的 `message` 和 `yyyy-MM-dd` 的 `time`。准备阶段会重新核验身份、刷新可管理组织、读取学校完整申请详情、确认组织归属、确认指定类型仍处于唯一“等待”流程状态，并读取当前关系；这些检查都不写入。API 决定必须独立给出 `--via api` 和 `--yes`，提交 exact payload `{identified,msg,handleType:"XS02",studentOrganizationInfoApproveAddReqDto:{...学校详情,uuid:申请UUID},time,uuid}`，执行一次 POST 后只读回查待办与关系，不重试 POST。POST 响应丢失时即使待办已消失也保留不可重试的 `UNKNOWN_OUTCOME`（退出码 7）并报告 readback 证据；学校已确认但回查失败同样是不可重试的 `UNKNOWN_OUTCOME`，已确认但申请仍在待办中则返回业务拒绝。
 
-Ego 审批准备只执行可见步骤：先检查当前路由和可见非空人工输入，必要时才导航到对应加入/退出详情页；取得全页快照后用快照引用打开“通过”或“拒绝”弹窗，核验弹窗标题，并只填写空的审批意见。若意见已有相同值则保留，已有不同人工值则原样保留；日期留给用户复核，不替用户修改。随后命令把页面交接给用户，不点击“确认”，不调用审批 POST，`--yes` 会被拒绝。当前仓库只完成虚构 HTTP 与 strict DOM fixture 验收；真实 Ego、学校登录态只读查询、明确授权的 API 写入和用户人工提交未在本任务中执行。
+Ego 审批准备只执行可见步骤：先检查当前路由和可见非空人工输入，必要时才导航到对应加入/退出详情页；取得全页快照后用学校源码核实的可见 CSS 控件打开“通过”或“拒绝”弹窗，核验弹窗标题，并只填写空的审批意见。若意见已有相同值则保留，已有不同人工值则原样保留；日期留给用户复核，不替用户修改。随后命令把页面交接给用户，不点击“确认”，不调用审批 POST，`--yes` 会被拒绝。当前仓库只完成虚构 HTTP 与 strict DOM fixture 验收；真实 Ego、学校登录态只读查询、明确授权的 API 写入和用户人工提交未在本任务中执行。
 
-组织加入/退出审批的 Ego 准备方法 `prepareOrganizationApplicationDecisionInEgo` 从 Node 入口导出；调用必须包含 `organizationId`、`applicationId`、`type`、`decision`、`message`、`time` 及匹配的详情 `route`。公开方法自行重新验证现有 Ego 会话、组织管理权限、申请归属及等待状态，不依赖 CLI 先行校验。准备阶段读取同源 iframe 的实际表单，使用当前快照的 `[ref=N]` 定位可见动作，仅填空的审批意见，保留其他人工字段与已填意见；不覆盖其他申请页。返回 `submitted:false` 并把日期与最终确认交给用户。返回值不把固定计数当作真实零写入证据。
+组织加入/退出审批的 Ego 准备方法 `prepareOrganizationApplicationDecisionInEgo` 从 Node 入口导出；调用必须包含 `organizationId`、`applicationId`、`type`、`decision`、`message`、`time` 及匹配的详情 `route`。公开方法自行重新验证现有 Ego 会话、组织管理权限、申请归属及等待状态，不依赖 CLI 先行校验。准备阶段读取同源 iframe 的实际表单，观察当前快照后使用学校源码核实的可见 CSS 控件打开审批弹窗并定位意见框，仅填空的审批意见，保留其他人工字段与已填意见；不覆盖其他申请页。返回 `submitted:false` 并把日期与最终确认交给用户。返回值不把固定计数当作真实零写入证据。
 
 命令重新核验当前身份、组织和活动，通过可见编辑弹窗只读核对学号、岗位及小时，保存本地新修订。它不会点击弹窗“保存”、上传或提交认证。过期修订保留冲突文件；未完成输入、页面缺失人员和不可恢复材料会列出待处理项。未捕获的网页修改不保证在关闭浏览器后保留。
 

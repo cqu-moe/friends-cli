@@ -336,7 +336,7 @@ export async function prepareOrganizationApplicationDecisionInEgo(options: {
   submitted: false;
   route: string;
   navigated: boolean;
-  decisionAction: "opened-from-snapshot-ref" | "already-open";
+  decisionAction: "opened-visible-control" | "already-open";
   messageAction: "filled" | "already-matching" | "human-value-preserved";
   timeAction: "left-for-human-review";
 }> {
@@ -389,27 +389,20 @@ async function inspect() {
       const rect = field.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0 && !field.disabled && !field.readOnly;
     };
-    const messages = Array.from(doc.querySelectorAll('textarea[name="msg"]')).filter(visible);
+    const controlSelectors = ['.action-bar .action-bar-item.c-success', '.action-bar .action-bar-item.c-jujue', '.van-popup .dialog-box textarea[name="msg"]'];
+    if (target !== window && controlSelectors.some(selector => Array.from(document.querySelectorAll(selector)).some(visible))) {
+      throw new Error("An outer-page control would intercept the organization approval action");
+    }
+    const messages = Array.from(doc.querySelectorAll('.van-popup .dialog-box textarea[name="msg"]')).filter(visible);
     const docs = target === window ? [document] : [document, doc];
     return {
       url: target.location.href,
       inputPresent: docs.some(d => Array.from(d.querySelectorAll('input,textarea,select,[contenteditable="true"]'))
         .some(f => visible(f) && String(f.value ?? f.textContent).trim() !== "")),
       messages: messages.map(f => f.value),
-      title: Array.from(doc.querySelectorAll(".title,h2")).filter(visible).map(e => e.textContent.trim()),
+      title: Array.from(doc.querySelectorAll(".van-popup .dialog-box .title")).filter(visible).map(e => e.textContent.trim()),
     };
   }, expected);
-}
-function snapshotRef(snapshot, label, role) {
-  const entries = snapshot.split(/\n(?=[^\n]*\[ref=\d+\])/);
-  const matches = entries.flatMap(entry => {
-    const ref = entry.match(/\[ref=(\d+)\]/);
-    if (!ref || !role.test(entry)) return [];
-    const text = entry.replace(/\[ref=\d+\]/g, "").replace(/^[\s-]*(button|generic|textbox)\b/, "").replace(/["']/g, "").trim();
-    return text === label || text === "请输入" + label ? ["@" + ref[1]] : [];
-  });
-  if (matches.length !== 1) throw new Error("Expected one snapshot target: " + label);
-  return matches[0];
 }
 try {
   const before = await inspect();
@@ -433,8 +426,8 @@ try {
   let decisionAction = "already-open";
   const decisionTitle = ${JSON.stringify(options.decision === "approve" ? "审批通过" : "审批拒绝")};
   if (ready.messages.length === 0) {
-    const snapshot = await page.snapshot({ scope: "full_page" });
-    await page.click(snapshotRef(snapshot, ${JSON.stringify(options.decision === "approve" ? "通过" : "拒绝")}, /\b(button|generic)\b/));
+    await page.snapshot({ scope: "full_page" });
+    await page.click(${JSON.stringify(options.decision === "approve" ? "loc=css:.action-bar .action-bar-item.c-success" : "loc=css:.action-bar .action-bar-item.c-jujue")});
     await page.waitForFunction(() => {
       const doc = (document.querySelector("iframe")?.contentWindow ?? window).document;
       return Array.from(doc.querySelectorAll('textarea[name="msg"]')).some(f => {
@@ -442,7 +435,7 @@ try {
         return rect.width > 0 && rect.height > 0;
       });
     }, undefined, { timeout: 15000 });
-    decisionAction = "opened-from-snapshot-ref";
+    decisionAction = "opened-visible-control";
   }
   const dialog = await inspect();
   if (dialog.url !== targetUrl || dialog.messages.length !== 1 || !dialog.title.includes(decisionTitle)) {
@@ -451,8 +444,8 @@ try {
   const requested = ${JSON.stringify(options.message.trim())};
   let messageAction = dialog.messages[0] === requested ? "already-matching" : "human-value-preserved";
   if (dialog.messages[0] === "") {
-    const snapshot = await page.snapshot({ scope: "full_page" });
-    await page.fill(snapshotRef(snapshot, "审批意见", /\btextbox\b/), requested);
+    await page.snapshot({ scope: "full_page" });
+    await page.fill('loc=css:.van-popup .dialog-box textarea[name="msg"]', requested);
     const after = await inspect();
     if (after.url !== targetUrl || after.messages.length !== 1 || after.messages[0] !== requested) throw new Error("Review opinion did not remain visible");
     messageAction = "filled";
@@ -467,7 +460,7 @@ try {
 `;
   type Result = {
     status: "awaiting-user"; submitted: false; route: string; navigated: boolean;
-    decisionAction: "opened-from-snapshot-ref" | "already-open";
+    decisionAction: "opened-visible-control" | "already-open";
     messageAction: "filled" | "already-matching" | "human-value-preserved";
     timeAction: "left-for-human-review";
   };
@@ -482,7 +475,7 @@ try {
         applicationId: applicationIdValue, completed: ["visible-preparation-started"] } });
   }
   if (typeof result !== "object" || result === null || result.status !== "awaiting-user" || result.submitted !== false || result.route !== options.route ||
-      typeof result.navigated !== "boolean" || !["opened-from-snapshot-ref", "already-open"].includes(result.decisionAction) ||
+      typeof result.navigated !== "boolean" || !["opened-visible-control", "already-open"].includes(result.decisionAction) ||
       !["filled", "already-matching", "human-value-preserved"].includes(result.messageAction) || result.timeAction !== "left-for-human-review") {
     throw new FriendsError({ code: FriendsErrorCode.UnknownOutcome,
       message: "The Ego organization preparation result is ambiguous",
