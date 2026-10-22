@@ -1,6 +1,6 @@
 # friends-cli
 
-重庆大学第二课堂平台的本地 CLI 与可复用 SDK。当前交付 Issue #2–#3 的最小只读课程链、Issue #4 的 CQU Auth OAuth/DPoP 登录与恢复、Issue #5 的志愿认证本地草稿、Issue #21 的学生组织查询、成员查询与组织资料受控维护，以及 Issue #22 的组织加入/退出申请审批：Ego 浏览器本地登录、学校 API 身份/上下文核验、课程查询、可管理志愿活动/报名名单只读查询、草稿编辑与恢复、组织/资料/成员查询、加入/退出申请查询与受控决定。不包含组织活动报名、成员直接写入、部门维护或学校认证提交。
+重庆大学第二课堂平台的本地 CLI 与可复用 SDK。当前包含学校会话与课程查询、志愿认证草稿与 API 认证提交、校内志愿活动开办及审批，以及学生组织资料/成员查询与加入退出申请审批。各操作的 API/Ego 支持阶段以命令 schema 和验收记录为准；Ego 需人工审阅的写流程只准备并交接。
 
 ## 安装与命令
 
@@ -46,6 +46,11 @@ friends organizations approvals decide <organizationUuid> <applicationUuid> \
 friends drafts activities --via ego --ego-task-space 16 --ego-page p1 --json
 friends drafts create --activity-id <activityUuid> --json
 friends drafts edit <draftId> --expected-revision 0 --input patch.json --json
+friends offerings prepare --input offering.json --via api --json
+friends offerings materials --input offering.json --via api --dry-run --json
+friends offerings materials --input offering.json --via api --confirm --json
+friends offerings submit --input offering.json --via api --publicity-group-uuid <32-hex> --confirm --json
+friends offerings status <offeringApplicationUuid> --via ego --ego-task-space 16 --json
 ```
 
 多身份/多单位时，命令要求同时提供 `--level-no` 与 `--unit-no`，不会默认选择第一项。课程 UUID 只用于课程详情，不能替换报名记录、认证申请或其他领域 UUID。
@@ -151,6 +156,22 @@ friends certification status <activityId> --via ego --ego-task-space 16
 
 `--input -` 读取 stdin 导出的草稿。当前认证表单没有附件入口，带材料的草稿会在写入前拒绝。`UNKNOWN_OUTCOME`（退出码 7）时保留草稿，先用 `certification status` 回查，不自动重交。业务确认与回查结果分别返回；已有认证不会被这个新建命令覆盖。
 
+## 校内志愿活动开办申请
+
+`offerings prepare` 会重新核验学校身份、志愿组织、活动类型/等级和当前学年学期，只构造公开源码核实过的第一页与报名字段。`SCHOOL_ACTIVITY` 先创建中间 UUID 再最终提交；`TEMP_ACTIVITY` 的 `next-step` 本身就是最终写入，并额外携带 `posts: []` 与 `nameList`。两类标识和输入不同，不能互换。
+
+材料 JSON 引用本地文件，路径按输入文件目录解析（stdin 按 CLI 当前目录解析），也可以用 `name` 覆盖上传文件名：
+
+```json
+{"materials":{"publicityPictures":[{"path":"banner.png"}],"attachments":[{"path":"details.pdf","name":"虚构明细.pdf"}]}}
+```
+
+公开图片最多 5 张、每张 20 MiB，仅接受图片；附件最多 10 个，普通附件 20 MiB、视频 200 MiB。`offerings materials` 使用标准 `FormData` 上传到 protected upload 接口并逐组只读回查；部分失败时保留已完成资源和组 UUID，不重试、不清理。上传响应丢失时即使回查发现文件，也报告不确定，不宣称服务器已确认。
+
+正式 API 提交必须独立 `--via api --confirm`，并传入材料阶段返回的 publicity/attachment 组 UUID；`--dry-run` 只重新校验与只读回查，不需要组 UUID。Ego 只支持可见 prepare：打开或复用对应开办页，可见填写文本、数字、日期和包装层选择器，保留人工已有值，不上传材料、不点击“下一步”或“提交申请”，交接后返回 `submitted:false`。`offerings submit --via ego` 在副作用前拒绝。进度查询可从 API 或 Ego 会话直接调用同一个只读详情接口，未知学校流程字段原样保留。
+
+`UNKNOWN_OUTCOME`（退出码 7）表示学校可能已接受请求；结果中会保留已发生的组 UUID、中间申请 UUID（若已取得）和只读回查状态，调用者必须先查 manager/status，不得自动重试或跨 API/Ego 续交。
+
 ## 学生组织
 
 组织查询先通过生产前端已核实的 `POST /student-organization-info/my` 获取当前账号上下文返回的组织，再按返回对象推导 `principal`、`manager` 或 `member`。成员列表只调用已核实的 `organizational-members-list`，请求固定绑定 `organizationId` 和在岗状态，输出仅投影学号、姓名、职务与负责人/管理员标志，不透传学校返回的其他字段。
@@ -170,3 +191,18 @@ Ego 资料修改只执行可见 prepare：先经现有页面会话核验权限�
 Ego 审批准备只执行可见步骤：先检查当前路由和可见非空人工输入，必要时才导航到对应加入/退出详情页；取得全页快照后用快照引用打开“通过”或“拒绝”弹窗，核验弹窗标题，并只填写空的审批意见。若意见已有相同值则保留，已有不同人工值则原样保留；日期留给用户复核，不替用户修改。随后命令把页面交接给用户，不点击“确认”，不调用审批 POST，`--yes` 会被拒绝。当前仓库只完成虚构 HTTP 与 strict DOM fixture 验收；真实 Ego、学校登录态只读查询、明确授权的 API 写入和用户人工提交未在本任务中执行。
 
 组织加入/退出审批的 Ego 准备方法 `prepareOrganizationApplicationDecisionInEgo` 从 Node 入口导出；调用必须包含 `organizationId`、`applicationId`、`type`、`decision`、`message`、`time` 及匹配的详情 `route`。公开方法自行重新验证现有 Ego 会话、组织管理权限、申请归属及等待状态，不依赖 CLI 先行校验。准备阶段读取同源 iframe 的实际表单，使用当前快照的 `[ref=N]` 定位可见动作，仅填空的审批意见，保留其他人工字段与已填意见；不覆盖其他申请页。返回 `submitted:false` 并把日期与最终确认交给用户。返回值不把固定计数当作真实零写入证据。
+
+命令重新核验当前身份、组织和活动，通过可见编辑弹窗只读核对学号、岗位及小时，保存本地新修订。它不会点击弹窗“保存”、上传或提交认证。过期修订保留冲突文件；未完成输入、页面缺失人员和不可恢复材料会列出待处理项。未捕获的网页修改不保证在关闭浏览器后保留。
+
+按需要用 `drafts edit` 明确修改选择和时长，再单独 `drafts prepare` 恢复录入。用户最终提交后只用 `certification status` 查询。详见[捕获验收](docs/verification/2026-10-22-certification-capture.md)。
+
+志愿活动开办和报名审批是两个独立对象，用 `--type` 明确选择。查询可以使用 API 或当前 Ego 会话：
+
+```sh
+friends volunteer activity-reviews list --type registration --via ego --ego-task-space 16 --ego-page p3
+friends volunteer activity-reviews show <申请UUID> --type offering
+friends volunteer activity-reviews prepare <申请UUID> --type offering --decision pass --via ego --ego-task-space 16 --input review.json
+friends volunteer activity-reviews decide <申请UUID> --type offering --decision pass --via api --input review.json --dry-run
+```
+
+`review.json` 含 `message`、`time`（YYYY-MM-DD）；开办审批还需 `isSafeEducation: 0|1`，打回多个节点时需 `callbackActivityId`。API 实际决定须显式 `--yes`；Ego 仅准备并交接，用户亲自点最终确定。响应不确定返回 exit 7，不会自动重试。见 [#11 验收记录](docs/verification/2026-10-22-volunteer-activity-reviews.md)。

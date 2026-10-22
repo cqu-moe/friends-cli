@@ -217,3 +217,23 @@ test("real CLI reports CQU Auth negative paths without secrets or silent fallbac
   ]);
   await mismatch.close();
 });
+
+
+test("real CLI reports discovery challenge as exit 6 without suggesting a login fallback", async (t) => {
+  const scenario = await controlledCquAuthScenario({ discoveryFailure: {
+    status: 403, headers: { "content-type": "text/html", "cf-mitigated": "challenge" }, body: "<html>private challenge details</html>",
+  } });
+  const root = await mkdtemp(join(tmpdir(), "friends-discovery-"));
+  t.after(() => scenario.close());
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const child = spawnCli(["auth", "login", "--method", "cqu-auth", "--issuer", scenario.issuer, "--client-id", clientId, "--no-open", "--json"], { ...process.env, FRIENDS_HOME: root });
+  const result = await child.json();
+  const exit = await child.done();
+  assert.equal(exit.code, 6);
+  assert.equal(result.error.code, "NETWORK_PROTOCOL_ERROR");
+  assert.match(result.error.message, /Cloudflare.*challenge/i);
+  assert.equal(result.error.nextAction, undefined);
+  assert.equal(exit.stderr.includes("private"), false);
+  assert.equal(scenario.requests.length, 1);
+  assert.equal((await child.lines.next()).done, true);
+});
