@@ -98,6 +98,23 @@ const members = await organizationClient.listMembers(organizationId(organization
 
 草稿保存和恢复不调用志愿认证提交接口，也不上传材料。`drafts validate --mode complete` 只表示本地 payload 完整，不表示学校已接收或批准认证。
 
+`drafts prepare <draftId> --via ego --ego-task-space 16 --ego-page p4 --ego-session-page p1` 通过既有学校页面核对身份，再核对活动、组织、岗位及人员。目标页必须已是对应认证页，或是明确选定的空白标签页；不会导航覆盖已有页面。只通过可见控件添加人员、选择岗位、填写小时和局部保存。人工新增选择或较新的时长会保留并提示审核；完成后交接并返回 `submitted:false`，最终“提交认证”由用户亲自点击。
+
+`--dry-run` 仅验证和读取已有认证页，不导航、不点击、不交接。`drafts submit ... --via ego` 及 `--yes`、`--retry`、`--api-fallback` 都无法提交。遇到同名人员等无法从可见页面唯一确认的内容会明确列为待人工处理。
+
+### 捕获人工修改
+
+用户明确交还 Ego 控制后执行：
+
+```sh
+friends drafts capture <draftId> --via ego --ego-task-space 16 \
+  --ego-page p3 --expected-revision 1 --user-returned-control
+```
+
+命令重新核验当前身份、组织和活动，通过可见编辑弹窗只读核对学号、岗位及小时，保存本地新修订。它不会点击弹窗“保存”、上传或提交认证。过期修订保留冲突文件；未完成输入、页面缺失人员和不可恢复材料会列出待处理项。未捕获的网页修改不保证在关闭浏览器后保留。
+
+按需要用 `drafts edit` 明确修改选择和时长，再单独 `drafts prepare` 恢复录入。用户最终提交后只用 `certification status` 查询。详见[捕获验收](docs/verification/2026-10-22-certification-capture.md)。
+
 ## 输出与错误
 
 业务命令与 schema 输出为版本化 JSON；`auth login --method cqu-auth --no-open` 会先输出一行只含授权 URL 的 JSON 事件，完成后输出最终 JSON。`--help`/`--version` 使用普通文本，错误诊断写 stderr。退出码：0 成功，2 输入错误，3 认证失效，4 权限不足，5 业务拒绝/状态冲突，6 网络或协议错误，7 写入结果不确定且禁止自动重试。HTTP 200 但 `code !== "0"` 不是成功；HTTP 非 2xx 即使业务码为 0 也不是成功。

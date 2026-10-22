@@ -8,6 +8,7 @@ import { FriendsError, FriendsErrorCode } from "./errors.js";
 import { organizationApplicationId } from "./organizations.js";
 
 export * from "./draft-store.js";
+export * from "./certification-ego.js";
 
 export type SessionStorageType = "keyring" | "file";
 
@@ -536,6 +537,7 @@ async function readExistingEgoSession(options: {
   page?: string;
   timeoutMs?: number;
   command?: string;
+  baseUrl?: string;
 } = {}): Promise<BrowserSession> {
   if (options.taskSpaceId !== undefined && (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1)) {
     throw safeError("Invalid Ego task space", FriendsErrorCode.InvalidInput);
@@ -551,21 +553,20 @@ async function readExistingEgoSession(options: {
 const task = await ${taskExpression};
 const page = task.page(${JSON.stringify(page)});
 async function existingSessionReady() {
-  return page.waitForFunction(() => location.origin === "https://friends.cqu.edu.cn" &&
+  return page.waitForFunction((expectedOrigin) => location.origin === expectedOrigin &&
     (() => {
       try {
         const frame = document.querySelector("iframe");
         const frameWindow = frame?.contentWindow;
-        const frameDocument = frameWindow?.document;
-        if (!frameWindow || !frameDocument || frameWindow.origin !== location.origin) return false;
-        const frameUrl = new URL(frameWindow.location.href);
-        if (!frameUrl.pathname.startsWith("/mobile/") || /login|sso|roles/i.test(frameUrl.pathname) || frameUrl.searchParams.has("ticket") || frameDocument.readyState !== "complete") return false;
-        const local = localStorage;
-        const frameLocal = frameWindow.localStorage;
-        return ["token_str", "userLevel_str", "userInfo_obj", "account_str", "loginModel_str"]
-          .every((key) => Boolean(local.getItem(key)) && local.getItem(key) === frameLocal.getItem(key));
+        const target = frameWindow ?? window;
+        if (target.origin !== location.origin) return false;
+        const url = new URL(target.location.href);
+        if (!url.pathname.startsWith("/mobile/") || /login|sso|roles/i.test(url.pathname) || url.searchParams.has("ticket") || target.document.readyState !== "complete") return false;
+        if (!["token_str", "userLevel_str"].every(key => Boolean(target.localStorage.getItem(key)))) return false;
+        return !frameWindow || ["token_str", "userLevel_str", "userInfo_obj", "account_str", "loginModel_str"]
+          .every(key => Boolean(localStorage.getItem(key)) && localStorage.getItem(key) === frameWindow.localStorage.getItem(key));
       } catch { return false; }
-    })(), undefined, { timeout: 15000 });
+    })(), ${JSON.stringify(new URL(options.baseUrl ?? "https://friends.cqu.edu.cn/gateway").origin)}, { timeout: 15000 });
 }
 let raw;
 try {
@@ -760,3 +761,5 @@ export async function loadSession(): Promise<StoredSession> {
   }
   return { ...metadata, token };
 }
+
+export * from "./certification-capture.js";
