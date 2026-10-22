@@ -151,7 +151,7 @@ export async function prepareVolunteerOfferingPage(task: Task, input: Input): Pr
   const missing = [...values.entries()].filter(([, value]) => value === "").map(([name]) => `page:${name}`);
   if (initial.publicityUploadCount < input.expectedPublicityCount) missing.push("materials:publicityPictures");
   if (input.dryRun) {
-    return { status: "ready", submitted: false, dryRun: true, actions: [], missing, executionError: null, 
+    return { status: "ready", submitted: false, dryRun: true, actions: [], missing, executionError: null,
       page: { url: initial.url, fields: initial.fields, publicityUploadCount: initial.publicityUploadCount, attachmentUploadCount: initial.attachmentUploadCount, finalActionLabel: initial.finalActionLabel } };
   }
   const actions: VolunteerOfferingPageAction[] = [];
@@ -194,7 +194,7 @@ export async function prepareVolunteerOfferingPage(task: Task, input: Input): Pr
   const handoff: "completed" = "completed";
   return {
     status: "awaiting-user", submitted: false, handoff,
-    actions, missing: stillMissing, executionError, 
+    actions, missing: stillMissing, executionError,
     page: { url: final.url, fields: final.fields, publicityUploadCount: final.publicityUploadCount, attachmentUploadCount: final.attachmentUploadCount, finalActionLabel: final.finalActionLabel },
   };
 }

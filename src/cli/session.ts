@@ -43,4 +43,3 @@ export async function resolveQuerySession(options: Record<string, string | undef
   });
   return { session, entry: "ego" as const };
 }
-
