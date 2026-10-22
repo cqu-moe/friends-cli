@@ -27,6 +27,7 @@ export type {
   SavedOrganizationProfile,
 } from "./organizations.js";
 export * from "./certification-api.js";
+export * from "./volunteer-reviews.js";
 
 export * from "./volunteer-offering.js";
 export * from "./volunteer-offering-api.js";
