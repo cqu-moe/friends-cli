@@ -257,7 +257,7 @@ export async function courseOfferingCliSetup(t, upstream) {
 }
 
 export async function installCourseOfferingEgoFixture(home, token = "course-fixture-token", url = "https://friends.cqu.edu.cn/mobile/course/courseInfo?type=add", options = {}) {
-  const initial = { curriculumName: options.humanName ?? "", curriculumPlace: "", curriculumContent: "", curriculumType: "", curriculumLevel: "", organizationName: "", beginTime: "", endTime: "" };
+  const initial = { curriculumName: options.humanName ?? "", curriculumPlace: "", curriculumContent: "", curriculumType: "", curriculumLevel: "", organizationName: "", beginTime: options.humanBeginTime ?? "", endTime: "" };
   const field = (key, label, select = false) => {
     const multiline = key === "curriculumName" || key === "curriculumContent";
     const name = options.sourceSlots ? "" : ` name="${label}"`;
@@ -300,7 +300,7 @@ export async function installCourseOfferingEgoFixture(home, token = "course-fixt
     for(const key of ['beginTime','endTime']) {
       const control=document.querySelector('[data-model="'+key+'"]');
       const trigger=control.matches('input')?control.parentElement:control;
-      trigger.onclick=()=>{if(Array.from(document.querySelectorAll('.van-popup')).some(p=>p.style.display!=='none'))return;picker([['2026'],['09','10'],['01','31'],['08','18'],['00']],v=>{const value=v[0]+'-'+v[1]+'-'+v[2]+' '+v[3]+':'+v[4];model[key]=value;setValue(control,value);});};
+      trigger.onclick=()=>{if(Array.from(document.querySelectorAll('.van-popup')).some(p=>p.style.display!=='none'))return;picker([['2026'],['09','10'],['01','31'],['08','18'],['00']],v=>{const value=v[0]+'-'+v[1]+'-'+v[2]+' '+v[3]+':'+v[4]+':00';model[key]=value;setValue(control,value);});};
     }
     if(${JSON.stringify(options.openPicker === true)}) picker([['人工选项']],()=>{}).style.display='block';
     document.querySelector('#next').onclick=()=>fetch('/business/course-next-step',{method:'POST',body:JSON.stringify(model)});

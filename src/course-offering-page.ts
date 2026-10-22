@@ -29,6 +29,11 @@ type Field = keyof typeof labels;
 const activePicker = '.van-popup:not([style*="display: none"]) .van-picker';
 const selector = (field: Field) => `loc=css:[data-friends-course-field="${field}"]`;
 
+function sameDateTime(actual: string | null, expected: string): boolean {
+  const withSeconds = (value: string | null) => value?.length === 16 ? `${value}:00` : value;
+  return withSeconds(actual) === withSeconds(expected);
+}
+
 function pickerVisibility(visible: boolean): boolean {
   const frame = document.querySelector("iframe");
   const d = frame ? frame.contentDocument : document;
@@ -160,7 +165,7 @@ export async function prepareCourseOfferingPage(task: Task, input: Input) {
     for (const [field, expected] of Object.entries(requested) as Array<[Field, string]>) {
       const value = (await capture()).fields[field];
       const isDate = field === "beginTime" || field === "endTime";
-      if (value === expected || (isDate && value === expected.slice(0, 16))) {
+      if (value === expected || (isDate && sameDateTime(value, expected))) {
         actions.push({ field, action: "already-matching" });
       } else if (value !== null) {
         actions.push({ field, action: "human-value-preserved" });
@@ -177,7 +182,7 @@ export async function prepareCourseOfferingPage(task: Task, input: Input) {
         await page.click(`loc=css:${activePicker} .van-picker__confirm`);
         await waitForPicker(page, false);
         const actual = (await capture()).fields[field];
-        if (actual !== expected && !(isDate && actual === expected.slice(0, 16))) throw new Error(`Course picker did not retain its value: ${field}`);
+        if (actual !== expected && !(isDate && sameDateTime(actual, expected))) throw new Error(`Course picker did not retain its value: ${field}`);
         actions.push({ field, action: "filled" });
       }
     }

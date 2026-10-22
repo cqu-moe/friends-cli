@@ -133,7 +133,7 @@ test("course offering CLI prepares a visible Ego page and hands it off without s
     PATH: `${ego.bin}:${process.env.PATH}`,
   };
   const inputFile = join(home, "ego-application.json");
-  await writeFile(inputFile, JSON.stringify(application), { mode: 0o600 });
+  await writeFile(inputFile, JSON.stringify({ ...application, firstStep: { ...application.firstStep, beginTime: "2026-10-01 08:00", endTime: "2026-10-31 18:00" } }), { mode: 0o600 });
   const result = await run([
     "course-offering", "prepare-ego",
     "--input", inputFile,
@@ -156,8 +156,8 @@ test("course offering CLI prepares a visible Ego page and hands it off without s
   assert.equal(observed.model.curriculumType, "通识课");
   assert.equal(observed.model.curriculumLevel, "校级");
   assert.equal(observed.model.organizationName, "示例课程组织");
-  assert.equal(observed.model.beginTime, "2026-10-01 08:00");
-  assert.equal(observed.model.endTime, "2026-10-31 18:00");
+  assert.equal(observed.model.beginTime, "2026-10-01 08:00:00");
+  assert.equal(observed.model.endTime, "2026-10-31 18:00:00");
   assert.equal(observed.submits, 0);
   assert.equal(observed.remoteWrites, 0);
   assert.equal(observed.handoffs, 1);
