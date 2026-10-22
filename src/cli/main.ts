@@ -28,6 +28,7 @@ import { resolveQuerySession } from "./session.js";
 import { draftSchemas, registerDraftCommands } from "./drafts.js";
 import { organizationSchemas, registerOrganizationCommands } from "./organizations.js";
 import { registerVolunteerCommands, volunteerSchemas } from "./volunteer.js";
+import { registerVolunteerReviewCommands, volunteerReviewSchemas } from "./volunteer-reviews.js";
 import { offeringSchemas, registerOfferingCommands } from "./offerings.js";
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
@@ -38,6 +39,7 @@ const schemas = {
   ...draftSchemas,
   ...organizationSchemas,
   ...volunteerSchemas,
+  ...volunteerReviewSchemas,
   errors: {
     operation: "errors", readonly:true, permission:"none", phases:["inspect"], supportedVia:["local"],
     exitCodes: {0:"success", 2:"INVALID_INPUT", 3:"AUTH_REQUIRED", 4:"PERMISSION_DENIED", 5:"BUSINESS_REJECTED", 6:"NETWORK_PROTOCOL_ERROR", 7:"UNKNOWN_OUTCOME"},
@@ -421,6 +423,10 @@ registerVolunteerCommands(program, {
   output,
   selectedSession: (options) =>
     resolveQuerySession(options, process.env.FRIENDS_BASE_URL ?? productionBaseUrl),
+});
+
+registerVolunteerReviewCommands(program, {
+  baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
 });
 
 program.parseAsync(process.argv).catch(async (error: unknown) => {

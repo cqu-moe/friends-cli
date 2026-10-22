@@ -1,6 +1,6 @@
 # friends-cli
 
-重庆大学第二课堂平台的本地 CLI 与可复用 SDK。当前包含课程查询、OAuth/DPoP 登录与恢复、志愿认证草稿与受控 API 提交、志愿活动开办和个人报名、开办与报名审批，以及学生组织查询和资料维护。各业务的 API/Ego 支持阶段与验证限制见下文。
+重庆大学第二课堂平台的本地 CLI 与可复用 SDK。SDK 提供共享业务契约；CLI 支持本地 API 与 Ego 会话查询、活动与认证准备、明确确认的 API 写入。Ego 写操作保留给用户审核并亲自最终提交。完整范围和验证层次见下文与 docs/verification。
 
 ## 安装与命令
 
@@ -33,6 +33,15 @@ friends organizations profile show <organizationUuid> --json
 friends organizations members <organizationUuid> --page 1 --page-size 10 --json
 friends organizations profile prepare <organizationUuid> \
   --via ego --ego-task-space 12 --ego-page p1 --blurb "新的组织简介" --json
+friends volunteer-hours list --page 1 --page-size 10 --json
+friends volunteer-hours show <transcriptUuid> --json
+friends volunteer-certification-reviews list --via ego \
+  --ego-task-space 16 --ego-page p1 --json
+friends volunteer-certification-reviews show <reviewUuid> --json
+friends volunteer-certification-reviews decide <reviewUuid> \
+  --via api --decision pass --message "同意认证" --time 2026-10-22 --confirm --json
+friends volunteer-certification-reviews prepare <reviewUuid> \
+  --via ego --ego-task-space 16 --decision back --message "请补充材料" --json
 friends drafts activities --via ego --ego-task-space 16 --ego-page p1 --json
 friends drafts create --activity-id <activityUuid> --json
 friends drafts edit <draftId> --expected-revision 0 --input patch.json --json
@@ -140,6 +149,14 @@ friends certification status <activityId> --via ego --ego-task-space 16
 ```
 
 `--input -` 读取 stdin 导出的草稿。当前认证表单没有附件入口，带材料的草稿会在写入前拒绝。`UNKNOWN_OUTCOME`（退出码 7）时保留草稿，先用 `certification status` 回查，不自动重交。业务确认与回查结果分别返回；已有认证不会被这个新建命令覆盖。
+
+## 个人志愿时长与认证审批
+
+`volunteer-hours` 查询学校成绩单分页和详情，时长按生产页面已核实的单位投影为小时；未知活动类型、状态和分页能力保留原值或 `null`，不把待审时长解释为已认定。`volunteer-certification-reviews` 先用学校返回的真实登录角色映射审批 `handleType`，角色不能由 CLI 参数指定或提升。
+
+认证审批 API 决定只暴露生产页面可见的 `pass` 和 `back`。决定必须独立 `--via api`，并使用 `--confirm` 或 `--dry-run`；写入前会用当前学校会话重新核对账号、真实角色、待办列表、申请 UUID 和活动绑定，BACK 的回退节点只能来自学校 callback-list。请求确认和只读回查分开返回，写入响应丢失时即使回查匹配也保持 `UNKNOWN_OUTCOME`，不会重试。
+
+Ego prepare 同样用已核验会话新建 review SDK client 并重新读取学校返回的账号、角色、待办申请和活动绑定，不信任 CLI 传入的角色或绑定。它会复用已打开的目标审批页；其他页面直接拒绝，只有调用者显式给出 `--allow-blank-navigation` 且当前页是 `about:blank` 时才导航。命令先取得页面快照再点击通过/打回；若审批意见已有非空人工输入则保留该值，只在空字段填入请求意见，然后输出 `submitted:false` 并交接页面。它不点击最终确认、不触发保存 PUT、不调用写入 API；BACK 的回退节点和最终提交由用户人工确认。
 
 ## 校内志愿活动开办申请
 
