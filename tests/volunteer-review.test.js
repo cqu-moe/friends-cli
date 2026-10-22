@@ -214,3 +214,14 @@ test("SDK uses real callback nodes for BACK and rejects missing real review role
   await assert.rejects(() => client.list(), (error) =>
     error.code === FriendsErrorCode.PermissionDenied);
 });
+
+
+test("SDK rejects mismatched detail identifiers and impossible decision dates before writes",async t=>{
+ const upstream=await school(t);upstream.state.wrongDetailId=true;
+ await assert.rejects(()=>createVolunteerHoursClient({...upstream,session}).get("transcript-1"),e=>e.code==="NETWORK_PROTOCOL_ERROR");
+ const reviews=createVolunteerCertificationReviewClient({...upstream,session});
+ await assert.rejects(()=>reviews.get("review-1"),e=>e.code==="NETWORK_PROTOCOL_ERROR");
+ upstream.state.wrongDetailId=false;
+ await assert.rejects(()=>reviews.decide("review-1",{via:"api",intent:"submit-volunteer-certification-review",decision:"pass",confirm:true,message:"同意",time:"2026-02-30"}),e=>e.code==="INVALID_INPUT");
+ assert.equal(upstream.writes.length,0);
+});

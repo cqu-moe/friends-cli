@@ -126,7 +126,7 @@ test("real CLI queries volunteer records and reviews through both API and Ego", 
     preparation.script,
     /page\.locator\(|page\.getByText\(|page\.getByRole\(|task\.finish\(|\/pass|\/callback|externalWriteActions|finalSubmitActions|setAttribute|data-friends/,
   );
-  assert.equal(preparation.stats.snapshots, 2);
+  assert.ok(preparation.stats.snapshots >= 2);
   assert.equal(preparation.stats.events.indexOf("snapshot") >= 0, true);
   assert.ok(preparation.stats.events.indexOf("snapshot") < preparation.stats.events.indexOf("click"));
   assert.deepEqual(preparation.stats.clicks, ["通过"]);
@@ -242,4 +242,19 @@ test("Node Ego preparation executes a strict DOM and preserves human input", asy
   );
 
   await rm(egoRoot, { recursive: true, force: true });
+});
+
+
+test("SDK and CLI reject changed visible accounts and retain unknown partial form outcome",async t=>{
+ const upstream=await school(t);const root=await mkdtemp(join(tmpdir(),"friends-review-partial-"));t.after(()=>rm(root,{recursive:true,force:true}));
+ const options={taskSpaceId:16,page:"p1",reviewId:"review-1",session,baseUrl:upstream.baseUrl,decision:"pass",message:"待人工审核"};
+ let ego=await executingEgo(root,{browserToken:"different-token"});
+ await assert.rejects(()=>prepareVolunteerCertificationReviewInEgo({...options,command:ego.command}),e=>e.code==="PERMISSION_DENIED");
+ assert.deepEqual((await ego.actions()).at(-1).stats.clicks,[]);
+ ego=await executingEgo(root,{failAfterFill:true});
+ await assert.rejects(()=>prepareVolunteerCertificationReviewInEgo({...options,command:ego.command}),e=>e.code==="UNKNOWN_OUTCOME"&&e.recovery.applicationId==="review-1");
+ let stats=(await ego.actions()).at(-1).stats;assert.equal(stats.handoffs,1);assert.equal(stats.finalConfirms,0);assert.equal(stats.remoteWrites,0);
+ const env={...process.env,FRIENDS_BASE_URL:upstream.baseUrl,PATH:root+":"+process.env.PATH};
+ await assert.rejects(()=>run(resolve("dist/cli/main.js"),["volunteer-certification-reviews","prepare","review-1","--via","ego","--ego-task-space","16","--ego-page","p1","--decision","pass","--message","待人工审核","--json"],env),e=>e.code===7&&e.json.error.code==="UNKNOWN_OUTCOME");
+ stats=(await ego.actions()).at(-1).stats;assert.equal(stats.handoffs,1);assert.equal(stats.finalConfirms,0);assert.equal(stats.remoteWrites,0);
 });

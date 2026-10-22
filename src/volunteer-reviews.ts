@@ -261,6 +261,7 @@ function createClient(options: {
     try {
       response = await fetchImpl(new URL(`${baseUrl}${path}`), {
         ...init,
+        headers: {...init.headers, "h-zove-appkey": path.startsWith("/ek-agg-mob/") ? "zovecenter-saip-ek-agg-mob" : service},
         redirect: "error",
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -375,6 +376,7 @@ export function createVolunteerHoursClient(options: {
         headers: headers(client.session),
       });
       const raw = object(envelope.data) ?? invalid("Unexpected volunteer transcript");
+      if(raw.uuid !== id) throw new FriendsError({code:FriendsErrorCode.NetworkProtocol,message:"The school returned a different volunteer transcript"});
       const items = Array.isArray(raw.itemList) ? raw.itemList : invalid("Unexpected volunteer transcript items");
       return {
         id: nullableText(raw.uuid) ?? id,
@@ -413,11 +415,12 @@ export function createVolunteerCertificationReviewClient(options: {
       headers: headers(client.session),
     });
     const raw = object(envelope.data) ?? invalid("Unexpected certification review detail");
+    if(raw.uuid !== id) throw new FriendsError({code:FriendsErrorCode.NetworkProtocol,message:"The school returned a different certification review"});
     return { raw, projected: reviewDetail(raw, role, handleType), role, handleType };
   }
 
   async function flowState(handleType: string) {
-    const envelope = await client.request("/biz-common/flow/template-activity-state", {
+    const envelope = await client.request("/ek-agg-mob/biz-common/flow/template-activity-state", {
       method: "POST",
       headers: headers(client.session),
       body: JSON.stringify({ businessTypeCode: "校内活动认证申请", handleType }),
@@ -431,7 +434,7 @@ export function createVolunteerCertificationReviewClient(options: {
   }
 
   async function callbackNodes(handleType: string) {
-    const envelope = await client.request("/biz-common/flow/callback-list", {
+    const envelope = await client.request("/ek-agg-mob/biz-common/flow/callback-list", {
       method: "POST",
       headers: headers(client.session),
       body: JSON.stringify({ businessTypeCode: "校内活动认证申请", handleType }),
@@ -509,6 +512,8 @@ export function createVolunteerCertificationReviewClient(options: {
       invalid("A non-empty certification review message of at most 100 characters is required");
     }
     if (typeof intent.time !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(intent.time)) invalid("Review time must be YYYY-MM-DD");
+    const date = new Date(`${intent.time}T00:00:00Z`);
+    if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0,10) !== intent.time) invalid("Review time must be a real calendar date");
     if (intent.callbackActivityId !== undefined && typeof intent.callbackActivityId !== "string") {
       invalid("callbackActivityId must be a string");
     }
@@ -563,6 +568,7 @@ export function createVolunteerCertificationReviewClient(options: {
       let callbackActivityId: string | null = null;
       if (intent.decision === "back") {
         const nodes = await callbackNodes(before.handleType);
+        if (nodes.length === 0 || nodes.some(node => node.id === null)) invalid("The school did not expose a valid callback node");
         if (nodes.length === 1) callbackActivityId = nodes[0].id;
         else if (nodes.length > 1) {
           callbackActivityId = intent.callbackActivityId ?? null;
@@ -591,14 +597,12 @@ export function createVolunteerCertificationReviewClient(options: {
         };
       }
 
-      let acknowledged = false;
       try {
         await client.request(`${prefix}/school-activity-attestation-apply/${intent.decision === "pass" ? "pass" : "callback"}`, {
           method: "POST",
           headers: headers(client.session),
           body: JSON.stringify(payload),
         }, true);
-        acknowledged = true;
       } catch (error) {
         if (!(error instanceof FriendsError) || error.code !== FriendsErrorCode.NetworkProtocol) throw error;
         let readbackState = "unavailable";

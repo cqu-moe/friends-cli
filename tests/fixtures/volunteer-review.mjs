@@ -98,10 +98,10 @@ export async function school(t) {
           account: "20210001", name: "示例", userLoginStateLevel: "XS", departmentNo: "24080",
         });
       }
-      if (req.url.endsWith("/biz-common/flow/template-activity-state")) {
+      if (req.url === "/gateway/ek-agg-mob/biz-common/flow/template-activity-state") {
         return reply(res, [{ code: "0", name: "待处理" }]);
       }
-      if (req.url.endsWith("/biz-common/flow/callback-list")) {
+      if (req.url === "/gateway/ek-agg-mob/biz-common/flow/callback-list") {
         return reply(res, state.callbackNodes);
       }
       if (req.url.endsWith("/student-transcript/page")) {
@@ -114,7 +114,7 @@ export async function school(t) {
         });
       }
       if (req.url.endsWith("/student-transcript/transcript-1")) {
-        return reply(res, transcriptDetail);
+        return reply(res, {...transcriptDetail,uuid:state.wrongDetailId?"other-transcript":transcriptDetail.uuid});
       }
       if (req.url.endsWith("/school-activity-attestation-apply/page-list")) {
         const pending = state.pendingMissing ? [] : [{
@@ -143,6 +143,7 @@ export async function school(t) {
           return;
         }
         const detail = structuredClone(currentReview);
+        if(state.wrongDetailId) detail.uuid="other-review";
         if (state.activityMismatch) detail.activityId = "different-activity";
         return reply(res, detail);
       }
@@ -179,18 +180,18 @@ export async function school(t) {
   };
 }
 
-export async function executingEgo(root, { initialMessage = "", currentUrl } = {}) {
+export async function executingEgo(root, { initialMessage = "", currentUrl, browserToken = "review-token", failAfterFill = false } = {}) {
   const runner = `${root}/ego-runner.mjs`;
   const scriptLog = `${root}/generated-script.js`;
   const actionLog = `${root}/ego-actions.jsonl`;
   const targetUrl = "https://friends.cqu.edu.cn/mobile/volunteerManage/campusCerApprovalDetail?uuid=review-1&activityId=activity-1&handleType=XSC";
   const html = `<!doctype html><meta charset="utf-8"><title>认证审批</title>
 <style>body{font:16px system-ui;margin:20px}button{padding:10px;margin:4px}textarea{display:block;padding:10px}[data-dialog]{display:none;position:fixed;inset:40px;background:white;padding:20px}[data-dialog].open{display:block}</style>
-<main>
+<main class="action-bar">
   <button type="button" data-action="pass">通过</button>
   <button type="button" data-action="back">打回</button>
   <button type="button" data-action="save">保存</button>
-  <section data-dialog aria-label="审批对话框">
+  <section data-dialog class="van-dialog" aria-label="审批对话框"><div class="van-dialog__header"></div>
     <label>审批意见<textarea aria-label="审批意见"></textarea></label>
     <button type="button" data-action="cancel">取消</button>
     <button type="button" data-action="confirm">确认审批</button>
@@ -199,7 +200,7 @@ export async function executingEgo(root, { initialMessage = "", currentUrl } = {
 <script>
 const dialog=document.querySelector("[data-dialog]");
 for(const button of document.querySelectorAll("[data-action]"))button.addEventListener("click",()=>{
-  if(button.dataset.action==="pass"||button.dataset.action==="back")dialog.classList.add("open");
+  if(button.dataset.action==="pass"||button.dataset.action==="back"){dialog.classList.add("open");dialog.querySelector(".van-dialog__header").textContent=button.dataset.action==="pass"?"审批通过":"审批打回";}
 });
 document.querySelector("[data-action=confirm]").addEventListener("click",()=>fetch("/school-activity-attestation-apply/pass",{method:"POST"}));
 document.querySelector("[data-action=save]").addEventListener("click",()=>fetch("/school-activity-attestation-apply/save",{method:"PUT"}));
@@ -211,6 +212,7 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
     targetUrl,
     currentUrl: currentUrl ?? targetUrl,
     result: `${root}/observed.json`,
+    browserToken, failAfterFill,
   }));
   await writeFile(`${root}/page.html`, html);
   await writeFile(runner, String.raw`
@@ -228,7 +230,7 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
       events: [], clicks: [], fills: [], snapshots: 0, handoffs: 0,
       navigations: 0, remoteWrites: 0, externalSaves: 0, finalConfirms: 0,
     };
-    const dom = new JSDOM(await readFile(configuration.html, "utf8"), {
+    const contentDom = new JSDOM(await readFile(configuration.html, "utf8"), {
       url: configuration.targetUrl,
       runScripts: "dangerously",
       beforeParse(window) {
@@ -245,7 +247,13 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
         };
       },
     });
-    const window = dom.window;
+    const dom = new JSDOM('<iframe></iframe>', {url: configuration.targetUrl,runScripts: "dangerously"});
+    const frame = dom.window.document.querySelector('iframe');
+    Object.defineProperty(frame,'contentDocument',{get:()=>contentDom.window.document});
+    Object.defineProperty(frame,'contentWindow',{get:()=>contentDom.window});
+    const window = dom.window, document = contentDom.window.document;
+    for(const w of [window,contentDom.window]){w.localStorage.setItem('token_str',configuration.browserToken);w.localStorage.setItem('userLevel_str','XS');}
+
     let currentUrl = configuration.currentUrl;
     let handedOff = false;
     function active() { if (handedOff) throw new Error("Browser operation after handOff"); }
@@ -265,7 +273,7 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
     function capture() {
       const refs = new Map();
       const lines = [];
-      for (const element of window.document.querySelectorAll("button, textarea")) {
+      for (const element of document.querySelectorAll("button, textarea")) {
         if (!visible(element)) continue;
         let ref = refByElement.get(element);
         if (ref === undefined) {
@@ -273,10 +281,10 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
           refByElement.set(element, ref);
         }
         refs.set(ref, element);
-        const label = element instanceof window.HTMLTextAreaElement
+        const label = element instanceof contentDom.window.HTMLTextAreaElement
           ? (element.getAttribute("aria-label") + " " + element.value).trim()
           : element.textContent.trim();
-        lines.push(label + " " + ref);
+        lines.push((element instanceof contentDom.window.HTMLTextAreaElement ? 'textbox "审批意见"' : "button") + " [ref=" + ref.slice(1) + "]\n  text " + JSON.stringify(label));
       }
       return { text: lines.join("\n"), refs };
     }
@@ -285,6 +293,12 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
       stats.events.push("snapshot");
       return capture();
     }
+    function matches(selector) {
+      const css=selector.replace(/^loc=css:/,'');
+      const match=css.match(/:has-text\((".*")\)$/);
+      return [...document.querySelectorAll(match?css.slice(0,match.index):css)].filter(e=>visible(e)&&(!match||e.textContent.includes(JSON.parse(match[1]))));
+    }
+    function one(selector){const result=matches(selector);if(result.length!==1)throw new Error('Expected one visible selector: '+selector);return result[0];}
     const page = {
       async url() { active(); return currentUrl; },
       async goto(url) {
@@ -298,8 +312,8 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
         active();
         actions.push({ type: "waitForSelector", selector, options });
         for (let attempt = 0; attempt < 30; attempt += 1) {
-          const matches = [...window.document.querySelectorAll(selector)].filter(visible);
-          if (options?.state === "hidden" ? matches.length === 0 : matches.length > 0) return;
+          const selected = matches(selector);
+          if (options?.state === "hidden" ? selected.length === 0 : selected.length > 0) return;
           await new Promise(resolve => setTimeout(resolve, 10));
         }
         throw new Error("Waiting for selector failed: " + selector);
@@ -308,7 +322,7 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
         active();
         actions.push({ type: "waitForFunction", options });
         window.__argument = structuredClone(argument);
-        const body = window.document.body;
+        const body = document.body;
         if (body.innerText === undefined) body.innerText = body.textContent ?? "";
         if (!await window.eval("(" + callback.toString() + ")(__argument)")) {
           throw new Error("Fixture condition was not ready");
@@ -317,7 +331,7 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
       async click(selector, options) {
         active();
         const current = capture();
-        const element = current.refs.get(selector);
+        const element = selector.startsWith("@") ? current.refs.get(selector) : one(selector);
         if (element === undefined) throw new Error("Unknown snapshot reference: " + selector);
         if (element.dataset.action === "save") stats.externalSaves += 1;
         if (element.dataset.action === "confirm") stats.finalConfirms += 1;
@@ -329,14 +343,15 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
       async fill(selector, value) {
         active();
         const current = capture();
-        const element = current.refs.get(selector);
-        if (!(element instanceof window.HTMLTextAreaElement)) throw new Error("Fill target is not a textarea");
+        const element = selector.startsWith("@") ? current.refs.get(selector) : one(selector);
+        if (!(element instanceof contentDom.window.HTMLTextAreaElement)) throw new Error("Fill target is not a textarea");
         stats.fills.push(value);
         stats.events.push("fill");
         actions.push({ type: "fill", selector, value });
         element.value = value;
         element.dispatchEvent(new window.Event("input", { bubbles: true }));
         element.dispatchEvent(new window.Event("change", { bubbles: true }));
+        if(configuration.failAfterFill) throw new Error("Lost visible fill receipt");
       },
       async evaluate(callback, argument) {
         active();
@@ -355,7 +370,7 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
       actions.push({ type: "taskSpace", id });
       return {
         page(label) { actions.push({ type: "page", label }); return page; },
-        async handOff() { active(); stats.handoffs += 1; stats.events.push("handOff"); actions.push({ type: "handOff" }); },
+        async handOff() { active(); handedOff=true; stats.handoffs += 1; stats.events.push("handOff"); actions.push({ type: "handOff" }); },
       };
     };
     try {
@@ -365,9 +380,9 @@ document.querySelector("[data-dialog] textarea").value=${JSON.stringify(initialM
         script: source,
         actions,
         stats,
-        html: window.document.body.innerHTML,
+        html: document.body.innerHTML,
       }) + "\n");
-      window.close();
+      window.close();contentDom.window.close();
     }
   ` + "\n");
   const command = `${root}/ego-browser`;
