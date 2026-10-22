@@ -61,6 +61,7 @@ async function runEgo(options: {
   script: string;
   command: string;
   timeoutMs: number;
+  missingSessionMessage?: string;
 }): Promise<BrowserOutput> {
   const child = spawn(options.command, ["nodejs"], { stdio: ["pipe", "pipe", "pipe"] });
   let stdout = "";
@@ -93,8 +94,14 @@ async function runEgo(options: {
   const marker = "FRIENDS_CLI_EGO_SESSION:";
   const lines = `${stdout}\n${stderr}`.split("\n").filter(line => line.startsWith(marker));
   const lastLine = lines.length === 1 ? lines[0].slice(marker.length) : undefined;
+  if (lastLine === undefined && options.missingSessionMessage !== undefined) {
+    throw safeError(options.missingSessionMessage);
+  }
   try {
     const parsed = lastLine === undefined ? null : JSON.parse(lastLine) as Record<string, unknown>;
+    if (parsed?.error === "NO_EXISTING_FRIENDS_SESSION") {
+      throw safeError(options.missingSessionMessage ?? "No existing Ego friends session is ready");
+    }
     const token = parseToken(parsed?.token);
     const userLevel = parsed?.userLevel;
     if (
@@ -171,6 +178,62 @@ console.log("FRIENDS_CLI_EGO_SESSION:" + JSON.stringify(raw));
   });
 }
 
+async function readExistingEgoSession(options: {
+  taskSpaceId?: number;
+  page?: string;
+  timeoutMs?: number;
+  command?: string;
+} = {}): Promise<BrowserSession> {
+  if (options.taskSpaceId !== undefined && (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1)) {
+    throw safeError("Invalid Ego task space", FriendsErrorCode.InvalidInput);
+  }
+  const page = options.page ?? "p1";
+  if (!/^p[1-9][0-9]*$/.test(page)) throw safeError("Invalid Ego page label", FriendsErrorCode.InvalidInput);
+  const userWaitMs = options.timeoutMs ?? 300_000;
+  if (!Number.isSafeInteger(userWaitMs) || userWaitMs < 1) throw safeError("Invalid Ego timeout", FriendsErrorCode.InvalidInput);
+  const taskExpression = options.taskSpaceId === undefined
+    ? 'taskSpace("friends-cli local login")'
+    : `taskSpace(${options.taskSpaceId})`;
+  const script = `
+const task = await ${taskExpression};
+const page = task.page(${JSON.stringify(page)});
+async function existingSessionReady() {
+  return page.waitForFunction(() => location.origin === "https://friends.cqu.edu.cn" &&
+    (() => {
+      try {
+        const frame = document.querySelector("iframe");
+        const frameWindow = frame?.contentWindow;
+        const frameDocument = frameWindow?.document;
+        if (!frameWindow || !frameDocument || frameWindow.origin !== location.origin) return false;
+        const frameUrl = new URL(frameWindow.location.href);
+        if (!frameUrl.pathname.startsWith("/mobile/") || /login|sso|roles/i.test(frameUrl.pathname) || frameUrl.searchParams.has("ticket") || frameDocument.readyState !== "complete") return false;
+        const local = localStorage;
+        const frameLocal = frameWindow.localStorage;
+        return ["token_str", "userLevel_str", "userInfo_obj", "account_str", "loginModel_str"]
+          .every((key) => Boolean(local.getItem(key)) && local.getItem(key) === frameLocal.getItem(key));
+      } catch { return false; }
+    })(), undefined, { timeout: 15000 });
+}
+let raw;
+try {
+  await existingSessionReady();
+  raw = await page.evaluate(() => ({
+    token: localStorage.getItem("token_str"),
+    userLevel: localStorage.getItem("userLevel_str")
+  }));
+} catch {
+  raw = { error: "NO_EXISTING_FRIENDS_SESSION" };
+}
+console.log("FRIENDS_CLI_EGO_SESSION:" + JSON.stringify(raw));
+`;
+  return runEgo({
+    script,
+    command: options.command ?? "ego-browser",
+    timeoutMs: userWaitMs + 30_000,
+    missingSessionMessage: "No existing Ego friends session is ready",
+  });
+}
+
 export async function readVerifiedEgoSession(options: {
   taskSpaceId?: number;
   page?: string;
@@ -179,7 +242,7 @@ export async function readVerifiedEgoSession(options: {
   baseUrl?: string;
   selector?: { levelNo?: string; unitNo?: string };
 } = {}): Promise<VerifiedEgoSession> {
-  const browserSession = await readEgoSession(options);
+  const browserSession = await readExistingEgoSession(options);
   const activated = await createFriendsSdk({ baseUrl: options.baseUrl }).activateLocalContext({
     token: browserSession.token,
     userLevel: browserSession.userLevel,
