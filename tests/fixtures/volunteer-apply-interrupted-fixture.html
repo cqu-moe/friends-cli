@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>志愿报名中断 fixture</title>
+<style>.van-field,.van-cell{display:block;padding:12px}.van-field__label{display:block}.hidden{display:none}</style>
+<div class="van-cell">示例志愿活动</div>
+<div class="van-cell van-field" id="post-field">
+  <div class="van-cell__title van-field__label"><span>申请岗位</span></div>
+  <div class="van-cell__value"><input id="post" readonly value=""></div>
+</div>
+<div class="van-picker hidden" id="post-picker">
+  <div class="van-picker-column__item" data-value="post-1"><div class="van-ellipsis">签到岗</div></div>
+  <button class="van-picker__confirm" type="button">确认</button>
+</div>
+<div class="form-outside"><div class="item-title">服务人数</div></div>
+<button class="submit" type="button">申请加入</button>
+<script>
+document.querySelector("#post-field").addEventListener("click", () => document.getElementById("post-picker").classList.remove("hidden"));
+document.querySelector(".van-picker-column__item").addEventListener("click", () => document.querySelector(".van-picker-column__item").dataset.selected = "true");
+document.querySelector(".van-picker__confirm").addEventListener("click", () => {
+  document.getElementById("post").value = "post-1";
+  document.getElementById("post-picker").classList.add("hidden");
+});
+</script>
