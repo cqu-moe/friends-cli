@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { createFriendsSdk, type LoginContext } from "./index.js";
 import { FriendsError, FriendsErrorCode } from "./errors.js";
 
 export type SessionStorageType = "keyring" | "file";
@@ -24,6 +25,13 @@ export interface StoredSession {
     levelName: string;
     unit: { unitType: number; unitNo: string; unitName: string };
   };
+}
+
+export interface VerifiedEgoSession {
+  token: string;
+  userLevel: string;
+  account: { userNo: string; userName: string };
+  context: LoginContext;
 }
 
 type BrowserOutput = Pick<BrowserSession, "token" | "userLevel">;
@@ -161,6 +169,28 @@ console.log("FRIENDS_CLI_EGO_SESSION:" + JSON.stringify(raw));
     command: options.command ?? "ego-browser",
     timeoutMs: userWaitMs + 30_000,
   });
+}
+
+export async function readVerifiedEgoSession(options: {
+  taskSpaceId?: number;
+  page?: string;
+  timeoutMs?: number;
+  command?: string;
+  baseUrl?: string;
+  selector?: { levelNo?: string; unitNo?: string };
+} = {}): Promise<VerifiedEgoSession> {
+  const browserSession = await readEgoSession(options);
+  const activated = await createFriendsSdk({ baseUrl: options.baseUrl }).activateLocalContext({
+    token: browserSession.token,
+    userLevel: browserSession.userLevel,
+    selector: options.selector ? { ...options.selector } : undefined,
+  });
+  return {
+    token: browserSession.token,
+    userLevel: activated.context.levelNo,
+    account: activated.account,
+    context: activated.context,
+  };
 }
 
 function storageRoot(): string {

@@ -19,8 +19,8 @@ test('packed installation exposes SDK without Ego and runs the complete CLI flow
     assert.ok(packed.files.some(file => file.path === 'dist/cli/main.js'));
     assert.ok(packed.files.every(file => file.path.startsWith('dist/') || ['package.json', 'README.md'].includes(file.path)));
     await run('npm', ['install', '--prefix', install, '--ignore-scripts', '--package-lock=false', '--no-audit', '--no-fund', join(install, packed.filename)]);
-    const imported = await run(process.execPath, ['--input-type=module', '--eval', "import {createFriendsSdk} from '@cqu-moe/friends-cli'; const sdk = createFriendsSdk(); console.log(typeof sdk.inspectLocalSession);"], {cwd:install, env:{...process.env,PATH:''}});
-    assert.equal(imported.stdout.trim(), 'function');
+    const imported = await run(process.execPath, ['--input-type=module', '--eval', "import {createFriendsSdk} from '@cqu-moe/friends-cli'; import {readVerifiedEgoSession} from '@cqu-moe/friends-cli/node'; const sdk = createFriendsSdk(); console.log(typeof sdk.inspectLocalSession, typeof readVerifiedEgoSession);"], {cwd:install, env:{...process.env,PATH:''}});
+    assert.equal(imported.stdout.trim(), 'function function');
     assert.equal(imported.stderr, '');
     const cli = join(install, 'node_modules/.bin/friends');
     const version = await run(cli, ['--version']);

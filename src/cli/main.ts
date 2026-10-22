@@ -11,6 +11,7 @@ import {
 import {
   loadSession,
   readEgoSession,
+  readVerifiedEgoSession,
   saveSession,
   sessionPath,
   SessionStorageType,
@@ -52,6 +53,10 @@ const schemas = {
     operation: "courses.list",
     permission: "school-verified identity; upstream enforces course access", phases: ["query"],
     input: {
+      via: { type: "local or ego", default: "local", egoTaskSpace: "required integer; reuses an existing Ego task space" },
+      egoPage: { type: "string", default: "p1" },
+      levelNo: { type: "string", required: "only when multiple Ego contexts match" },
+      unitNo: { type: "string", required: "only when multiple Ego contexts match" },
       page: { type: "integer", minimum: 1, default: 1 },
       pageSize: { type: "integer", minimum: 1, default: 10 },
       keyword: {
@@ -62,17 +67,25 @@ const schemas = {
     },
     output: "one page of necessary course projections",
     readonly: true,
-    supportedVia: ["api"],
-    verifiedWith: "controlled-api; live-read-only-evidence",
+    supportedVia: ["local", "ego"],
+    requestMode: "direct-api",
+    verifiedWith: "controlled-local; controlled-ego; live-read-only-evidence",
   },
   "courses.get": {
     operation: "courses.get",
     permission: "school-verified identity; upstream enforces course access", phases: ["query"],
-    input: { courseId: { type: "course UUID", required: true } },
+    input: {
+      via: { type: "local or ego", default: "local", egoTaskSpace: "required integer; reuses an existing Ego task space" },
+      egoPage: { type: "string", default: "p1" },
+      levelNo: { type: "string", required: "only when multiple Ego contexts match" },
+      unitNo: { type: "string", required: "only when multiple Ego contexts match" },
+      courseId: { type: "course UUID", required: true },
+    },
     output: "necessary public course detail projection",
     readonly: true,
-    supportedVia: ["api"],
-    verifiedWith: "controlled-api; live-read-only-evidence",
+    supportedVia: ["local", "ego"],
+    requestMode: "direct-api",
+    verifiedWith: "controlled-local; controlled-ego; live-read-only-evidence",
   },
 } as const;
 
@@ -86,6 +99,66 @@ function sdk() {
   return createFriendsSdk({
     baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
   });
+}
+
+function queryMeta(source: {
+  entry: "local" | "ego";
+  session: { account: unknown; context: unknown };
+}) {
+  return {
+    via: source.entry === "ego" ? "ego-selected+direct-api" : "api",
+    selectedEntry: source.entry,
+    requestMode: "direct-api",
+    verification: {
+      identityAndContext: source.entry === "ego" ? "school-api-verified" : "school-api-reverified",
+      account: source.session.account,
+      context: source.session.context,
+      queryContract: "live-read-only-evidence+controlled-api",
+    },
+  };
+}
+
+async function courseQuerySession(options: Record<string, string | undefined>) {
+  const via = options.via ?? "local";
+  if (via === "local") {
+    const mixedEgoOptions = ["egoTaskSpace", "egoPage", "levelNo", "unitNo"].filter((key) => options[key] != null);
+    if (mixedEgoOptions.length > 0) {
+      throw new FriendsError({
+        code: FriendsErrorCode.InvalidInput,
+        message: `Ego options require --via ego: ${mixedEgoOptions.join(", ")}`,
+      });
+    }
+    return { session: await loadSession(), entry: "local" as const };
+  }
+  if (via !== "ego") {
+    throw new FriendsError({
+      code: FriendsErrorCode.InvalidInput,
+      message: "--via must be local or ego",
+    });
+  }
+  if (options.egoTaskSpace === undefined) {
+    throw new FriendsError({
+      code: FriendsErrorCode.InvalidInput,
+      message: "--via ego requires --ego-task-space",
+    });
+  }
+  const taskSpaceId = Number(options.egoTaskSpace);
+  if (!Number.isInteger(taskSpaceId) || taskSpaceId < 1) {
+    throw new FriendsError({
+      code: FriendsErrorCode.InvalidInput,
+      message: "--ego-task-space must be a positive integer",
+    });
+  }
+  const session = await readVerifiedEgoSession({
+    taskSpaceId,
+    page: options.egoPage,
+    baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+    selector:
+      options.levelNo === undefined && options.unitNo === undefined
+        ? undefined
+        : { levelNo: options.levelNo, unitNo: options.unitNo },
+  });
+  return { session, entry: "ego" as const };
 }
 
 const program = new Command()
@@ -126,7 +199,7 @@ auth
     process.env.FRIENDS_STORAGE ?? "keyring",
   )
   .option("--ego-task-space <number>", "reuse an existing Ego task space by numeric ID")
-  .option("--ego-page <label>", "existing Ego page label", "p1")
+  .option("--ego-page <label>", "existing Ego page label (default p1)")
   .option("--level-no <value>", "select a level when multiple contexts match")
   .option("--unit-no <value>", "select an identity unit when multiple contexts match")
   .option("--json", "print stable JSON", true)
@@ -219,19 +292,20 @@ courses
   .option("--page <number>", "result page", "1")
   .option("--page-size <number>", "results per page", "10")
   .option("--keyword <value>", "course name or organizer keyword")
+  .option("--via <source>", "query session source", "local")
+  .option("--ego-task-space <number>", "existing Ego task space required by --via ego")
+  .option("--ego-page <label>", "existing Ego page label (default p1)")
+  .option("--level-no <value>", "select an Ego level when multiple contexts match")
+  .option("--unit-no <value>", "select an Ego identity unit when multiple contexts match")
   .option("--json", "print stable JSON", true)
   .action(async (options: Record<string, string>) => {
     const query = validateCourseListInput({page:Number(options.page), pageSize:Number(options.pageSize), keyword:options.keyword});
-    const session = await loadSession();
-    const client = await sdk().createCourseClient(session);
+    const source = await courseQuerySession(options);
+    const client = await sdk().createCourseClient(source.session);
     const data = await client.list(query);
     output(data, {
       operation: "courses.list",
-      via: "api",
-      verification: {
-        identityAndContext: "school-api-reverified",
-        queryContract: "live-read-only-evidence+controlled-api",
-      },
+      ...queryMeta(source),
     });
   });
 
@@ -239,18 +313,19 @@ courses
   .command("show")
   .description("Show one course by course UUID")
   .argument("<courseId>", "course UUID, not an application or certification UUID")
+  .option("--via <source>", "query session source", "local")
+  .option("--ego-task-space <number>", "existing Ego task space required by --via ego")
+  .option("--ego-page <label>", "existing Ego page label (default p1)")
+  .option("--level-no <value>", "select an Ego level when multiple contexts match")
+  .option("--unit-no <value>", "select an Ego identity unit when multiple contexts match")
   .option("--json", "print stable JSON", true)
-  .action(async (courseIdValue: string) => {
+  .action(async (courseIdValue: string, options: Record<string, string>) => {
     const id = courseId(courseIdValue);
-    const session = await loadSession();
-    const client = await sdk().createCourseClient(session);
+    const source = await courseQuerySession(options);
+    const client = await sdk().createCourseClient(source.session);
     output(await client.get(id), {
       operation: "courses.get",
-      via: "api",
-      verification: {
-        identityAndContext: "school-api-reverified",
-        queryContract: "live-read-only-evidence+controlled-api",
-      },
+      ...queryMeta(source),
     });
   });
 

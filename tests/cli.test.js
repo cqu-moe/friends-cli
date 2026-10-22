@@ -27,7 +27,9 @@ test("CLI help and schema are discoverable from the installed entry point", asyn
   assert.deepEqual(Object.keys(output), ["schemaVersion", "ok", "data", "meta"]);
   assert.equal(output.data.operation, "courses.list");
   assert.equal(output.data.readonly, true);
-  assert.equal(output.data.verifiedWith, "controlled-api; live-read-only-evidence");
+  assert.equal(output.data.verifiedWith, "controlled-local; controlled-ego; live-read-only-evidence");
+  assert.deepEqual(output.data.supportedVia, ["local", "ego"]);
+  assert.equal(output.data.requestMode, "direct-api");
 
   const errors = await run(process.execPath, [
     "dist/cli/main.js",
