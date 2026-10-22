@@ -31,15 +31,16 @@ export interface CourseSummary {
   limitGrade: string[] | null;
   limitSpecialtyTypeOne: string[] | null;
   state: {
-    raw: unknown;
+    raw: string | number | boolean | null;
     known: false;
     flowOverallState: number | null;
     studentApplied: boolean | null;
   };
 }
 
-export interface CourseDetail extends Omit<CourseSummary, "unknownFields"> {
-  roles: Array<{ uuid: unknown; integral: unknown }> | null;
+export interface CourseDetail extends CourseSummary {
+  roles: Array<{ uuid: string | null; roleName: string | null; integral: number | null; classHour: number | null }> | null;
+  questionnaires: { count: number | null; content: "none" | "unverified" };
 }
 
 export interface CoursePage {
@@ -136,7 +137,7 @@ function courseFields(raw: JsonObject) {
     limitGrade: strings(raw.limitGrade),
     limitSpecialtyTypeOne: strings(raw.limitSpecialtyTypeOne),
     state: {
-      raw: raw.curriculumState ?? null,
+      raw: text(raw.curriculumState) ?? number(raw.curriculumState) ?? boolean(raw.curriculumState),
       known: false as const,
       flowOverallState: number(raw.flowOverallState),
       studentApplied: boolean(raw.studentApplied),
@@ -144,16 +145,17 @@ function courseFields(raw: JsonObject) {
   };
 }
 
-function pagination(input: CourseListInput = {}) {
+export function validateCourseListInput(input: CourseListInput = {}) {
+  if (!object(input)) invalid("Expected course query input");
   const page = input.page ?? 1;
   const pageSize = input.pageSize ?? 10;
-  if (!Number.isInteger(page) || page < 1) {
+  if (!Number.isSafeInteger(page) || page < 1) {
     throw new FriendsError({
       code: FriendsErrorCode.InvalidInput,
       message: "page must be a positive integer",
     });
   }
-  if (!Number.isInteger(pageSize) || pageSize < 1) {
+  if (!Number.isSafeInteger(pageSize) || pageSize < 1) {
     throw new FriendsError({
       code: FriendsErrorCode.InvalidInput,
       message: "pageSize must be a positive integer",
@@ -341,7 +343,7 @@ function userTypeFor(userLoginType: string): "STUDENT" | "TEACHER" {
 }
 
 export function courseId(value: string): CourseId {
-  if (value === "" || /[/?#]/.test(value)) {
+  if (typeof value !== "string" || value.trim() === "" || value === "." || value === ".." || /[\\/?#\s]/.test(value)) {
     throw new FriendsError({
       code: FriendsErrorCode.InvalidInput,
       message: "Invalid course ID",
@@ -350,19 +352,41 @@ export function courseId(value: string): CourseId {
   return value as CourseId;
 }
 
+function invalid(message: string): never {
+  throw new FriendsError({ code: FriendsErrorCode.InvalidInput, message });
+}
+
+function validateSession(input: { token: string; userLevel: string }): void {
+  if (!input || typeof input.token !== "string" || !input.token ||
+      typeof input.userLevel !== "string" || !input.userLevel ||
+      /[\r\n]/.test(input.token + input.userLevel)) invalid("A token and user level are required");
+}
+
+function snapshotSession(input: VerifiedCourseSession): VerifiedCourseSession {
+  validateSession(input);
+  if (typeof input.account?.userNo !== "string" || !input.account.userNo ||
+      typeof input.context?.unit?.unitNo !== "string" || !input.context.unit.unitNo ||
+      input.context.levelNo !== input.userLevel) invalid("Account, role and identity unit must match");
+  return {token:input.token, userLevel:input.userLevel, account:{userNo:input.account.userNo},
+    context:{levelNo:input.context.levelNo, unit:{unitNo:input.context.unit.unitNo}}};
+}
+
 export function createFriendsSdk(options: {
   baseUrl?: string;
   fetch?: typeof fetch;
   timeoutMs?: number;
-}) {
+} = {}) {
   const baseUrl = (options.baseUrl ?? "https://friends.cqu.edu.cn/gateway").replace(/\/$/, "");
   const fetchImpl = options.fetch ?? fetch;
   const timeoutMs = options.timeoutMs ?? 60_000;
+  const bindings = new Map<string, string>();
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) invalid("timeoutMs must be a positive integer");
 
   async function inspectLocalSession(input: {
     token: string;
     userLevel: string;
   }): Promise<LocalSessionInspection> {
+    validateSession(input);
     const init = {
       method: "POST",
       headers: headers(input.token, input.userLevel, mainService),
@@ -375,8 +399,19 @@ export function createFriendsSdk(options: {
     return parseInspection(levels.data, info.data);
   }
 
-  return {
+  async function verifyLocalSession(input: VerifiedCourseSession): Promise<LocalSessionInspection> {
+    const session = snapshotSession(input);
+    const inspection = await inspectLocalSession(session);
+    if (inspection.account.userNo !== session.account.userNo || !inspection.contexts.some(context =>
+      context.levelNo === session.context.levelNo && context.unit.unitNo === session.context.unit.unitNo)) {
+      throw new FriendsError({code:FriendsErrorCode.AuthRequired, message:"The stored account or context no longer matches; log in again"});
+    }
+    return inspection;
+  }
+
+  const sdk = {
     inspectLocalSession,
+    verifyLocalSession,
     async activateLocalContext(input: {
       token: string;
       userLevel: string;
@@ -394,6 +429,13 @@ export function createFriendsSdk(options: {
         });
       }
       const context = chooseContext(inspection.contexts, input.selector);
+      const binding = JSON.stringify([inspection.account.userNo, context.levelNo, context.unit.unitNo]);
+      if (bindings.has(input.token) && bindings.get(input.token) !== binding) {
+        throw new FriendsError({code:FriendsErrorCode.UpstreamBusiness, message:"This school token is already bound to another context; use a separate login session"});
+      }
+      const userType = userTypeFor(inspection.userLoginType);
+      // One school token may hold server-side identity state; never bind it to competing clients.
+      bindings.set(input.token, binding);
       const envelope = await callApi(
         baseUrl,
         "/ek-agg-mob/user/enterHall",
@@ -403,7 +445,7 @@ export function createFriendsSdk(options: {
           body: JSON.stringify({
             departNo: context.unit.unitNo,
             userStateLevel: context.levelNo,
-            userType: userTypeFor(inspection.userLoginType),
+            userType,
           }),
         },
         fetchImpl,
@@ -429,34 +471,14 @@ export function createFriendsSdk(options: {
       return { account: inspection.account, context };
     },
     async createCourseClient(input: VerifiedCourseSession) {
-      if (
-        input.token === "" ||
-        input.userLevel === "" ||
-        input.account.userNo === "" ||
-        input.context.levelNo === "" ||
-        input.context.unit.unitNo === ""
-      ) {
-        throw new FriendsError({
-          code: FriendsErrorCode.InvalidInput,
-          message: "A school-verified account and context are required",
-        });
-      }
-      const inspection = await inspectLocalSession(input);
-      const contextStillAvailable = inspection.contexts.some(
-        (context) =>
-          context.levelNo === input.context.levelNo &&
-          context.unit.unitNo === input.context.unit.unitNo,
-      );
-      if (inspection.account.userNo !== input.account.userNo || !contextStillAvailable) {
-        throw new FriendsError({
-          code: FriendsErrorCode.AuthRequired,
-          message: "The course session account or context no longer matches",
-        });
-      }
-      const courseHeaders = headers(input.token, input.userLevel, curriculumService);
+      const session = snapshotSession(input);
+      await sdk.activateLocalContext({token:session.token, userLevel:session.userLevel,
+        expectedAccount:session.account.userNo,
+        selector:{levelNo:session.context.levelNo, unitNo:session.context.unit.unitNo}});
+      const courseHeaders = headers(session.token, session.userLevel, curriculumService);
       return {
         async list(input: CourseListInput = {}): Promise<CoursePage> {
-          const query = pagination(input);
+          const query = validateCourseListInput(input);
           const envelope = await callApi(
             baseUrl,
             "/zovecenter-saip-ek-app-curriculum/mob/apply/student-apply-page-list",
@@ -529,12 +551,16 @@ export function createFriendsSdk(options: {
           const roles = Array.isArray(raw.roles)
             ? raw.roles.map((role) => {
                 const value = object(role) ?? {};
-                return { uuid: value.uuid, integral: value.integral };
+                return { uuid: text(value.uuid), roleName: text(value.roleName), integral: number(value.integral), classHour: number(value.classHour) };
               })
             : null;
-          return { ...courseFields(raw), roles };
+          return { ...courseFields(raw), roles, questionnaires: {
+            count: Array.isArray(raw.questionnaires) ? raw.questionnaires.length : null,
+            content: Array.isArray(raw.questionnaires) && raw.questionnaires.length === 0 ? "none" : "unverified",
+          }};
         },
       };
     },
   };
+  return sdk;
 }

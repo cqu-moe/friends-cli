@@ -1,9 +1,8 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { chmod, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
 import { FriendsError, FriendsErrorCode } from "./errors.js";
 
 export type SessionStorageType = "keyring" | "file";
@@ -57,8 +56,14 @@ async function runEgo(options: {
 }): Promise<BrowserOutput> {
   const child = spawn(options.command, ["nodejs"], { stdio: ["pipe", "pipe", "pipe"] });
   let stdout = "";
-  child.stdout.on("data", (chunk: Buffer) => (stdout += chunk));
-  child.stderr.on("data", () => {});
+  let stderr = "";
+  const collect = (stream: "stdout" | "stderr", chunk: Buffer) => {
+    if (stream === "stdout") stdout += chunk.toString(); else stderr += chunk.toString();
+    if (stdout.length + stderr.length > 1024 * 1024) child.kill("SIGTERM");
+  };
+  child.stdout.on("data", (chunk: Buffer) => collect("stdout", chunk));
+  child.stderr.on("data", (chunk: Buffer) => collect("stderr", chunk));
+  child.stdin.on("error", () => child.kill("SIGTERM"));
   const timer = setTimeout(() => child.kill("SIGTERM"), options.timeoutMs);
   const closed = new Promise<number>((resolveChild, reject) => {
     child.once("error", reject);
@@ -77,7 +82,9 @@ async function runEgo(options: {
   if (exitCode !== 0) {
     throw safeError("The Ego friends login bridge failed");
   }
-  const lastLine = stdout.split("\n").map((line) => line.trim()).filter(Boolean).at(-1);
+  const marker = "FRIENDS_CLI_EGO_SESSION:";
+  const lines = `${stdout}\n${stderr}`.split("\n").filter(line => line.startsWith(marker));
+  const lastLine = lines.length === 1 ? lines[0].slice(marker.length) : undefined;
   try {
     const parsed = lastLine === undefined ? null : JSON.parse(lastLine) as Record<string, unknown>;
     const token = parseToken(parsed?.token);
@@ -100,7 +107,11 @@ export async function readEgoSession(options: {
   timeoutMs?: number;
   command?: string;
 } = {}): Promise<BrowserSession> {
+  if (options.taskSpaceId !== undefined && (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1)) {
+    throw safeError("Invalid Ego task space", FriendsErrorCode.InvalidInput);
+  }
   const page = options.page ?? "p1";
+  if (!/^p[1-9][0-9]*$/.test(page)) throw safeError("Invalid Ego page label", FriendsErrorCode.InvalidInput);
   const userWaitMs = options.timeoutMs ?? 300_000;
   const taskExpression = options.taskSpaceId === undefined
     ? 'taskSpace("friends-cli local login")'
@@ -116,16 +127,18 @@ await page.waitForLoadState("load");
 async function sessionReady() {
   return page.waitForFunction(() => location.origin === "https://friends.cqu.edu.cn" &&
     (() => {
+      try {
       const frame = document.querySelector("iframe");
       const frameWindow = frame?.contentWindow;
       const frameDocument = frameWindow?.document;
       if (!frameWindow || !frameDocument || frameWindow.origin !== location.origin) return false;
       const frameUrl = new URL(frameWindow.location.href);
-      if (frameUrl.pathname === "/mobile/sso" || frameUrl.searchParams.has("ticket")) return false;
+      if (!frameUrl.pathname.startsWith("/mobile/") || /login|sso|roles/i.test(frameUrl.pathname) || frameUrl.searchParams.has("ticket") || frameDocument.readyState !== "complete") return false;
       const local = localStorage;
       const frameLocal = frameWindow.localStorage;
       return ["token_str", "userLevel_str", "userInfo_obj", "account_str", "loginModel_str"]
         .every((key) => Boolean(local.getItem(key)) && local.getItem(key) === frameLocal.getItem(key));
+      } catch { return false; }
     })(), undefined, { timeout: 15000 });
 }
 try {
@@ -140,7 +153,7 @@ const raw = await page.evaluate(() => ({
   userLevel: localStorage.getItem("userLevel_str")
 }));
 ${finishExpression}
-console.log(JSON.stringify(raw));
+console.log("FRIENDS_CLI_EGO_SESSION:" + JSON.stringify(raw));
 `;
   return runEgo({
     script,
@@ -157,26 +170,37 @@ export function sessionPath(): string {
   return join(storageRoot(), "session.json");
 }
 
-function assertOutsideRepository(path: string): void {
-  const packageRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
-  const relation = relative(packageRoot, path);
-  if (relation === "" || (!relation.startsWith("..") && !relation.startsWith("/"))) {
-    throw safeError("The friends session path must be outside the repository", FriendsErrorCode.InvalidInput);
+async function assertOutsideRepository(path: string): Promise<void> {
+  let existing = path;
+  const missing: string[] = [];
+  while (!(await lstat(existing).catch(() => null))) {
+    missing.unshift(existing.slice(dirname(existing).length + 1));
+    existing = dirname(existing);
+  }
+  let directory = resolve(await realpath(existing), ...missing);
+  while (true) {
+    if (await lstat(join(directory, ".git")).catch(() => null)) {
+      throw safeError("The friends session path must be outside a Git repository", FriendsErrorCode.InvalidInput);
+    }
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
   }
 }
 
 async function secureDirectory(path: string): Promise<void> {
-  await mkdir(path, { recursive: true, mode: 0o700 });
-  const stat = await lstat(path);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw safeError("The friends session directory is unsafe", FriendsErrorCode.InvalidInput);
+  if (process.platform === "win32") throw safeError("Local session storage requires POSIX permissions in this version", FriendsErrorCode.InvalidInput);
+  await assertOutsideRepository(path);
+  const existing = await lstat(path).catch(() => null);
+  if (existing && (!existing.isDirectory() || existing.isSymbolicLink() || (existing.mode & 0o777) !== 0o700)) {
+    throw safeError("Use a dedicated session directory with mode 0700", FriendsErrorCode.InvalidInput);
   }
-  await chmod(path, 0o700);
+  if (!existing) await mkdir(path, { recursive: true, mode: 0o700 });
 }
 
 async function writeMetadata(session: SessionMetadata): Promise<string> {
   const root = storageRoot();
-  assertOutsideRepository(root);
+  await assertOutsideRepository(root);
   await secureDirectory(root);
   const path = join(root, "session.json");
   const existing = await lstat(path).catch(() => null);
@@ -184,16 +208,18 @@ async function writeMetadata(session: SessionMetadata): Promise<string> {
     throw safeError("The friends session file is unsafe", FriendsErrorCode.InvalidInput);
   }
   const temporary = join(root, `.session-${randomUUID()}.json`);
-  await writeFile(temporary, `${JSON.stringify(session)}\n`, { mode: 0o600 });
-  await chmod(temporary, 0o600);
-  await rename(temporary, path);
+  try {
+    await writeFile(temporary, `${JSON.stringify(session)}\n`, { mode: 0o600, flag:"wx" });
+    await chmod(temporary, 0o600);
+    await rename(temporary, path);
+  } finally { await rm(temporary, {force:true}); }
   return path;
 }
 
 async function keyringToken(action: "get" | "set", token?: string): Promise<string | null> {
   try {
     const { Entry } = await import("@napi-rs/keyring");
-    const entry = new Entry("friends-cli", "local-session", {
+    const entry = new Entry("friends-cli", `local-session:${createHash("sha256").update(await realpath(storageRoot())).digest("hex")}`, {
       linux: { store: "secret-service" },
     });
     if (action === "set") {
@@ -211,6 +237,11 @@ export async function saveSession(
   session: StoredSession,
   storage: SessionStorageType = "keyring",
 ): Promise<string> {
+  if (storage !== "keyring" && storage !== "file") throw safeError("Invalid storage backend", FriendsErrorCode.InvalidInput);
+  validateMetadata({...session, storage:"file"});
+  await secureDirectory(storageRoot());
+  const metadataStat = await lstat(sessionPath()).catch(() => null);
+  if (metadataStat && (!metadataStat.isFile() || metadataStat.isSymbolicLink())) throw safeError("Unsafe session metadata", FriendsErrorCode.InvalidInput);
   if (storage === "keyring") {
     await keyringToken("set", session.token);
     return writeMetadata({ ...session, storage, token: "" });
@@ -219,6 +250,9 @@ export async function saveSession(
 }
 
 function validateMetadata(value: unknown): SessionMetadata {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw safeError("The local friends session file is invalid", FriendsErrorCode.NetworkProtocol);
+  }
   const session = value as StoredSession;
   if (
     session.schemaVersion !== 1 ||
@@ -226,11 +260,12 @@ function validateMetadata(value: unknown): SessionMetadata {
     (session.storage !== "keyring" && session.storage !== "file") ||
     typeof session.userLevel !== "string" ||
     session.userLevel === "" ||
-    typeof session.account?.userNo !== "string" ||
+    session.userLevel !== session.context?.levelNo ||
+    typeof session.account?.userNo !== "string" || session.account.userNo === "" ||
     typeof session.account?.userName !== "string" ||
     typeof session.context?.levelNo !== "string" ||
     typeof session.context?.levelName !== "string" ||
-    typeof session.context?.unit?.unitNo !== "string" ||
+    typeof session.context?.unit?.unitNo !== "string" || session.context.unit.unitNo === "" ||
     typeof session.context?.unit?.unitName !== "string" ||
     typeof session.context?.unit?.unitType !== "number"
   ) {
@@ -247,7 +282,7 @@ function validateMetadata(value: unknown): SessionMetadata {
 
 export async function loadSession(): Promise<StoredSession> {
   const root = storageRoot();
-  assertOutsideRepository(root);
+  await assertOutsideRepository(root);
   const rootStat = await lstat(root).catch(() => null);
   if (
     rootStat === null || !rootStat.isDirectory() || rootStat.isSymbolicLink() ||

@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import {
   courseId,
+  validateCourseListInput,
   createFriendsSdk,
   exitCodeFor,
   FriendsError,
@@ -17,13 +18,18 @@ import {
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
+  errors: {
+    operation: "errors", readonly:true, permission:"none", phases:["inspect"], supportedVia:["local"],
+    exitCodes: {0:"success", 2:"INVALID_INPUT", 3:"AUTH_REQUIRED", 4:"PERMISSION_DENIED", 5:"BUSINESS_REJECTED", 6:"NETWORK_PROTOCOL_ERROR", 7:"reserved: write outcome unknown; writes not implemented"},
+  },
   "auth.login": {
     operation: "auth.login",
+    permission: "school login and an available identity", phases: ["login"],
     input: {
       method: { type: "local", required: true },
       egoTaskSpace: { type: "integer", default: "managed friends-cli space; explicit integer reuses an existing space" },
       egoPage: { type: "string", default: "p1" },
-      storage: { type: "keyring or explicit file", default: "keyring" },
+      storage: { type: "keyring or explicit file", default: "keyring", fileSupport: "POSIX only: dedicated 0700 directory and 0600 file" },
       levelNo: { type: "string", required: "only when multiple contexts match" },
       unitNo: { type: "string", required: "only when multiple contexts match" },
     },
@@ -35,6 +41,7 @@ const schemas = {
   },
   "auth.status": {
     operation: "auth.status",
+    permission: "valid local school session", phases: ["inspect"],
     input: {},
     output: "redacted account, context, and storage state",
     readonly: true,
@@ -43,6 +50,7 @@ const schemas = {
   },
   "courses.list": {
     operation: "courses.list",
+    permission: "school-verified identity; upstream enforces course access", phases: ["query"],
     input: {
       page: { type: "integer", minimum: 1, default: 1 },
       pageSize: { type: "integer", minimum: 1, default: 10 },
@@ -59,6 +67,7 @@ const schemas = {
   },
   "courses.get": {
     operation: "courses.get",
+    permission: "school-verified identity; upstream enforces course access", phases: ["query"],
     input: { courseId: { type: "course UUID", required: true } },
     output: "necessary public course detail projection",
     readonly: true,
@@ -95,7 +104,7 @@ program
   .argument("<operation>", "operation name")
   .option("--json", "print stable JSON", true)
   .action((operation: string) => {
-    const schema = Reflect.get(schemas, operation);
+    const schema = Object.hasOwn(schemas, operation) ? Reflect.get(schemas, operation) : undefined;
     if (!schema) {
       throw new FriendsError({
         code: FriendsErrorCode.InvalidInput,
@@ -186,21 +195,7 @@ auth
   .option("--json", "print stable JSON", true)
   .action(async () => {
     const session = await loadSession();
-    const inspection = await sdk().inspectLocalSession(session);
-    const contextStillAvailable = inspection.contexts.some(
-      (context) =>
-        context.levelNo === session.context.levelNo &&
-        context.unit.unitNo === session.context.unit.unitNo,
-    );
-    if (
-      inspection.account.userNo !== session.account.userNo ||
-      !contextStillAvailable
-    ) {
-      throw new FriendsError({
-        code: FriendsErrorCode.AuthRequired,
-        message: "The stored friends account or context is no longer valid",
-      });
-    }
+    const inspection = await sdk().verifyLocalSession(session);
     output(
       {
         loginMethod: session.loginMethod,
@@ -226,13 +221,10 @@ courses
   .option("--keyword <value>", "course name or organizer keyword")
   .option("--json", "print stable JSON", true)
   .action(async (options: Record<string, string>) => {
+    const query = validateCourseListInput({page:Number(options.page), pageSize:Number(options.pageSize), keyword:options.keyword});
     const session = await loadSession();
     const client = await sdk().createCourseClient(session);
-    const data = await client.list({
-      page: Number(options.page),
-      pageSize: Number(options.pageSize),
-      keyword: options.keyword,
-    });
+    const data = await client.list(query);
     output(data, {
       operation: "courses.list",
       via: "api",
@@ -249,9 +241,10 @@ courses
   .argument("<courseId>", "course UUID, not an application or certification UUID")
   .option("--json", "print stable JSON", true)
   .action(async (courseIdValue: string) => {
+    const id = courseId(courseIdValue);
     const session = await loadSession();
     const client = await sdk().createCourseClient(session);
-    output(await client.get(courseId(courseIdValue)), {
+    output(await client.get(id), {
       operation: "courses.get",
       via: "api",
       verification: {
@@ -274,8 +267,8 @@ program.parseAsync(process.argv).catch((error: unknown) => {
     error instanceof FriendsError
       ? error
       : new FriendsError({
-          code: FriendsErrorCode.InvalidInput,
-          message: error instanceof Error ? error.message : "Invalid command",
+          code: code?.startsWith("commander.") ? FriendsErrorCode.InvalidInput : FriendsErrorCode.NetworkProtocol,
+          message: code?.startsWith("commander.") && error instanceof Error ? error.message : "The local operation failed",
         });
   const nextAction =
     friendsError.code === FriendsErrorCode.AuthRequired
