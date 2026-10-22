@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import {volunteerActivityReviewSchemas,registerVolunteerActivityReviewCommands} from "./volunteer-activity-reviews.js";
 import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
+import { courseOfferingSchemas, registerCourseOfferingCommands } from "./course-offering.js";
 import { Command } from "commander";
 import {
   courseId,
@@ -34,6 +35,7 @@ const schemas = {
   ...offeringSchemas,
   ...volunteerActivityReviewSchemas,
   ...certificationApiSchemas,
+  ...courseOfferingSchemas,
   ...draftSchemas,
   ...organizationSchemas,
   errors: {
@@ -411,6 +413,10 @@ registerDraftCommands(program, {
 });
 
 registerOrganizationCommands(program, {
+  baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+});
+
+registerCourseOfferingCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
 });
 

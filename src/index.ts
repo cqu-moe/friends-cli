@@ -3,6 +3,10 @@ import {
   createVerifiedOrganizationClient,
   type OrganizationSession,
 } from "./organizations.js";
+import {
+  createCourseOfferingClient,
+  type CourseOfferingSession,
+} from "./course-offering.js";
 
 export { FriendsError, FriendsErrorCode, exitCodeFor } from "./errors.js";
 export type { WriteRecovery } from "./errors.js";
@@ -27,6 +31,7 @@ export type {
   SavedOrganizationProfile,
 } from "./organizations.js";
 export * from "./certification-api.js";
+export * from "./course-offering.js";
 
 export * from "./volunteer-offering.js";
 export * from "./volunteer-offering-api.js";
@@ -616,6 +621,16 @@ export function createFriendsSdk(options: {
           });
         },
       });
+    },
+    async createCourseOfferingClient(input: CourseOfferingSession) {
+      const session = snapshotSession(input);
+      await sdk.activateLocalContext({
+        token: session.token,
+        userLevel: session.userLevel,
+        expectedAccount: session.account.userNo,
+        selector: { levelNo: session.context.levelNo, unitNo: session.context.unit.unitNo },
+      });
+      return createCourseOfferingClient({ baseUrl, session, fetch: fetchImpl, timeoutMs });
     },
   };
   return sdk;
