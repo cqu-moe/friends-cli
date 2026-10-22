@@ -255,6 +255,21 @@ friends volunteer activity-reviews decide <申请UUID> --type offering --decisio
 
 `review.json` 含 `message`、`time`（YYYY-MM-DD）；开办审批还需 `isSafeEducation: 0|1`，打回多个节点时需 `callbackActivityId`。API 实际决定须显式 `--yes`；Ego 仅准备并交接，用户亲自点最终确定。响应不确定返回 exit 7，不会自动重试。见 [#11 验收记录](docs/verification/2026-10-22-volunteer-activity-reviews.md)。
 
+### 组织活动参与
+
+`createOrganizationParticipationClient` 提供 `list/get/prepare/execute`；Node 导出 `prepareOrganizationParticipationInEgo`。活动与报名记录 ID 独立，开放窗口/个人状态从当前学校会话读取。
+
+```sh
+friends organization-participation list --keyword 志愿 --via api
+friends organization-participation list --mine --via ego --ego-task-space 16 --ego-page p3
+friends organization-participation show <activity-id> --via api
+friends organization-participation register <activity-id> --via api --input answers.json --dry-run
+friends organization-participation register <activity-id> --via api --input answers.json --yes
+friends organization-participation exit <activity-id> --via api --yes
+friends organization-participation prepare <activity-id> --action register --via ego --ego-task-space 16 --ego-page p3 --input answers.json
+```
+
+`answers.json` 为问卷 ID 到字符串/字符串数组的映射；附件答案为已存在且可读取的学校资源组 ID。Ego 填写文本、数字和选择项，保留人工值；日期和附件需人工完成，最终提交始终由用户本人操作。`show` 与 `list --mine` 可回查个人记录；未知结果不自动重试。
 
 ## 组织活动开办与报名审批（#20）
 
