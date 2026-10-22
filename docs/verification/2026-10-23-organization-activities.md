@@ -34,10 +34,12 @@ CLI 覆盖所有命令 help/schema、文件与 stdin、版本化单 JSON stdout�
 
 主线程确认旧 `node-list-no-state` 请求 HTTP 200/code="0"，但 data 是长度 3 的数组；只记录形状，不保存真实节点或个人信息。重新沿源码核对：detail.bb008e63.js 导入 `{A as D}`，common.b21a4484.js 的导出为 `O as A`，O 实际 POST `biz-common/flow/approve-list`。前端从该接口 data 读取 nodeList/evaluationRecords；此前实现与 fixture 都把错误端点伪装成了这个对象。
 
-修复将 status 对齐前端 approve-list，不把无状态节点数组伪装成审批历史、不以空数组掩盖历史缺失。节点与记录中的未知状态保留；缺失或非数组字段为 null，学校明确返回空数组时保留 []。SDK 和真实 CLI 的回归测试在旧代码准确复现同一 NETWORK_PROTOCOL_ERROR（CLI exit 6），再通过修复验证 API/Ego 查询的版本化输出与缺失历史。实际学校修复后复测由主线程执行。 本次定向测试 18/18，全量 npm test 224/224 通过（0 failed/skipped，含构建）。
+修复将 status 对齐前端 approve-list，不把无状态节点数组伪装成审批历史、不以空数组掩盖历史缺失。节点与记录中的未知状态保留；缺失或非数组字段为 null，学校明确返回空数组时保留 []。SDK 和真实 CLI 的回归测试在旧代码准确复现同一 NETWORK_PROTOCOL_ERROR（CLI exit 6），再通过修复验证 API/Ego 查询的版本化输出与缺失历史。实际学校修复后复测由主线程执行。本次定向测试 18/18，全量 npm test 224/224 通过（0 failed/skipped，含构建）。
+
+主线程后续通过现有 Ego 查询入口实测：修正后的 status 成功，nodeList 为 3 项、evaluationRecords 为 2 项。这里只记录数量与只读查询结论，不保存真实节点、审批人员或记录内容；它不代表开办写入或人工最终提交验收。
 
 ## 尚未验收与风险
 
-本次没有真实 Ego、学校登录态只读、生产材料上传、生产 API 开办、用户最终提交或生产回查。受控测试不替代这些层次。实际学校服务对材料、权限及完整表单仍有最终决定权。
+本工作线程没有执行真实 Ego、学校登录态只读、生产材料上传、生产 API 开办、用户最终提交或生产回查；主线程的 status 只读复测结果单独记录于上一节。受控测试不替代这些层次。实际学校服务对材料、权限及完整表单仍有最终决定权。
 
 图片 fixture 仅为受控字节，未声称生产图片解码/压缩通过；资源核对仅验证学校返回的资源 ID/文件名，不能证明字节散列。Ego 只交付第一阶段文本准备，组织/日期/材料、下一步保存和第二步设置必须人工完成。
