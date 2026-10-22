@@ -620,3 +620,5 @@ export function createFriendsSdk(options: {
   };
   return sdk;
 }
+export {createVolunteerActivityReviewClient} from './volunteer-activity-reviews.js';
+export type {VolunteerActivityReviewType, VolunteerActivityReviewInput, PreparedVolunteerActivityReview, VolunteerActivityReviewClientOptions} from './volunteer-activity-reviews.js';
