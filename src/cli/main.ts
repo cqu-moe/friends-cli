@@ -16,9 +16,11 @@ import {
   sessionPath,
   SessionStorageType,
 } from "../node.js";
+import { draftSchemas, registerDraftCommands } from "./drafts.js";
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
+  ...draftSchemas,
   errors: {
     operation: "errors", readonly:true, permission:"none", phases:["inspect"], supportedVia:["local"],
     exitCodes: {0:"success", 2:"INVALID_INPUT", 3:"AUTH_REQUIRED", 4:"PERMISSION_DENIED", 5:"BUSINESS_REJECTED", 6:"NETWORK_PROTOCOL_ERROR", 7:"UNKNOWN_OUTCOME"},
@@ -163,7 +165,7 @@ async function courseQuerySession(options: Record<string, string | undefined>) {
 
 const program = new Command()
   .name("friends")
-  .description("Query CQU Second Classroom courses with a verified local session")
+  .description("Query courses and manage local volunteer certification drafts")
   .version("0.1.0")
   .configureOutput({
     writeOut: (text) => process.stdout.write(text),
@@ -328,6 +330,10 @@ courses
       ...queryMeta(source),
     });
   });
+
+registerDraftCommands(program, {
+  baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+});
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   const code = (error as { code?: string }).code;

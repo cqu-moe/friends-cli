@@ -6,6 +6,8 @@ import { dirname, join, resolve } from "node:path";
 import { createFriendsSdk, type LoginContext } from "./index.js";
 import { FriendsError, FriendsErrorCode } from "./errors.js";
 
+export * from "./draft-store.js";
+
 export type SessionStorageType = "keyring" | "file";
 
 export interface BrowserSession {
