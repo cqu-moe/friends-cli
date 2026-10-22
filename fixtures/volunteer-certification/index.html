@@ -1,5 +1,5 @@
 <!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>志愿认证受控页面</title>
-<style>body{font:16px system-ui;margin:25px}.van-cell{display:flex;gap:20px;margin:10px}.name-list .list-group{padding:20px;border:1px solid #ccc}.van-popup,.set-form{display:none;background:white;padding:20px;border:2px solid #ccc;position:fixed;inset:30px;z-index:2}.van-popup--right{z-index:3}.van-popup--bottom{z-index:4}.open{display:block}.van-overlay{position:fixed;inset:0;background:#0003;z-index:1}button{padding:10px;margin:6px}input{padding:10px}.van-checkbox{cursor:pointer;display:flex;align-items:center;gap:10px;min-height:32px}.van-checkbox::before{content:"";display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;flex:0 0 24px;width:24px;height:24px;border:2px solid #737373;border-radius:4px;background:white;color:white;font-weight:700}.van-checkbox[aria-checked="true"]::before{content:"✓";background:#1769db;border-color:#1769db}.van-checkbox:focus-visible{outline:3px solid #1769db;outline-offset:4px}.van-checkbox[aria-checked="true"]::after{content:"已选中";font-size:14px;color:#1769db}.van-checkbox[aria-checked="false"]::after{content:"未选中";font-size:14px;color:#555}.hours{padding:10px}.field-select input{pointer-events:none}</style>
+<style>body{font:16px system-ui;margin:25px}.van-cell{display:flex;gap:20px;margin:10px}.name-list .list-group{padding:20px;border:1px solid #ccc}.van-popup,.set-form{display:none;background:white;padding:20px;border:2px solid #ccc;position:fixed;inset:30px;z-index:2}.van-popup--right{z-index:3}.van-popup--bottom{z-index:4}.open{display:block}.van-overlay{position:fixed;inset:0;background:#0003;z-index:1}button{padding:10px;margin:6px}input{padding:10px}.van-checkbox{cursor:pointer;display:flex;align-items:center;gap:10px;min-height:32px}.van-checkbox::before{content:"";display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;flex:0 0 24px;width:24px;height:24px;border:2px solid #737373;border-radius:4px;background:white;color:white;font-weight:700}.van-checkbox[aria-checked="true"]::before{content:"✓";background:#1769db;border-color:#1769db}.van-checkbox:focus-visible{outline:3px solid #1769db;outline-offset:4px}.van-checkbox[aria-checked="true"]::after{content:"已选中";font-size:14px;color:#1769db}.van-checkbox[aria-checked="false"]::after{content:"未选中";font-size:14px;color:#555}.hours{padding:10px}</style>
 <div class="cmine">
  <div class="van-cell"><div class="van-cell__title">活动名称</div><div class="van-cell__value">迎新志愿服务</div></div>
  <div class="van-cell"><div class="van-cell__title">组织单位</div><div class="van-cell__value">示例青协</div></div>
@@ -11,7 +11,7 @@
 <div class="set-form" id="add-form">
  <div class="van-cell"><div class="van-cell__title">学号</div><div class="van-cell__value" id="student-number"></div></div>
  <div class="van-cell"><div class="van-cell__title">姓名</div><div class="van-cell__value" id="student-name"></div></div>
- <div class="field-select"><input name="postId" placeholder="请选择"></div>
+ <input name="postId" placeholder="请选择" readonly>
  <input name="requiredCourseCount" placeholder="请输入">
  <div class="footer"><button>保存</button></div>
 </div>
@@ -23,7 +23,7 @@
 <div class="van-popup van-popup--center" id="edit">
  <div class="van-cell"><div class="van-cell__title">学号</div><div class="van-cell__value" id="edit-no"></div></div>
  <div class="van-cell"><div class="van-cell__title">姓名</div><div class="van-cell__value" id="edit-name"></div></div>
- <div class="field-select"><input name="date"></div><input name="requiredCourseCount">
+ <input name="date" readonly><input name="requiredCourseCount">
  <div class="save"><button>保存</button></div>
 </div>
 <div class="van-popup van-popup--bottom" id="picker"><div class="van-picker"><div class="van-picker-column__item" role="button"><div class="van-ellipsis">引导岗</div></div><button class="van-picker__confirm">确认</button></div></div>
@@ -37,7 +37,7 @@ $('#add').onclick=()=>{$('#add-form').classList.add('open');$('#search').classLi
 $('.van-search__action').onclick=()=>{const no=$('#search input').value;if(no!=='20210002')return;pending={no,name:'示例志愿者',selected:true,post:'',hours:null};$('.page-list').innerHTML='<div class="stu-info"><div role="radio" aria-checked="false">选择</div><span class="stu-name">示例志愿者 / 示例学院 2021级 本科</span></div>';$('.stu-info [role=radio]').onclick=e=>e.target.setAttribute('aria-checked','true');};
 $('.search-footer .confirm').onclick=()=>{if(!pending||$('.stu-info [role=radio]').getAttribute('aria-checked')!=='true')return;$('#student-number').textContent=pending.no;$('#student-name').textContent=pending.name;$('#search').classList.remove('open');};
 $('.search-footer .back').onclick=()=>{$('#search').classList.remove('open');$('#add-form').classList.remove('open');};
-for(const field of all('.field-select'))field.onclick=()=>{postInput=field.querySelector('input');$('#picker').classList.add('open');};
+for(const field of all('input[name=postId],input[name=date]'))field.onclick=()=>{postInput=field;$('#picker').classList.add('open');};
 $('.van-picker-column__item').onclick=()=>{};
 $('.van-picker__confirm').onclick=()=>{postInput.value='引导岗';$('#picker').classList.remove('open');};
 $('#add-form .footer button').onclick=()=>{if(!pending||!$('#add-form input[name=postId]').value)return;pending.post=$('#add-form input[name=postId]').value;pending.hours=Number($('#add-form input[name=requiredCourseCount]').value);rows.push(pending);pending=null;$('#add-form').classList.remove('open');render();};

@@ -3,6 +3,7 @@ import {
   createVerifiedOrganizationClient,
   type OrganizationSession,
 } from "./organizations.js";
+import { createVolunteerClient } from "./volunteer.js";
 
 export { FriendsError, FriendsErrorCode, exitCodeFor } from "./errors.js";
 export type { WriteRecovery } from "./errors.js";
@@ -28,6 +29,40 @@ export type {
 } from "./organizations.js";
 export * from "./certification-api.js";
 export * from "./volunteer-reviews.js";
+
+export {
+  validateVolunteerRegisterInput,
+  validateVolunteerListInput,
+  volunteerActivityId,
+  volunteerRegistrationId,
+} from "./volunteer.js";
+export type {
+  VolunteerActivityDetail,
+  VolunteerActivityId,
+  VolunteerActivityPage,
+  VolunteerActivityPost,
+  VolunteerActivitySummary,
+  VolunteerClient,
+  VolunteerIdentity,
+  VolunteerListInput,
+  VolunteerManageableActivity,
+  VolunteerQuestionnaire,
+  VolunteerQuestionnaireAnswer,
+  VolunteerQuestionnaireOption,
+  VolunteerRegisterInput,
+  VolunteerRegisterWriteInput,
+  VolunteerRegisterPayload,
+  VolunteerRegistration,
+  VolunteerRegistrationId,
+  VolunteerRegistrationPage,
+  VolunteerRegistrationRecord,
+  VolunteerRegistrationRequirements,
+  VolunteerWithdrawalPreparation,
+  VolunteerWriteReceipt,
+  VolunteerWriteReadback,
+  VolunteerWriteResult,
+  VolunteerRegistrationPreparation,
+} from "./volunteer.js";
 
 export * from "./volunteer-offering.js";
 export * from "./volunteer-offering-api.js";
@@ -616,6 +651,14 @@ export function createFriendsSdk(options: {
             },
           });
         },
+      });
+    },
+    async createVolunteerClient(input: VerifiedCourseSession) {
+      return createVolunteerClient({
+        session: input,
+        baseUrl,
+        fetch: fetchImpl,
+        timeoutMs,
       });
     },
   };

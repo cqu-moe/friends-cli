@@ -45,6 +45,13 @@ friends volunteer-certification-reviews prepare <reviewUuid> \
 friends drafts activities --via ego --ego-task-space 16 --ego-page p1 --json
 friends drafts create --activity-id <activityUuid> --json
 friends drafts edit <draftId> --expected-revision 0 --input patch.json --json
+friends volunteers identity --json
+friends volunteers activities list --kind participable --page 1 --page-size 10 --keyword 示例 --json
+friends volunteers activities list --kind manageable --json
+friends volunteers activities requirements <activityUuid> --json
+friends volunteers registrations list --page 1 --page-size 10 --json
+friends volunteers register <activityUuid> --input register.json --confirm --json
+friends volunteers withdraw <activityUuid> <registrationUuid> --confirm --json
 friends offerings prepare --input offering.json --via api --json
 friends offerings materials --input offering.json --via api --dry-run --json
 friends offerings materials --input offering.json --via api --confirm --json
@@ -118,6 +125,7 @@ const members = await organizationClient.listMembers(organizationId(organization
 - 本仓库测试使用虚构 HTTP/Ego 场景。学校登录与只读查询单独记录于 [验收记录](docs/verification/2026-10-22-local-courses.md)，CI 通过不代表生产写入能力。
 - 查询类操作可使用 API；后续 Ego 写操作按阶段执行，需要审阅的表单只录入并交接，由用户亲自最终提交。
 - Ego 查询的受控 SDK/CLI 验收见 [Ego 课程查询验收](docs/verification/2026-10-22-ego-course-query.md)；真实已安装 Ego 与学校登录态实测由集中操作另行记录，不能由本仓库受控测试替代。
+- 志愿身份/活动/个人报名的受控 SDK、CLI 与 strict-Ego DOM 验收见 [志愿操作验收](docs/verification/2026-10-22-volunteer-operations.md)；真实 Ego、生产只读和授权写入仍是独立验收层。
 
 志愿草稿可用 `friends drafts edit <id> --expected-revision <n> --input patch.json` 增补尚未报名的人员：
 
@@ -177,6 +185,23 @@ Ego prepare 同样用已核验会话新建 review SDK client 并重新读取学�
 ```
 
 Ego 资料修改只执行可见 prepare：先经现有页面会话核验权限，再检查当前路由；若目标组织编辑页已经打开则不重新导航。命令先取得页面快照，再从快照引用打开“组织简介及Logo”维护弹窗；若简介已有非空人工输入，会保留该值而不覆盖，只在空字段中填入请求的简介，随后把页面交接给用户。Logo 和背景图上传控件保留在页面上由用户人工处理；命令不点击最终保存、不调用 PUT，也不会把 `--yes` 用于 Ego prepare。
+
+## 志愿身份、活动与个人报名
+
+志愿查询和写入使用 #5 已实测的 `zovecenter-saip-ek-app-young-volunteers` 网关服务。活动 UUID、报名记录 UUID、岗位 UUID 是不同领域 ID；CLI 和 SDK 均按对应方法校验，不能用报名 UUID 查活动，也不能把其他活动的岗位提交给当前活动。
+
+`volunteers activities requirements` 会返回活动详情、岗位、学校 `can-apply` 结果和未支持问卷类型。API 写入当前支持 `CHOICE`、`MULTIPLE_CHOICE`、`TEXT`、`NUMBER`、`DATE`；`PICTURE`、`MULTIPLE_PICTURE`、`FILE`、`MULTIPLE_FILE` 会显式拒绝，不会用空附件组伪造成功。Ego 可见准备不自动填写 DATE；必填或已提供 DATE 答案时拒绝自动化准备，可选未答日期留给用户在交接后的可见页面处理。
+
+SDK 写入方法本身要求精确确认值：报名为 `confirmation: "volunteers.register"`，退出为 `confirmation: "volunteers.withdraw"`。CLI 的 `--confirm` 只负责构造对应 SDK 确认；缺少确认、`--dry-run` 或 Ego 路径带 `--confirm` 都不会写入。写入成功返回分离的 `receipt` 与 `readback`；`receipt` 仅表示学校网关确认收到请求，`readback` 是第一页个人报名列表证据，两者都不把审批状态说成通过。
+
+`--via ego` 的查询只复用现有 Ego 页面会话并直接调用 API，不导航当前页面。Ego 写入从 `@cqu-moe/friends-cli/node` 公开入口进入：每次重新核验学校会话、账号和上下文，重新读取活动、岗位、问卷和 `can-apply` 要求，再新开一个专用页面并校验该页面 token、账号、角色、路由和活动 UUID。适配器定位可见表单和嵌套 `.van-ellipsis` picker 文本；已有非空文本、岗位或选择会被保留，不覆盖、不盲切换。填写中断返回不可重试的 `UNKNOWN_OUTCOME`，并保留已发生步骤与专用页面 label。准备完成后 `handOff()`；适配器不隐藏调用提交 API，不点击最终提交/确认，也不自动重试。受控页面验收入口：
+
+```sh
+npm run verify:volunteer-ego -- register
+npm run verify:volunteer-ego -- withdraw
+```
+
+仓库内的 jsdom strict fixture 会执行当前生成的 Ego 脚本并检查可见 DOM 输入；runner 的 HTTP fixture 会统计真实到达 `/write` 或 `/quit` 的请求数，并要求准备阶段为 0。该入口只验收可见控件、会话绑定和受控服务器链路，不代表生产写入。真实 Ego 与学校生产验收另行记录。
 
 ## 捕获人工修改
 

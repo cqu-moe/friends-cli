@@ -2,7 +2,7 @@ import {createServer} from 'node:http';
 import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {tmpdir} from 'node:os';
-export async function setupCertification(t,{humanHours,account='20210001'}={}){
+export async function setupCertification(t,{humanHours,account='20210001',browserAccount='20210001',readonlyHours=false,permission=true}={}){
  const home=await mkdtemp(join(tmpdir(),'friends-ego-cert-'));t.after(()=>rm(home,{recursive:true,force:true}));
  const requests=[];const school={certification:null};
  const server=createServer((req,res)=>{
@@ -13,7 +13,7 @@ export async function setupCertification(t,{humanHours,account='20210001'}={}){
   if(req.url.endsWith('/checkUserAndGetUserLevel'))return reply({loginLevels:[{levelNo:'XS',levelName:'学生',units:[{unitType:2,unitNo:'24080',unitName:'示例学院'}]}],userLoginType:'STUDENT'});
   if(req.url.endsWith('/user/info'))return reply({userNo:account,userName:'示例'});
   if(req.url.endsWith('/enterHall'))return reply({account,name:'示例',userLoginStateLevel:'XS',departmentNo:'24080'});
-  if(req.url.endsWith('/manager-activity-list'))return reply([{uuid:'activity-1',organizationId:'org-1'}]);
+  if(req.url.endsWith('/manager-activity-list'))return reply(permission?[{uuid:'activity-1',organizationId:'org-1'}]:[]);
   if(req.url.endsWith('/school-activity-apply/approve-detail/activity-1'))return reply({uuid:'activity-1',activityName:'迎新志愿服务',organizationName:'示例青协',organizationId:'org-1',positionSetMethod:'SIGN',posts:[{uuid:'post-1',postName:'引导岗',duration:2.5}]});
   if(req.url.endsWith('/apply-list-by-activity/activity-1'))return reply([{uuid:'registration-1',studentNo:'20210001',studentName:'示例学生',postId:'post-1',postName:'引导岗',postDuration:2.5,signDuration:2,isApply:true,isAttestation:false}]);
   if(req.url.includes('/query-student?studentNo=20210002'))return reply({studentNo:'20210002',studentName:'示例志愿者'});
@@ -28,7 +28,9 @@ export async function setupCertification(t,{humanHours,account='20210001'}={}){
  html=html.replace('<script>','<script>localStorage.setItem("token_str","ego-fixture-token");localStorage.setItem("userLevel_str","XS");');
  if(humanHours!==undefined)html=html.replace("hours:2,selected:false",`hours:${humanHours},selected:false`);
  const htmlPath=join(home,'index.html');await writeFile(htmlPath,html);
- const result=join(home,'observed.json'),config=join(home,'ego.json');await writeFile(config,JSON.stringify({html:htmlPath,url,result}));
+ if(readonlyHours)html=html.replaceAll('name="requiredCourseCount"','name="requiredCourseCount" readonly');
+ await writeFile(htmlPath,html);
+ const result=join(home,'observed.json'),config=join(home,'ego.json');await writeFile(config,JSON.stringify({html:htmlPath,url,result,iframe:true,executeSession:true,accountUserNo:browserAccount}));
  const bin=join(home,'bin');await mkdir(bin,{mode:0o700});
  const command=join(bin,'ego-browser');
  await writeFile(command,`#!${process.execPath}\nawait import(${JSON.stringify(new URL('./strict-ego.mjs',import.meta.url).href)});\n`,{mode:0o700});
