@@ -173,7 +173,15 @@ export interface VolunteerWithdrawalPreparation {
 
 export interface VolunteerIdentity {
   memberView: { present: boolean; interpreted: false };
-  membershipApplicationAllowed: boolean;
+  membershipApplicationAllowed: boolean | null;
+  membershipApplication:
+    | { status: "checked"; rejection: null }
+    | { status: "business-rejected"; rejection: {
+      code: typeof FriendsErrorCode.UpstreamBusiness;
+      upstreamCode: string | null;
+      message: string;
+      requestId: string | null;
+    } };
 }
 
 export interface VolunteerClient {
@@ -310,7 +318,7 @@ async function readApi(options: {
   }
   if (response.status === 401) throw new FriendsError({ code: FriendsErrorCode.AuthRequired, message: "Friends session expired" });
   if (response.status === 403) throw new FriendsError({ code: FriendsErrorCode.PermissionDenied, message: "The friends API denied this context" });
-  if (!response.ok) {
+  if (!response.ok && response.status !== 400) {
     throw new FriendsError({ code: FriendsErrorCode.NetworkProtocol, message: `Unexpected friends HTTP status ${response.status}` });
   }
   let payload: unknown;
@@ -322,6 +330,13 @@ async function readApi(options: {
       message: `Unexpected non-JSON friends response (HTTP ${response.status})`,
       cause,
     });
+  }
+  if (response.status === 400) {
+    const envelope = object(payload);
+    if (!envelope || typeof envelope.code !== "string" || !envelope.code.trim() || envelope.code === "0" ||
+        typeof envelope.message !== "string" || !envelope.message.trim()) {
+      protocol("Unexpected friends HTTP status 400");
+    }
   }
   return businessEnvelope(payload, response.status);
 }
@@ -881,13 +896,32 @@ export function createVolunteerClient(options: {
 
   return {
     async getIdentity() {
-      const [memberView, canApply] = await Promise.all([
+      const [memberView, application] = await Promise.all([
         call(`${volunteerRoot}/member/student-view`, { method: "GET", headers: requestHeaders }),
-        call(`${volunteerRoot}/member-apply/can-apply`, { method: "GET", headers: requestHeaders }),
+        call(`${volunteerRoot}/member-apply/can-apply`, { method: "GET", headers: requestHeaders })
+          .then(canApply => {
+            if (typeof canApply.data !== "boolean") protocol("Unexpected volunteer membership application eligibility");
+            return {
+              membershipApplicationAllowed: canApply.data,
+              membershipApplication: {status: "checked" as const, rejection: null},
+            };
+          })
+          .catch((error: unknown) => {
+            if (!(error instanceof FriendsError) || error.code !== FriendsErrorCode.UpstreamBusiness) throw error;
+            return {
+              membershipApplicationAllowed: null,
+              membershipApplication: {status: "business-rejected" as const, rejection: {
+                code: FriendsErrorCode.UpstreamBusiness,
+                upstreamCode: error.upstreamCode ?? null,
+                message: error.message,
+                requestId: error.requestId ?? null,
+              }},
+            };
+          }),
       ]);
       return {
         memberView: { present: object(memberView.data) !== null, interpreted: false as const },
-        membershipApplicationAllowed: canApply.data === true,
+        ...application,
       };
     },
     async listActivities(input: VolunteerListInput = {}) {

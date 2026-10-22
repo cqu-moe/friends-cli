@@ -32,7 +32,16 @@ export const volunteerSchemas = {
   "volunteers.identity": {
     operation: "volunteers.identity",
     permission: "school-verified identity; upstream enforces volunteer access", phases: ["query"],
-    input: viaInput, output: "own volunteer membership evidence without interpreting unverified member fields",
+    input: viaInput,
+    output: {
+      memberView: "successful school membership evidence; unverified fields are not interpreted or exposed",
+      membershipApplicationAllowed: {type: "boolean|null", nullWhen: "school returned a valid business rejection"},
+      membershipApplication: {
+        status: ["checked", "business-rejected"],
+        rejection: "null when checked; otherwise {code: BUSINESS_REJECTED, upstreamCode, message, requestId}",
+      },
+      failures: "401 AUTH_REQUIRED; 403 PERMISSION_DENIED; malformed eligibility or generic 400 NETWORK_PROTOCOL_ERROR",
+    },
     readonly: true, supportedVia: ["api", "ego"], requestMode: "direct-api",
     ...sessionContract, verifiedWith: "public-source; controlled-api; controlled-ego-script",
   },

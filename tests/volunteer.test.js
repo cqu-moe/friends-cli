@@ -375,6 +375,7 @@ test("volunteer SDK completes queries, registration, withdrawal, and separate re
   assert.deepEqual(identityResult, {
     memberView: { present: true, interpreted: false },
     membershipApplicationAllowed: true,
+    membershipApplication: { status: "checked", rejection: null },
   });
   const available = await client.listActivities({ page: 1, pageSize: 2, keyword: "示例" });
   assert.equal(available.items[0].id, "activity-1");
