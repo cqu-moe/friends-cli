@@ -17,13 +17,14 @@ export async function prepareVolunteerActivityReviewPage(page: {
 }) {
     const completed: string[] = [];
     function inspect() {
+        const d = document.querySelector("iframe")?.contentDocument ?? document;
         const visible = (e: Element) => { for (let n: Element | null = e; n; n = n.parentElement)
             if (getComputedStyle(n).display === 'none' || getComputedStyle(n).visibility === 'hidden')
                 return false; return true; };
-        const dialogs = [...document.querySelectorAll('.van-dialog')].filter(visible);
+        const dialogs = [...d.querySelectorAll('.van-dialog')].filter(visible);
         const dialog = dialogs[0];
         const textarea = dialog?.querySelector('textarea');
-        return { hasInputs: [...document.querySelectorAll('input,textarea')].some(e => visible(e) && !!(e as HTMLInputElement).value), title: dialog?.querySelector('.van-dialog__header')?.textContent?.trim() ?? null, message: (textarea as HTMLTextAreaElement)?.value ?? '', safe: [...dialog?.querySelectorAll('[role="radio"]') ?? []].filter(e => e.getAttribute('aria-checked') === 'true').map(e => e.textContent?.trim()), date: (dialog?.querySelector('input[name="time"]') as HTMLInputElement)?.value ?? null, callback: !!dialog?.querySelector('input[name="callbackActivityId"]') };
+        return { hasInputs: [...d.querySelectorAll('input,textarea')].some(e => visible(e) && !!(e as HTMLInputElement).value), title: dialog?.querySelector('.van-dialog__header')?.textContent?.trim() ?? null, message: (textarea as HTMLTextAreaElement)?.value ?? '', safe: [...dialog?.querySelectorAll('[role="radio"]') ?? []].filter(e => e.getAttribute('aria-checked') === 'true').map(e => e.textContent?.trim()), date: (dialog?.querySelector('input[name="time"]') as HTMLInputElement)?.value ?? null, callback: !!dialog?.querySelector('input[name="callbackActivityId"]') };
     }
     try {
         const url = await page.url();
