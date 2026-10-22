@@ -19,6 +19,7 @@ export type {
   OrganizationMemberPage,
   OrganizationProfile,
   OrganizationProfileChanges,
+  OrganizationProfileSaveIntent,
   OrganizationSession,
   OrganizationSummary,
   PreparedOrganizationProfileUpdate,
@@ -595,7 +596,23 @@ export function createFriendsSdk(options: {
         expectedAccount: session.account.userNo,
         selector: { levelNo: session.context.levelNo, unitNo: session.context.unit.unitNo },
       });
-      return createVerifiedOrganizationClient({ baseUrl, session, fetch: fetchImpl, timeoutMs });
+      return createVerifiedOrganizationClient({
+        baseUrl,
+        session,
+        fetch: fetchImpl,
+        timeoutMs,
+        verifySession: async (currentSession) => {
+          await sdk.activateLocalContext({
+            token: currentSession.token,
+            userLevel: currentSession.userLevel,
+            expectedAccount: currentSession.account.userNo,
+            selector: {
+              levelNo: currentSession.context.levelNo,
+              unitNo: currentSession.context.unit.unitNo,
+            },
+          });
+        },
+      });
     },
   };
   return sdk;

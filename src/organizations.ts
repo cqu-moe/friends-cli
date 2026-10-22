@@ -77,8 +77,16 @@ export interface PreparedOrganizationProfileUpdate {
 export interface SavedOrganizationProfile {
   status: "saved";
   submitted: true;
+  serverAcknowledged: true;
+  readback: "matched";
   organizationId: string;
   profile: OrganizationProfile;
+}
+
+export interface OrganizationProfileSaveIntent {
+  via: "api";
+  intent: "save-organization-profile";
+  confirm: true;
 }
 
 export interface OrganizationClient {
@@ -89,7 +97,10 @@ export interface OrganizationClient {
     organizationId: OrganizationId;
     changes: OrganizationProfileChanges;
   }): Promise<PreparedOrganizationProfileUpdate>;
-  saveProfile(prepared: PreparedOrganizationProfileUpdate): Promise<SavedOrganizationProfile>;
+  saveProfile(
+    prepared: PreparedOrganizationProfileUpdate,
+    intent: OrganizationProfileSaveIntent,
+  ): Promise<SavedOrganizationProfile>;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -377,15 +388,31 @@ function validatePreparedProfileUpdate(value: unknown): {
   };
 }
 
-function ensureChangesMatch(profile: OrganizationProfile, changes: OrganizationProfileChanges) {
-  for (const field of editableFields) {
-    if (changes[field] !== undefined && profile[field] !== changes[field]) {
-      throw new FriendsError({
-        code: FriendsErrorCode.UpstreamBusiness,
-        message: `The saved organization profile did not return the requested ${field}`,
-      });
+function validateSaveIntent(value: unknown): OrganizationProfileSaveIntent {
+  const raw = object(value);
+  if (raw === null) invalid("An organization profile write requires independent API intent");
+  for (const key of Object.keys(raw)) {
+    if (!["via", "intent", "confirm"].includes(key)) {
+      invalid(`Unknown organization profile write intent field: ${key}`);
     }
   }
+  if (
+    raw.via !== "api" ||
+    raw.intent !== "save-organization-profile" ||
+    raw.confirm !== true
+  ) {
+    invalid(
+      "Organization profile saving requires via=api, intent=save-organization-profile, and confirm=true; Ego preparation never authorizes it",
+    );
+  }
+  return { via: "api", intent: "save-organization-profile", confirm: true };
+}
+
+function changesMatch(profile: OrganizationProfile, changes: OrganizationProfileChanges) {
+  for (const field of editableFields) {
+    if (changes[field] !== undefined && profile[field] !== changes[field]) return false;
+  }
+  return true;
 }
 
 /**
@@ -397,6 +424,7 @@ export function createVerifiedOrganizationClient(options: {
   session: OrganizationSession;
   fetch?: typeof fetch;
   timeoutMs?: number;
+  verifySession?: (session: OrganizationSession) => Promise<void>;
 }): OrganizationClient {
   const session = validateSession(options.session);
   const baseUrl = options.baseUrl.replace(/\/$/, "");
@@ -407,6 +435,11 @@ export function createVerifiedOrganizationClient(options: {
 
   async function request(path: string, init: RequestInit) {
     return callApi(baseUrl, path, init, fetchImpl, timeoutMs);
+  }
+
+  async function refreshWriteAuthorization(): Promise<void> {
+    await options.verifySession?.(session);
+    managedCache = null;
   }
 
   async function managedOrganizations(): Promise<OrganizationSummary[]> {
@@ -534,8 +567,13 @@ export function createVerifiedOrganizationClient(options: {
         payload,
       };
     },
-    async saveProfile(value: PreparedOrganizationProfileUpdate) {
+    async saveProfile(
+      value: PreparedOrganizationProfileUpdate,
+      intentInput: OrganizationProfileSaveIntent,
+    ) {
+      validateSaveIntent(intentInput);
       const prepared = validatePreparedProfileUpdate(value);
+      await refreshWriteAuthorization();
       const organization = await requireOrganization(prepared.organizationId);
       requireProfileAccess(organization);
       const current = await detail(organization.id);
@@ -554,44 +592,74 @@ export function createVerifiedOrganizationClient(options: {
         if (!(error instanceof FriendsError) || error.code !== FriendsErrorCode.NetworkProtocol) {
           throw error;
         }
+        let lostReadbackState: "matched" | "unmatched";
         try {
           const readback = await detail(organizationId(organization.id));
-          ensureChangesMatch(readback.profile, prepared.changes);
-          return {
-            status: "saved" as const,
-            submitted: true as const,
-            organizationId: organization.id,
-            profile: readback.profile,
-          };
+          lostReadbackState = changesMatch(readback.profile, prepared.changes)
+            ? "matched" as const
+            : "unmatched" as const;
         } catch {
           throw new FriendsError({
             code: FriendsErrorCode.UnknownOutcome,
-            message: "The organization profile write response was lost and the read-only result check was inconclusive",
+            message: "The organization profile write response was lost and the read-only result check was unavailable",
             recovery: {
               operation: "organizations.profile.save",
               organizationId: organization.id,
-              completed: ["PUT", "read-only-result-check"],
+              completed: ["readback:unavailable"],
+              serverAcknowledged: "unknown",
+              readback: "unavailable",
             },
           });
         }
         throw new FriendsError({
           code: FriendsErrorCode.UnknownOutcome,
-          message: "The organization profile write response was lost and the requested changes were not confirmed",
+          message: "The organization profile write response was lost; its outcome remains unknown even though a read-only readback completed",
           recovery: {
             operation: "organizations.profile.save",
             organizationId: organization.id,
-            completed: ["PUT", "read-only-result-check"],
+            completed: [`readback:${lostReadbackState}`],
+            serverAcknowledged: "unknown",
+            readback: lostReadbackState,
           },
         });
       }
 
-      const readback = await detail(organization.id);
-      ensureChangesMatch(readback.profile, prepared.changes);
+      let profile: OrganizationProfile;
+      try {
+        profile = (await detail(organization.id)).profile;
+      } catch {
+        throw new FriendsError({
+          code: FriendsErrorCode.UnknownOutcome,
+          message: "The school acknowledged the organization profile write, but the required read-only readback was unavailable",
+          recovery: {
+            operation: "organizations.profile.save",
+            organizationId: organization.id,
+            completed: ["server-acknowledged", "readback:unavailable"],
+            serverAcknowledged: true,
+            readback: "unavailable",
+          },
+        });
+      }
+      if (!changesMatch(profile, prepared.changes)) {
+        throw new FriendsError({
+          code: FriendsErrorCode.UpstreamBusiness,
+          message: "The school acknowledged the organization profile write, but readback did not match every requested field",
+          recovery: {
+            operation: "organizations.profile.save",
+            organizationId: organization.id,
+            completed: ["server-acknowledged", "readback:unmatched"],
+            serverAcknowledged: true,
+            readback: "unmatched",
+          },
+        });
+      }
       return {
         status: "saved" as const,
         submitted: true as const,
+        serverAcknowledged: true,
+        readback: "matched" as const,
         organizationId: organization.id,
-        profile: readback.profile,
+        profile,
       };
     },
   };
