@@ -79,9 +79,8 @@ test("real CLI queries organizations, prepares visibly in Ego, and confirms API 
     const root = await mkdtemp(join(tmpdir(), `friends-org-ego-${mode}-`));
     const scriptPath = join(root, "ego-script.js");
     const evidencePath = join(root, "evidence.json");
-    const runner = join(root, "ego-organization-page.mjs");
+    const runner = new URL("./fixtures/ego-organization-page.mjs", import.meta.url).href;
     const ego = join(root, "ego-browser");
-    await writeFile(runner, await readFile(join(process.cwd(), "tests/fixtures/ego-organization-page.mjs")));
     await writeFile(ego, [
       "#!/bin/sh",
       `cat > ${JSON.stringify(scriptPath)}`,
@@ -89,7 +88,7 @@ test("real CLI queries organizations, prepares visibly in Ego, and confirms API 
       `EGO_ORGANIZATION_SCRIPT_PATH=${JSON.stringify(scriptPath)}`,
       `EGO_ORGANIZATION_EVIDENCE_PATH=${JSON.stringify(evidencePath)}`,
       "export EGO_ORGANIZATION_FIXTURE_MODE EGO_ORGANIZATION_SCRIPT_PATH EGO_ORGANIZATION_EVIDENCE_PATH",
-      `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(runner)}`,
+      `exec ${JSON.stringify(process.execPath)} -e 'await import(${JSON.stringify(runner)})'`,
       "",
     ].join("\n"), { mode: 0o700 });
     await chmod(ego, 0o700);
@@ -176,6 +175,9 @@ test("real CLI queries organizations, prepares visibly in Ego, and confirms API 
   assert.equal(cleanEvidence.snapshotCount >= 1, true);
   assert.deepEqual(cleanEvidence.clickSelectors, ["@7"]);
   assert.deepEqual(cleanEvidence.fillSelectors, ["textarea[data-friends-cli-blurb]"]);
+  assert.equal(cleanEvidence.inputEvents, 1);
+  assert.equal(cleanEvidence.changeEvents, 1);
+  assert.equal(cleanEvidence.dialogOpen, true);
   assert.equal(cleanEvidence.waitForTimeoutCount, 0);
   assert.equal(cleanEvidence.externalWrites, 0);
   assert.equal(cleanEvidence.finalSubmitActions, 0);
