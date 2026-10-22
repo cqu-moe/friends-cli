@@ -1,0 +1,36 @@
+{
+  "name": "@cqu-moe/friends-cli",
+  "version": "0.1.0",
+  "description": "Local CLI and SDK for the CQU Second Classroom platform",
+  "type": "module",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "friends": "dist/cli/main.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test 'tests/*.test.js'"
+  },
+  "dependencies": {
+    "@napi-rs/keyring": "^2.1.2",
+    "commander": "^14.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,304 @@
+#!/usr/bin/env node
+import { Command } from "commander";
+import {
+  courseId,
+  createFriendsSdk,
+  exitCodeFor,
+  FriendsError,
+  FriendsErrorCode,
+} from "../index.js";
+import {
+  loadSession,
+  readEgoSession,
+  saveSession,
+  sessionPath,
+  SessionStorageType,
+} from "../node.js";
+
+const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
+const schemas = {
+  "auth.login": {
+    operation: "auth.login",
+    input: {
+      method: { type: "local", required: true },
+      egoTaskSpace: { type: "integer", default: "managed friends-cli space; explicit integer reuses an existing space" },
+      egoPage: { type: "string", default: "p1" },
+      storage: { type: "keyring or explicit file", default: "keyring" },
+      levelNo: { type: "string", required: "only when multiple contexts match" },
+      unitNo: { type: "string", required: "only when multiple contexts match" },
+    },
+    output: "account and selected context; never token",
+    readonly: false,
+    sideEffect: "establishes a local session and fixed friends context",
+    supportedVia: ["ego-login", "api-verification"],
+    verifiedWith: "controlled-api; live-read-only-evidence",
+  },
+  "auth.status": {
+    operation: "auth.status",
+    input: {},
+    output: "redacted account, context, and storage state",
+    readonly: true,
+    supportedVia: ["api"],
+    verifiedWith: "controlled-api",
+  },
+  "courses.list": {
+    operation: "courses.list",
+    input: {
+      page: { type: "integer", minimum: 1, default: 1 },
+      pageSize: { type: "integer", minimum: 1, default: 10 },
+      keyword: {
+        type: "string",
+        upstreamField: "key",
+        evidence: "live UI and read-only replay",
+      },
+    },
+    output: "one page of necessary course projections",
+    readonly: true,
+    supportedVia: ["api"],
+    verifiedWith: "controlled-api; live-read-only-evidence",
+  },
+  "courses.get": {
+    operation: "courses.get",
+    input: { courseId: { type: "course UUID", required: true } },
+    output: "necessary public course detail projection",
+    readonly: true,
+    supportedVia: ["api"],
+    verifiedWith: "controlled-api; live-read-only-evidence",
+  },
+} as const;
+
+function output(data: unknown, meta: Record<string, unknown> = {}): void {
+  process.stdout.write(
+    `${JSON.stringify({ schemaVersion: 1, ok: true, data, meta }, null, 2)}\n`,
+  );
+}
+
+function sdk() {
+  return createFriendsSdk({
+    baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+  });
+}
+
+const program = new Command()
+  .name("friends")
+  .description("Query CQU Second Classroom courses with a verified local session")
+  .version("0.1.0")
+  .configureOutput({
+    writeOut: (text) => process.stdout.write(text),
+    writeErr: (text) => process.stderr.write(text),
+  })
+  .exitOverride();
+
+program
+  .command("schema")
+  .description("Print a command contract")
+  .argument("<operation>", "operation name")
+  .option("--json", "print stable JSON", true)
+  .action((operation: string) => {
+    const schema = Reflect.get(schemas, operation);
+    if (!schema) {
+      throw new FriendsError({
+        code: FriendsErrorCode.InvalidInput,
+        message: `Unknown schema operation: ${operation}`,
+      });
+    }
+    output(schema, { operation: "schema" });
+  });
+
+const auth = program.command("auth").description("Local session management");
+
+auth
+  .command("login")
+  .description("Log in through the existing Ego page and verify the school context")
+  .requiredOption("--method <method>", "login source", "local")
+  .option(
+    "--storage <type>",
+    "session storage backend",
+    process.env.FRIENDS_STORAGE ?? "keyring",
+  )
+  .option("--ego-task-space <number>", "reuse an existing Ego task space by numeric ID")
+  .option("--ego-page <label>", "existing Ego page label", "p1")
+  .option("--level-no <value>", "select a level when multiple contexts match")
+  .option("--unit-no <value>", "select an identity unit when multiple contexts match")
+  .option("--json", "print stable JSON", true)
+  .action(async (options: Record<string, string>) => {
+    if (options.method !== "local") {
+      throw new FriendsError({
+        code: FriendsErrorCode.InvalidInput,
+        message: "Only --method local is implemented in this task",
+      });
+    }
+    if (options.storage !== "keyring" && options.storage !== "file") {
+      throw new FriendsError({
+        code: FriendsErrorCode.InvalidInput,
+        message: "--storage must be keyring or file",
+      });
+    }
+    const taskSpaceId = options.egoTaskSpace === undefined
+      ? undefined
+      : Number(options.egoTaskSpace);
+    if (taskSpaceId !== undefined && (!Number.isInteger(taskSpaceId) || taskSpaceId < 1)) {
+      throw new FriendsError({
+        code: FriendsErrorCode.InvalidInput,
+        message: "--ego-task-space must be a positive integer",
+      });
+    }
+    const browserSession = await readEgoSession({
+      taskSpaceId,
+      page: options.egoPage,
+    });
+    const activated = await sdk().activateLocalContext({
+      token: browserSession.token,
+      userLevel: browserSession.userLevel,
+      selector:
+        options.levelNo === undefined && options.unitNo === undefined
+          ? undefined
+          : { levelNo: options.levelNo, unitNo: options.unitNo },
+    });
+    const storedSession = {
+      schemaVersion: 1 as const,
+      loginMethod: "local" as const,
+      storage: options.storage as SessionStorageType,
+      token: browserSession.token,
+      userLevel: activated.context.levelNo,
+      account: activated.account,
+      context: activated.context,
+    };
+    const path = await saveSession(storedSession, options.storage);
+    output(
+      {
+        loginMethod: "local",
+        account: activated.account,
+        context: activated.context,
+        storage: { type: options.storage, path },
+      },
+      {
+        operation: "auth.login",
+        via: "ego-login+api-verification",
+        verification: { identityAndContext: "school-api-verified" },
+      },
+    );
+  });
+
+auth
+  .command("status")
+  .description("Reverify the stored account and fixed context through the school API")
+  .option("--json", "print stable JSON", true)
+  .action(async () => {
+    const session = await loadSession();
+    const inspection = await sdk().inspectLocalSession(session);
+    const contextStillAvailable = inspection.contexts.some(
+      (context) =>
+        context.levelNo === session.context.levelNo &&
+        context.unit.unitNo === session.context.unit.unitNo,
+    );
+    if (
+      inspection.account.userNo !== session.account.userNo ||
+      !contextStillAvailable
+    ) {
+      throw new FriendsError({
+        code: FriendsErrorCode.AuthRequired,
+        message: "The stored friends account or context is no longer valid",
+      });
+    }
+    output(
+      {
+        loginMethod: session.loginMethod,
+        account: inspection.account,
+        context: session.context,
+        storage: { type: session.storage, path: sessionPath() },
+      },
+      {
+        operation: "auth.status",
+        via: "api",
+        verification: { identityAndContext: "school-api-reverified" },
+      },
+    );
+  });
+
+const courses = program.command("courses").description("Course queries");
+
+courses
+  .command("list")
+  .description("List one page of courses")
+  .option("--page <number>", "result page", "1")
+  .option("--page-size <number>", "results per page", "10")
+  .option("--keyword <value>", "course name or organizer keyword")
+  .option("--json", "print stable JSON", true)
+  .action(async (options: Record<string, string>) => {
+    const session = await loadSession();
+    const client = await sdk().createCourseClient(session);
+    const data = await client.list({
+      page: Number(options.page),
+      pageSize: Number(options.pageSize),
+      keyword: options.keyword,
+    });
+    output(data, {
+      operation: "courses.list",
+      via: "api",
+      verification: {
+        identityAndContext: "school-api-reverified",
+        queryContract: "live-read-only-evidence+controlled-api",
+      },
+    });
+  });
+
+courses
+  .command("show")
+  .description("Show one course by course UUID")
+  .argument("<courseId>", "course UUID, not an application or certification UUID")
+  .option("--json", "print stable JSON", true)
+  .action(async (courseIdValue: string) => {
+    const session = await loadSession();
+    const client = await sdk().createCourseClient(session);
+    output(await client.get(courseId(courseIdValue)), {
+      operation: "courses.get",
+      via: "api",
+      verification: {
+        identityAndContext: "school-api-reverified",
+        queryContract: "live-read-only-evidence+controlled-api",
+      },
+    });
+  });
+
+program.parseAsync(process.argv).catch((error: unknown) => {
+  const code = (error as { code?: string }).code;
+  if (
+    code === "commander.help" ||
+    code === "commander.helpDisplayed" ||
+    code === "commander.version"
+  ) {
+    return;
+  }
+  const friendsError =
+    error instanceof FriendsError
+      ? error
+      : new FriendsError({
+          code: FriendsErrorCode.InvalidInput,
+          message: error instanceof Error ? error.message : "Invalid command",
+        });
+  const nextAction =
+    friendsError.code === FriendsErrorCode.AuthRequired
+      ? "friends auth login --method local"
+      : undefined;
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        ok: false,
+        error: {
+          code: friendsError.code,
+          message: friendsError.message,
+          retryable: friendsError.retryable,
+          upstreamCode: friendsError.upstreamCode,
+          requestId: friendsError.requestId,
+          nextAction,
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  process.stderr.write(`${friendsError.message}\n`);
+  process.exitCode = exitCodeFor(friendsError.code);
+});
