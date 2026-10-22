@@ -3,14 +3,17 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   createFriendsSdk,
+  courseId,
   createVolunteerCertificationReviewClient,
   type LoginContext,
   type VerifiedVolunteerSession,
 } from "./index.js";
-import { FriendsError, FriendsErrorCode } from "./errors.js";
+import { FriendsError, FriendsErrorCode, type WriteRecovery } from "./errors.js";
+import { courseRegistrationId, type CourseParticipationSession, type CourseRegistrationSummary, type CourseQuestionnaireDefinition, type PreparedCourseApply } from "./course-participation.js";
+import { loadCourseQuestionnaireFiles } from "./course-questionnaire-files.js";
 
 export * from "./draft-store.js";
 export * from "./certification-ego.js";
@@ -106,6 +109,22 @@ async function runEgoProcess(options: {
 function singleMarker(output: string, marker: string): unknown {
   const lines = output.split("\n").filter(line => line.startsWith(marker));
   return lines.length === 1 ? JSON.parse(lines[0].slice(marker.length)) : null;
+}
+
+async function runEgoCommand(options: {
+  script: string;
+  command: string;
+  timeoutMs: number;
+  marker: string;
+}): Promise<Record<string, unknown>> {
+  const output = await runEgoProcess(options);
+  if (!output.split("\n").some(line => line.startsWith(options.marker))) return {};
+  try {
+    const parsed = singleMarker(output, options.marker) as Record<string, unknown> | null;
+    return parsed ?? {};
+  } catch {
+    throw safeError("The Ego browser bridge returned invalid output");
+  }
 }
 
 async function runEgo(options: {
@@ -584,6 +603,129 @@ export async function readVerifiedEgoSession(options: {
     userLevel: activated.context.levelNo,
     account: activated.account,
     context: activated.context,
+  };
+}
+
+export interface CourseRegistrationEgoPreparation {
+  operation: string;
+  execution: "ego-visible-prepare";
+  submitted: false;
+  status: "awaiting-user";
+  taskSpaceId: number;
+  page: string;
+  target:
+    | { kind: "course"; courseId: string; route: string }
+    | { kind: "registration"; registrationId: string; courseName: string; route: string };
+  userAction: string;
+  finalSubmissionBy: "human";
+  automaticSubmit: false;
+  remoteFinalWrites: 0;
+  role: { id: string; name: string; status: string } | null;
+  completedActions: string[];
+  preservedInputs: string[];
+  pendingInputs: string[];
+  pendingQuestionnaires: CourseQuestionnaireDefinition[];
+  course?: PreparedCourseApply["course"];
+  registration?: CourseRegistrationSummary["registration"];
+}
+
+export async function prepareCourseRegistrationInEgo(options: {
+  operation: "apply" | "withdraw" | "exit";
+  taskSpaceId: number;
+  session: CourseParticipationSession;
+  page?: string;
+  timeoutMs?: number;
+  command?: string;
+  baseUrl?: string;
+  courseId?: string;
+  registrationId?: string;
+  courseName: string;
+  roleId?: string;
+  questionnaire?: unknown;
+}): Promise<CourseRegistrationEgoPreparation> {
+  const invalid = (message: string): never => { throw safeError(message, FriendsErrorCode.InvalidInput); };
+  if (!["apply", "withdraw", "exit"].includes(options.operation)) invalid("Invalid course operation");
+  if (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1) invalid("Invalid Ego task space");
+  const page = options.page ?? "p1", timeoutMs = options.timeoutMs ?? 30_000;
+  if (!/^p[1-9][0-9]*$/.test(page) || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1) invalid("Invalid Ego page or timeout");
+  if (typeof options.courseName !== "string" || !options.courseName.trim()) invalid("A non-empty course name is required");
+  if (options.operation === "apply") {
+    if (options.courseId === undefined || options.registrationId !== undefined) invalid("One courseId is required for apply");
+    courseId(options.courseId!);
+  } else {
+    if (options.registrationId === undefined || options.courseId !== undefined || options.roleId !== undefined || options.questionnaire !== undefined) invalid("One registrationId is required for withdrawal or exit");
+    courseRegistrationId(options.registrationId!);
+  }
+  const session = structuredClone(options.session);
+  const client = await createFriendsSdk({ baseUrl: options.baseUrl }).createCourseParticipationClient(session);
+  let prepared: PreparedCourseApply | undefined;
+  let registration: CourseRegistrationSummary["registration"] | undefined;
+  const files = await loadCourseQuestionnaireFiles(options.questionnaire);
+  for (const answer of files.answers ?? []) if ("attachments" in answer) {
+    if (answer.attachments.some((file, index) => (file.content as File).name !== basename(files.paths[answer.questionId][index]))) {
+      invalid("Ego uploads preserve local filenames; filename overrides require the API path");
+    }
+  }
+  if (options.operation === "apply") {
+    prepared = files.answers === undefined
+      ? await client.inspectApply(options.courseId!)
+      : await client.prepareApply(options.courseId!, { roleId: options.roleId, questionnaire: files.answers });
+    if (prepared.course.name !== options.courseName) invalid("The course name differs from current school detail");
+    if (options.roleId !== undefined && !prepared.roles.some(role => role.id === options.roleId)) invalid("roleId was not returned by course detail");
+  } else {
+    const summary = await client.getMyRegistration(courseRegistrationId(options.registrationId!));
+    if (summary.courseName !== options.courseName) invalid("The course name differs from the current personal record");
+    registration = summary.registration;
+    let matches = 0;
+    for (let page = 1; ; page++) {
+      const records = await client.listMyRegistrations({ page, pageSize: 20, keyword: options.courseName });
+      matches += records.items.filter(item => item.courseName === options.courseName).length;
+      if (matches > 1 || records.hasMore === null || page > 100) invalid("The personal course name is ambiguous; select the exact school record manually");
+      if (!records.hasMore) break;
+    }
+    if (matches !== 1) invalid("The selected personal course is no longer visible");
+  }
+  const origin = new URL(options.baseUrl ?? "https://friends.cqu.edu.cn/gateway").origin;
+  const route = options.operation === "apply"
+    ? `${origin}/mobile/course/stuCourseDetail?uuid=${encodeURIComponent(options.courseId!)}&type=Apply`
+    : `${origin}/mobile/course/stuCourseQuery`;
+  const runtime = new URL("./course-participation-page.js", import.meta.url).href;
+  const input = { operation: options.operation, page, route, session, courseId: options.courseId,
+    registrationId: options.registrationId, courseName: options.courseName, prepared, roleId: options.roleId,
+    answers: files.answers?.map(answer => "attachments" in answer ? { questionId: answer.questionId, attachments: [] } : answer), paths: files.paths };
+  const script = `
+const task = await taskSpace(${options.taskSpaceId});
+const {prepareCourseParticipationPage} = await import(${JSON.stringify(runtime)});
+try {
+ const result = await prepareCourseParticipationPage(task, ${JSON.stringify(input)});
+ console.log("FRIENDS_CLI_EGO_RESULT:" + JSON.stringify({ok:true,...result}));
+} catch(error) {
+ console.log("FRIENDS_CLI_EGO_RESULT:" + JSON.stringify({error:error.message,errorCode:error.code,recovery:error.recovery}));
+}
+`;
+  let output: Record<string, unknown>;
+  try {
+    output = await runEgoCommand({ script, command: options.command ?? "ego-browser", timeoutMs: timeoutMs + 30_000, marker: "FRIENDS_CLI_EGO_RESULT:" });
+  } catch (cause) {
+    throw new FriendsError({ code: FriendsErrorCode.UnknownOutcome, message: "Course preparation response was lost; inspect the visible page before retrying", cause,
+      recovery: { operation: `courses.registrations.${options.operation}.prepare`, courseId: options.courseId, registrationId: options.registrationId } });
+  }
+  if (output.error || output.ok !== true || ![output.completedActions, output.preservedInputs, output.pendingInputs].every(value => Array.isArray(value) && value.every(item => typeof item === "string")) ||
+    !(output.role === null || typeof output.role === "object" && output.role !== null && typeof (output.role as Record<string, unknown>).id === "string" && typeof (output.role as Record<string, unknown>).status === "string")) {
+    const code = Object.values(FriendsErrorCode).find(code => code === output.errorCode) ?? FriendsErrorCode.UnknownOutcome;
+    throw new FriendsError({ code, message: typeof output.error === "string" ? output.error : "Course preparation returned no receipt",
+      recovery: output.recovery as WriteRecovery | undefined ?? { operation: `courses.registrations.${options.operation}.prepare`, courseId: options.courseId, registrationId: options.registrationId } });
+  }
+  return {
+    operation: `courses.registrations.${options.operation}.prepare`, execution: "ego-visible-prepare", submitted: false,
+    status: "awaiting-user", taskSpaceId: options.taskSpaceId, page,
+    target: options.operation === "apply" ? { kind: "course", courseId: options.courseId!, route }
+      : { kind: "registration", registrationId: options.registrationId!, courseName: options.courseName, route },
+    userAction: "Review the preserved form and pending inputs, then personally make the final decision",
+    finalSubmissionBy: "human", automaticSubmit: false, remoteFinalWrites: 0,
+    role: output.role as CourseRegistrationEgoPreparation["role"], completedActions: output.completedActions as string[],
+    preservedInputs: output.preservedInputs as string[], pendingInputs: output.pendingInputs as string[],
+    pendingQuestionnaires: prepared?.questionnaires ?? [], course: prepared?.course, registration,
   };
 }
 

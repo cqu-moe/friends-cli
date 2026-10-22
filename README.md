@@ -28,6 +28,13 @@ friends auth login --method cqu-auth --no-open --storage file --json
 friends courses list --page 1 --page-size 10 --keyword 周周艺 --json
 friends courses show <courseUuid> --json
 friends courses list --via ego --ego-task-space 12 --ego-page p1 --json
+friends courses registrations list --page 1 --page-size 10 --keyword 周周艺 --json
+friends courses registrations show <registrationUuid> --json
+friends courses registrations apply <courseUuid> --dry-run --json
+friends courses registrations apply <courseUuid> --via api --confirm apply --json
+friends courses registrations withdraw <registrationUuid> --via api --confirm withdraw --json
+friends courses registrations exit <registrationUuid> --via api --confirm exit --json
+friends courses registrations apply <courseUuid> --via ego --ego-task-space 12 --ego-page p1 --confirm apply --json
 friends organizations list --json
 friends organizations profile show <organizationUuid> --json
 friends organizations members <organizationUuid> --page 1 --page-size 10 --json
@@ -95,6 +102,20 @@ const members = await organizationClient.listMembers(organizationId(organization
 普通 SDK 根导入不加载 Ego、文件系统或凭据库；这些 Node 集成从 `@cqu-moe/friends-cli/node` 按需加载。同一 SDK 实例拒绝将同一学校 token 同时绑定到不同身份单位/角色；跨客户端需要各自的学校会话，不能把服务器会话当作可并发切换的全局状态。课程 client 绑定学校返回的账号、角色和身份单位；身份单位不是学生组织 UUID，不能据此推断组织管理权限。恢复时重新核对学校身份。
 
 课程列表使用实测的 `student-apply-page-list` 与 `key` 参数，不使用历史聚合接口的 `type: CURRICULUM` 过滤。详情只投影课程资料、报名限制和必要状态；未知状态保留标量原值并标记 `known: false`。详情保留岗位名称、积分与学时；非空问卷仅报告数量和 `unverified`，尚未解析其内容，不能据此宣称已展示全部报名要求。
+
+## 课程报名与个人记录
+
+`createCourseParticipationClient` 绑定已核验的学校账号/角色/身份单位。个人记录只通过 `apply/my-applied-page-list` 分页读取，并用课程内 `studentApplied` 投影报名记录 UUID 与学校返回的审批状态；未知审批状态保留原始标量和 `known: false`，不把课程开办状态映射成报名审批结果。
+
+报名前 `inspectApply` 读取 `apply/approve-detail/{courseId}`，返回学校课程状态、角色和问卷定义。`prepareApply` 验证输入并生成 `student-apply/apply` payload，返回 `submitted:false`，不上传附件。CLI 用 `--input <file|->` 提供 `{ "questionnaire": [...] }`；单选、多选、文本、数字和日期分别使用 `choiceOptionId`、`choiceOptionIds` 或 `text`。题目和选项 ID 必须来自当前学校详情，选答题可省略。API 报名若存在角色，必须显式选择学校返回的 `roleId`，不会默认唯一角色或猜测名称、学时、积分。
+
+图片与附件题 `PICTURE/MULTIPLE_PICTURE/FILE/MULTIPLE_FILE` 使用 `{ "questionId": "...", "attachments": [{ "path": "/absolute/path/proof.pdf", "mimeType": "application/pdf" }] }`。普通 SDK 对应传入 `{content: Blob, filename?}`；Ego 文件选择保留本地文件名，改名只支持 API 路径。图片接受 PNG/JPG/JPEG/GIF/BMP，文件接受 PDF，单文件不超过 20 MiB；单图/单文件题只接受一个文件。显式 API 写入通过 `/gateway/ek-agg-mob/biz-common/protected-file-upload` 上传，AppKey 为 `zovecenter-saip-ek-agg-mob`，每题使用独立分组，再生成报名答案。分组回查失败不会否认已收到的确定上传回执；缺少资源 UUID、响应丢失或分组不匹配则立即停止，保留 `UNKNOWN_OUTCOME` 及已知资源/分组 ID，不继续上传、报名、删除或重试。dry-run 不产生上传，也不调用副作用未知的 `student-apply/can-apply/{courseId}`。
+
+API 写入要求 `--via api` 和字面确认：报名 `--confirm apply`、撤销 `--confirm withdraw`、退出 `--confirm exit`。学校前端把 `GET student-apply/{registrationId}` 用作确认后的撤销动作，所以它被标为业务写入，个人记录详情只通过列表定位。读取及每次写入前重新核对账号、角色和身份单位。确定的业务拒绝保留上游码及已完成上传；响应丢失返回退出码 7 / `UNKNOWN_OUTCOME`，即使只读回查匹配也不转成成功或自动续交。
+
+查询和 dry-run 支持 `--via api|ego`。正式 `--via ego --ego-task-space ... --ego-page ...` 只准备可见表单/确认层，然后交接，返回 `submitted:false`、`status:"awaiting-user"` 和 `finalSubmissionBy:"human"`。Node SDK 的 `prepareCourseRegistrationInEgo` 必须传入学校 session，并独立重新核对学校状态和页面绑定。目标必须是正确课程页或明确选定的空白页；不导航覆盖已有编辑。问卷只通过当前同源 iframe 中的可见控件填入空值，已有人工值和附件保留。附件选择会触发学校控件上传，属于有副作用的准备阶段；中断后保留可见页面和完成/尝试步骤，立即停止。
+
+当前公开源码的角色选择块被注释，因此 Ego 校验所选角色并列为人工核对事项，不注入隐藏模型；日期等只读选择器也交给用户。撤销/退出只打开与当前个人记录唯一匹配的确认层。最终按钮、提交 API、快捷键和 `--yes` 都不能代替用户亲自提交。上述路径通过源码与受控 SDK/CLI/DOM 测试，真实 Ego、学校生产读写及用户最终提交由集中验收另行确认。
 
 ## 志愿认证草稿
 

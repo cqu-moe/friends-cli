@@ -28,6 +28,10 @@ import {
 import { createCquAuthClient } from "../auth.js";
 import { resolveQuerySession } from "./session.js";
 import { draftSchemas, registerDraftCommands } from "./drafts.js";
+import {
+  courseParticipationSchemas,
+  registerCourseParticipationCommands,
+} from "./course-participation.js";
 import { organizationSchemas, registerOrganizationCommands } from "./organizations.js";
 import { registerVolunteerReviewCommands, volunteerReviewSchemas } from "./volunteer-reviews.js";
 import { offeringSchemas, registerOfferingCommands } from "./offerings.js";
@@ -39,6 +43,7 @@ const schemas = {
   ...volunteerActivityReviewSchemas,
   ...certificationApiSchemas,
   ...draftSchemas,
+  ...courseParticipationSchemas,
   ...organizationSchemas,
   ...organizationActivityReviewSchemas,
   ...volunteerReviewSchemas,
@@ -364,6 +369,10 @@ auth
 
 const courses = program.command("courses").description("Course queries");
 
+registerCourseParticipationCommands(courses, {
+  baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+});
+
 courses
   .command("list")
   .description("List one page of courses")
@@ -447,7 +456,9 @@ program.parseAsync(process.argv).catch(async (error: unknown) => {
   const nextAction =
     friendsError.code === FriendsErrorCode.AuthRequired
       ? `friends auth login --method ${await loadSession().then(session => session.loginMethod).catch(() => "local")}`
-      : undefined;
+      : friendsError.code === FriendsErrorCode.UnknownOutcome
+        ? "Inspect read-only output before any human retry; for course registrations use friends courses registrations list --json"
+        : undefined;
   process.stdout.write(
     `${JSON.stringify(
       {
