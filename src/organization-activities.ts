@@ -266,7 +266,7 @@ export function createOrganizationActivityClient(options: {baseUrl?: string; ses
     async get(id: OrganizationActivityId) { return activity(await detail(id)); },
     async status(id: OrganizationActivityId) {
       const current = activity(await detail(id));
-      const flow = object((await request(`${common}/flow/node-list-no-state`,'POST',{businessTypeCode:'组织活动申请流程',applyId:id,branchNo:''})).data);
+      const flow = object((await request(`${common}/flow/approve-list`,'POST',{businessTypeCode:'组织活动申请流程',applyId:id,branchNo:''})).data);
       if (!flow) protocol('Invalid organization activity workflow response');
       return {...current,flow:{nodeList:Array.isArray(flow.nodeList) ? flow.nodeList : null,evaluationRecords:Array.isArray(flow.evaluationRecords) ? flow.evaluationRecords : null}};
     },

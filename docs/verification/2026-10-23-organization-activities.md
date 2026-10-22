@@ -6,7 +6,7 @@
 
 源码：index.ab6e178e.js 请求工厂及导出映射；index.5fa98249.js 公开查询；activityApply.5e72e07a.js 的 my-page-list；detail.bb008e63.js 状态与组织活动申请流程；firstStep.95354968.js 第一步；secondStep.0d43cb1b.js 设置/最终提交；index.d1c12659.js 图片及 fileUploder.709dc576.js 附件上传。注意 activityApply 中别名 i 是取消函数；本实现没有复用它，不把索引别名误当 API 路径。
 
-组织服务为 /gateway/zovecenter-saip-ek-app-team-organization-manage/mob，AppKey 为该服务名。公共 term-list、protected-file-upload、list-group-resource、flow/node-list-no-state 均为 /gateway/ek-agg-mob/biz-common/...，AppKey 为 zovecenter-saip-ek-agg-mob。受控服务拒绝错误完整路径和 AppKey；不使用 fallback 重试。
+组织服务为 /gateway/zovecenter-saip-ek-app-team-organization-manage/mob，AppKey 为该服务名。公共 term-list、protected-file-upload、list-group-resource、flow/approve-list 均为 /gateway/ek-agg-mob/biz-common/...，AppKey 为 zovecenter-saip-ek-agg-mob。受控服务拒绝错误完整路径和 AppKey；不使用 fallback 重试。
 
 ## 交付契约
 
@@ -29,6 +29,12 @@ Node 与 CLI DOM 测试运行生成的当前脚本和真实 DOM 回调，不返�
 CLI 覆盖所有命令 help/schema、文件与 stdin、版本化单 JSON stdout、stderr、非交互确认、错误参数、权限退出 4、身份退出 3、UNKNOWN_OUTCOME 退出 7、API/Ego 查询和实际执行方式。材料 JSON 回执可直接传给 submit，不依赖私有临时页地址。
 
 最终合入 integration `368abeec446fc36ed079c347dfd3fa3e4b3dec4e` 后，完整 `npm test` 通过：223 tests，0 failed、0 skipped（包含 TypeScript 构建）。功能提交合入之前的独立全量为 136/136；合并时保留课程、参与、审批与志愿功能，组织活动命令复用共享父命令。共享 strict fixture 同时保留真实 iframe、课程表单 model、远程写计数和已有用户输入保护。
+
+## status 只读实测发现后的修复
+
+主线程确认旧 `node-list-no-state` 请求 HTTP 200/code="0"，但 data 是长度 3 的数组；只记录形状，不保存真实节点或个人信息。重新沿源码核对：detail.bb008e63.js 导入 `{A as D}`，common.b21a4484.js 的导出为 `O as A`，O 实际 POST `biz-common/flow/approve-list`。前端从该接口 data 读取 nodeList/evaluationRecords；此前实现与 fixture 都把错误端点伪装成了这个对象。
+
+修复将 status 对齐前端 approve-list，不把无状态节点数组伪装成审批历史、不以空数组掩盖历史缺失。节点与记录中的未知状态保留；缺失或非数组字段为 null，学校明确返回空数组时保留 []。SDK 和真实 CLI 的回归测试在旧代码准确复现同一 NETWORK_PROTOCOL_ERROR（CLI exit 6），再通过修复验证 API/Ego 查询的版本化输出与缺失历史。实际学校修复后复测由主线程执行。 本次定向测试 18/18，全量 npm test 224/224 通过（0 failed/skipped，含构建）。
 
 ## 尚未验收与风险
 

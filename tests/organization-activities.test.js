@@ -12,8 +12,13 @@ test('public organization activity SDK queries distinct lists, requirements and 
  const id=sdk.organizationActivityId('activity-1');assert.equal((await client.get(id)).id,'activity-1');
  assert.equal((await client.requirements(id)).isOpenEnrollment,true);
  const status=await client.status(id);assert.deepEqual(status.state,{raw:'FUTURE_STATE',flowOverallState:'SCHOOL_PENDING',known:false});
- assert.deepEqual(status.flow.nodeList,[{activityname:'组织审核',state:'UNKNOWN_NODE_STATE'}]);
- assert.deepEqual(f.requests.find(r=>r.path===commonRoot+'/flow/node-list-no-state').body,{businessTypeCode:'组织活动申请流程',applyId:'activity-1',branchNo:''});
+ assert.deepEqual(status.flow,{nodeList:[{activityname:'组织审核',state:'UNKNOWN_NODE_STATE'}],evaluationRecords:[{msg:'等待学校处理',state:'UNKNOWN_RECORD_STATE'}]});
+ assert.deepEqual(f.requests.find(r=>r.path===commonRoot+'/flow/approve-list'&&r.method==='POST').body,{businessTypeCode:'组织活动申请流程',applyId:'activity-1',branchNo:''});
+ for(const [workflow,expected] of [
+  [{nodeList:[],evaluationRecords:[]},{nodeList:[],evaluationRecords:[]}],
+  [{},{nodeList:null,evaluationRecords:null}],
+  [{nodeList:[{activityname:'组织审核',state:null}],evaluationRecords:null},{nodeList:[{activityname:'组织审核',state:null}],evaluationRecords:null}],
+ ]){f.state.workflow=workflow;assert.deepEqual((await client.status(id)).flow,expected);}
  f.state.mode='unknown-pages';assert.equal((await client.list()).hasMore,null);
  f.state.mode='denied';await assert.rejects(()=>client.get(id),e=>e.code==='PERMISSION_DENIED');
  f.state.mode='normal';await assert.rejects(()=>client.get(sdk.organizationActivityId('course-1')),e=>e.code==='NETWORK_PROTOCOL_ERROR');
