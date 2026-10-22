@@ -15,9 +15,9 @@ import {
 type JsonObject = Record<string, unknown>;
 
 const volunteerService = "zovecenter-saip-ek-app-young-volunteers";
-const mainService = "zovecenter-saip-ek-app-agg-mob";
+const mainService = "zovecenter-saip-ek-agg-mob";
 const volunteerPrefix = `/${volunteerService}/mob`;
-const commonPrefix = `/${mainService}/biz-common`;
+const commonPrefix = "/ek-agg-mob/biz-common";
 
 export interface VolunteerOfferingSession extends VerifiedCourseSession {}
 
@@ -290,14 +290,14 @@ export function createVolunteerOfferingClient(options: {
     }
     const yearEnvelope = await json(`${commonPrefix}/system/vschool-year-list`, {});
     if (!Array.isArray(yearEnvelope.data)) invalid("The school returned an invalid school year list");
-    const years = yearEnvelope.data.filter((item) => object(item)?.isCurrentYear === 1);
+    const years = yearEnvelope.data.filter((item) => String(object(item)?.isCurrentYear) === "1");
     if (years.length !== 1) invalid("The school did not return exactly one current year");
     const year = object(years[0]);
     const schoolYear = text(year?.schoolYear);
     if (schoolYear === null || !/^\d{4}-\d{4}$/.test(schoolYear)) invalid("The school returned an invalid current year");
-    const termEnvelope = await json(`${commonPrefix}/system/vschool-term-list`, {});
+    const termEnvelope = await json(`${commonPrefix}/term-list`, {});
     if (!Array.isArray(termEnvelope.data)) invalid("The school returned an invalid school term list");
-    const terms = termEnvelope.data.filter((item) => object(item)?.isCurrentTerm === 1);
+    const terms = termEnvelope.data.filter((item) => String(object(item)?.isCurrentTerm) === "1");
     if (terms.length !== 1) invalid("The school did not return exactly one current term");
     const termNo = text(object(terms[0])?.termNo);
     if (termNo === null) invalid("The school returned an invalid current term");
@@ -436,6 +436,13 @@ export function createVolunteerOfferingClient(options: {
       }
       if (!intent.dryRun && intent.confirm !== true) invalid("Offering material upload requires explicit confirmation");
       if (prepared?.status !== "prepared" || prepared.submitted !== false) invalid("A prepared volunteer offering is required");
+      const source = object(prepared.source);
+      const sourceActivity = object(source?.activity);
+      if (!source || !prepared.materials || !/^[0-9a-f]{32}$/.test(prepared.materials.publicityGroupUuid) ||
+          (prepared.materials.attachmentGroupUuid !== null && !/^[0-9a-f]{32}$/.test(prepared.materials.attachmentGroupUuid))) invalid("Invalid prepared material groups");
+      const context = await remoteContext({organizationId: prepared.context.organization.id,
+        activityType: text(sourceActivity?.activityType) ?? undefined, activityLevel: text(sourceActivity?.activityLevel) ?? undefined});
+      normalizeVolunteerOfferingInput({...source, materials: {publicityPictures: prepared.materials.publicityPictures, attachments: prepared.materials.attachments}}, context);
       if (intent.dryRun) {
         return {
           state: "not-uploaded", uploaded: false,
@@ -471,19 +478,21 @@ export function createVolunteerOfferingClient(options: {
                 // The upload result remains unknown when readback also fails.
               }
               uncertain.push({ name: item.name, groupUuid, stage: "upload", confirmedByReadback: confirmed !== null });
-              if (confirmed !== null) continue;
+              throw new FriendsError({
+                code: FriendsErrorCode.UnknownOutcome,
+                message: "The material upload response was lost. Inspect the resource group before retrying; remaining uploads were stopped.",
+                recovery: {operation: "offerings.materials", serverAcknowledged: "unknown", readback: confirmed === null ? "unavailable" : "matched",
+                  completed: [`publicity:${publicity.groupUuid}`, ...(attachment.groupUuid ? [`attachments:${attachment.groupUuid}`] : []), ...publicity.resources, ...attachment.resources]},
+              });
             }
-            failed.push({ name: item.name, stage: "upload", code: friendsError.code, message: friendsError.message, uncertain: friendsError.code === FriendsErrorCode.NetworkProtocol });
+            failed.push({ name: item.name, stage: "upload", code: friendsError.code, message: friendsError.message, uncertain: false });
             return false;
           }
         }
         return true;
       }
       const publicityComplete = await uploadGroup(publicity.groupUuid, prepared.materials.publicityPictures, publicity.resources);
-      const attachmentComplete = attachment.groupUuid === null || await uploadGroup(attachment.groupUuid, prepared.materials.attachments, attachment.resources);
-      if (!publicityComplete || !attachmentComplete) {
-        // Keep every completed resource and its group UUID; never retry or delete after partial failure.
-      }
+      const attachmentComplete = publicityComplete && (attachment.groupUuid === null || await uploadGroup(attachment.groupUuid, prepared.materials.attachments, attachment.resources));
       return materialResult(publicity, attachment, prepared.materials.publicityPictures.length, prepared.materials.attachments.length, failed, uncertain, acknowledgedAll);
     },
 
@@ -550,7 +559,7 @@ export function createVolunteerOfferingClient(options: {
       try {
         const next = await json(`${volunteerPrefix}/school-activity-apply/next-step`, firstPayload);
         const nextActivityId = text(next.data);
-        if (nextActivityId === null) invalid("The offering next step did not return an intermediate UUID");
+        if (nextActivityId === null) throw new FriendsError({code: FriendsErrorCode.NetworkProtocol, message: "The offering next step did not return an intermediate UUID"});
         activityId = nextActivityId;
       } catch (error) {
         if (error instanceof FriendsError && ([FriendsErrorCode.InvalidInput, FriendsErrorCode.AuthRequired, FriendsErrorCode.PermissionDenied, FriendsErrorCode.UpstreamBusiness] as FriendsErrorCode[]).includes(error.code)) throw error;
@@ -600,6 +609,7 @@ export function createVolunteerOfferingClient(options: {
       if (typeof applicationId !== "string" || applicationId === "" || /[\\/?#\s]/.test(applicationId)) {
         invalid("A valid offering application UUID is required");
       }
+      await identitySdk.verifyLocalSession(session);
       const envelope = await json(`${volunteerPrefix}/school-activity-apply/approve-detail/${encodeURIComponent(applicationId)}`);
       const data = object(envelope.data);
       if (data === null || data.uuid !== applicationId) invalid("The offering status response identifies a different application");

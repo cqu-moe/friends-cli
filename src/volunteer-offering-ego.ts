@@ -17,16 +17,16 @@ interface EgoOptions {
   dryRun?: boolean;
 }
 
-const offeringPath = "/mobile/volunteerManage/campusManagerApply";
+const offeringPath = "/mobile/volunteerManage/campusManagerApplyPages";
 
 function error(message: string, code: FriendsErrorCode): FriendsError {
   return new FriendsError({ code, message });
 }
 
 function validate(options: EgoOptions): void {
-  if (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1) error("Invalid Ego task space", FriendsErrorCode.InvalidInput);
+  if (!Number.isSafeInteger(options.taskSpaceId) || options.taskSpaceId < 1) throw error("Invalid Ego task space", FriendsErrorCode.InvalidInput);
   const page = options.page ?? "p1";
-  if (!/^p[1-9][0-9]*$/.test(page)) error("Invalid Ego page label", FriendsErrorCode.InvalidInput);
+  if (!/^p[1-9][0-9]*$/.test(page)) throw error("Invalid Ego page label", FriendsErrorCode.InvalidInput);
 }
 
 async function runEgoJson<T>(script: string, command: string, timeoutMs: number, marker: string): Promise<T> {
@@ -94,7 +94,7 @@ try {
  const result = await prepareVolunteerOfferingPage(task, ${JSON.stringify(input)});
  console.log("FRIENDS_CLI_OFFERING_PREPARE:" + JSON.stringify(result));
 } catch (error) {
- console.log("FRIENDS_CLI_OFFERING_PREPARE:" + JSON.stringify({executionError:{code:error.code ?? "UNKNOWN_OUTCOME",message:error.message},status:"awaiting-user",submitted:false,actions:[],missing:["human-review:page"],finalSubmitActions:0}));
+ console.log("FRIENDS_CLI_OFFERING_PREPARE:" + JSON.stringify({executionError:{code:error.code ?? "UNKNOWN_OUTCOME",message:error.message},status:"awaiting-user",submitted:false,actions:[],missing:["human-review:page"]}));
 }
 `;
   const result = await runEgoJson<VolunteerOfferingVisiblePreparation>(

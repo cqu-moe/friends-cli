@@ -23,9 +23,9 @@ test("SDK rechecks offering context and builds only source-verified first-page f
   assert.equal(prepared.context.termNo, "1");
   assert.deepEqual(upstream.state.requests.map((request) => request.path).slice(-4), [
     "/gateway/zovecenter-saip-ek-app-young-volunteers/mob/organization/drop-down",
-    "/gateway/zovecenter-saip-ek-app-agg-mob/biz-common/system/data-code-list/mulit",
-    "/gateway/zovecenter-saip-ek-app-agg-mob/biz-common/system/vschool-year-list",
-    "/gateway/zovecenter-saip-ek-app-agg-mob/biz-common/system/vschool-term-list",
+    "/gateway/ek-agg-mob/biz-common/system/data-code-list/mulit",
+    "/gateway/ek-agg-mob/biz-common/system/vschool-year-list",
+    "/gateway/ek-agg-mob/biz-common/term-list",
   ]);
   assert.equal(prepared.payload.activityName, "虚构图书馆志愿活动");
   assert.equal(prepared.payload.organizationId, "org-1");

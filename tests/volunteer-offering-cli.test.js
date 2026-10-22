@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { saveSession } from "../dist/node.js";
+import { saveSession, prepareVolunteerOfferingInEgo } from "../dist/node.js";
 import { offeringInput, offeringSchool, offeringSession } from "./fixtures/volunteer-offering-api.mjs";
 import { setupOfferingEgo } from "./fixtures/volunteer-offering-ego.mjs";
 
@@ -105,10 +105,11 @@ test("real CLI executes generated Ego preparation, preserves human values, and h
   assert.equal(prepared.data.status, "awaiting-user");
   assert.equal(prepared.data.submitted, false);
   assert.equal(prepared.data.handoff, "completed");
-  assert.equal(prepared.data.finalSubmitActions, 0);
   assert.ok(prepared.data.actions.some((action) => action.field === "活动名称" && action.action === "human-value-preserved"));
   assert.ok(prepared.data.missing.includes("materials:publicityPictures"));
   const observed = await fixture.observed();
+  assert.ok(prepared.data.page.fields.some(field=>field.name==="活动联系人"&&field.value==="人工联系人"));
+  assert.ok(prepared.data.page.fields.some(field=>field.name==="活动开始时间"&&field.value==="2026-11-02 09:00"));
   assert.equal(observed.submits, 0);
   assert.equal(observed.handoffs, 1);
   assert.equal(observed.navigations, 0);
@@ -124,4 +125,28 @@ test("real CLI executes generated Ego preparation, preserves human values, and h
   assert.equal(egoStatus.data.applicationId, "intermediate-uuid");
 
   await (await import("node:fs/promises")).rm(home, { recursive: true, force: true });
+});
+
+
+test("public Node SDK visibly prepares actual iframe controls, preserves user values, and never submits", async (t) => {
+  const upstream = await offeringSchool(t);
+  const fixture = await setupOfferingEgo(t, {humanName:"人工活动名称",baseUrl:upstream.baseUrl});
+  const result = await prepareVolunteerOfferingInEgo({value:offeringInput(),taskSpaceId:16,page:"p1",baseUrl:upstream.baseUrl,command:fixture.command});
+  assert.equal(result.submitted,false);
+  assert.equal(result.executionError,null);
+  assert.ok(result.actions.some(a=>a.field==="活动名称"&&a.action==="human-value-preserved"));
+  assert.ok(result.actions.some(a=>a.field==="活动联系人"&&a.action==="human-value-preserved"));
+  assert.equal(result.page.fields.find(f=>f.name==="活动结束时间").value,"2026-11-02 12:00");
+  const seen=await fixture.observed();assert.equal(seen.submits,0);assert.equal(seen.handoffs,1);
+  await assert.rejects(()=>prepareVolunteerOfferingInEgo({value:offeringInput(),taskSpaceId:0,baseUrl:upstream.baseUrl,command:fixture.command}),e=>e.code==="INVALID_INPUT");
+});
+
+
+test("real CLI preserves UNKNOWN_OUTCOME after lost material response, with no repeat upload",async t=>{
+ const upstream=await offeringSchool(t);upstream.state.lostUploadNames=["banner.png"];
+ const home=await sessionHome();t.after(()=>import("node:fs/promises").then(fs=>fs.rm(home,{recursive:true,force:true})));
+ const raw=offeringInput();const path=join(home,"banner.png");await writeFile(path,new Uint8Array([1]));raw.materials={publicityPictures:[{path}]};
+ const env={...process.env,FRIENDS_HOME:home,FRIENDS_BASE_URL:upstream.baseUrl};
+ await assert.rejects(()=>run(resolve("dist/cli/main.js"),env,["offerings","materials","--input","-","--via","api","--confirm","--json"],JSON.stringify(raw)),e=>{assert.equal(e.code,7);const out=JSON.parse(e.stdout);assert.equal(out.error.code,"UNKNOWN_OUTCOME");return true;});
+ assert.equal(upstream.state.uploads.length,1);
 });

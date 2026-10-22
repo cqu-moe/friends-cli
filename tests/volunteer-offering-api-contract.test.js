@@ -76,13 +76,12 @@ test("SDK verifies a lost upload response by readback instead of claiming acknow
   const offering = client(upstream);
   const input = offeringInput();
   const prepared = await offering.prepare(input);
-  const materials = await offering.uploadMaterials(prepared, uploadIntent);
-  assert.equal(materials.state, "complete");
-  assert.equal(materials.uploaded, false);
-  assert.equal(materials.publicityPictures.uploadedCount, 1);
-  assert.equal(materials.uncertain.length, 1);
-  assert.equal(materials.uncertain[0].name, "banner.png");
-  assert.equal(materials.uncertain[0].confirmedByReadback, true);
+  await assert.rejects(()=>offering.uploadMaterials(prepared, uploadIntent),error=>{
+    assert.equal(error.code,"UNKNOWN_OUTCOME");
+    assert.equal(error.recovery.readback,"matched");
+    assert.ok(error.recovery.completed.some(item=>item.startsWith("publicity:")));
+    return true;
+  });
   assert.equal(upstream.state.uploads.length, 1);
 });
 
@@ -178,4 +177,12 @@ test("SDK status preserves unknown school flow fields verbatim", async (t) => {
   assert.equal(status.state, "present");
   assert.equal(status.raw.flowOverallState, "FUTURE_STATE");
   assert.equal(status.raw.flowCurrNode, undefined);
+});
+
+
+test("SDK revalidates offering materials and permission immediately before upload",async t=>{
+ const upstream=await offeringSchool(t);const offering=client(upstream);const prepared=await offering.prepare(offeringInput());
+ prepared.materials.publicityPictures=[{name:"danger.exe",file:new Blob(["x"]),size:1,type:"application/octet-stream"}];
+ await assert.rejects(()=>offering.uploadMaterials(prepared,uploadIntent),e=>e.code==="INVALID_INPUT");
+ assert.equal(upstream.state.uploads.length,0);
 });

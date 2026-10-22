@@ -217,7 +217,6 @@ export function registerOfferingCommands(program: Command, options: { baseUrl: s
         via: "ego-visible-prepare",
         requestMode: "visible-ego-prepare",
         remoteWrites: 0,
-        finalSubmitActions: 0,
       });
     });
 

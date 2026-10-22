@@ -110,19 +110,19 @@ export async function offeringSchool(t) {
         organizationType: "STUDENT",
       }]);
     }
-    if (path.endsWith("/data-code-list/mulit")) {
+    if (path === "/gateway/ek-agg-mob/biz-common/system/data-code-list/mulit") {
       return json(res, {
         QNZYZXNHDLX: [{ dataCode: "TYPE_CODE", dataName: "校内服务" }],
         QNZYZXNHDJB: [{ dataCode: "LEVEL_CODE", dataName: "校级" }],
       });
     }
-    if (path.endsWith("/vschool-year-list")) {
+    if (path === "/gateway/ek-agg-mob/biz-common/system/vschool-year-list") {
       return json(res, [{ schoolYear: "2026-2027", schoolYearName: "2026-2027", isCurrentYear: 1 }]);
     }
-    if (path.endsWith("/vschool-term-list")) {
-      return json(res, [{ termNo: "1", isCurrentTerm: 1 }]);
+    if (path === "/gateway/ek-agg-mob/biz-common/term-list") {
+      return json(res, [{ termNo: "1", isCurrentTerm: "1" }]);
     }
-    if (path.endsWith("/protected-file-upload") && req.method === "POST") {
+    if (path === "/gateway/ek-agg-mob/biz-common/protected-file-upload" && req.method === "POST") {
       const match = /name="groupId"\r?\n\r?\n([^\r\n]+)/.exec(body);
       const fileMatch = /filename="([^"]+)"/.exec(body);
       if (!match || !fileMatch) {
@@ -149,7 +149,7 @@ export async function offeringSchool(t) {
       });
       return json(res, [resourceUuid]);
     }
-    if (path.endsWith("/list-group-resource") && req.method === "POST") {
+    if (path === "/gateway/ek-agg-mob/biz-common/list-group-resource" && req.method === "POST") {
       const groupUuid = url.searchParams.get("groupUuid");
       return json(res, state.groups.get(groupUuid) ?? []);
     }
