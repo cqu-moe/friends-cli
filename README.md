@@ -434,3 +434,21 @@ friends courses reviews prepare <报名申请UUID> --type registration --decisio
 ```
 
 `review.json` 只接受 `{"message":"审批意见","time":"2026-10-23"}`，也可用 `--input -` 从 stdin 读取。API 实际执行必须显式 `--via api --yes`，执行前刷新身份、待办和详情；`--dry-run` 只读。Ego 查询直接使用核验后的学校 API；Ego 写入只准备可见对话框并保留人工现值，交接后 `submitted:false`，用户亲自最终确定，`--yes` 无法绕过。返回 `UNKNOWN_OUTCOME`（exit 7）时即使回查匹配也不能自动重交；先用 `show` 只读检查。详情见 [#15 验收记录](docs/verification/2026-10-23-course-reviews.md)。
+
+
+## 统一搜索（#24）
+
+`createUnifiedSearchClient({session, baseUrl?}).search({keyword?, types?, pagination?})` 组合现有课程、志愿服务和组织活动参与查询，不重复实现学校接口。类型为 `course`、`volunteer`、`organization-activity`，默认全选、每类从第 1 页取 1 页，每页 10 条。
+
+```sh
+friends search --keyword 示例
+friends search --type course,volunteer --page 2 --page-size 10 --max-pages 2
+friends search --input query.json
+friends search --keyword 示例 --via ego --ego-task-space 8 --ego-page p2
+```
+
+`--input -` 接受 stdin。JSON 与关键词/类型/分页 flags 互斥，独立设置每类页码与预算，例如 `{"keyword":"示例","types":["course","organization-activity"],"pagination":{"course":{"page":2,"pageSize":5,"maxPages":2},"organization-activity":{"maxPages":1}}}`。页大小为 1–100，每类最多扫描 1–20 页；未支持筛选、排序、空类型、未知字段及非法预算直接拒绝，不偷偷改为全量查询。
+
+结果按 `sources` 分组，条目保留 `type/id/record` 和正确的 `detail.operation/id`，不按跨类型 ID 去重。逐类输出实际页信息、总数、下一页、预算、停止原因与完整性；不生成全局排序、总数或下一页。`complete` 只有从该类第 1 页开始且学校明确无后页时才为 true，缺分页信息为 null；顶层 complete 仅在全部选中来源完整时为 true。预算统计领域 SDK 页面调用尝试，不包含身份核验请求。
+
+单来源失败保留其他来源或已读页面，标记 `partial` 并写 stderr，CLI exit 0；全部来源均失败时 `ok:false`，仍保留逐类错误，使用共同错误退出码（混合错误 exit 6）。未知业务状态留在原始领域 record，不推断报名/审批成功。同一账号和身份上下文贯穿全部查询；Ego 只读现有会话后直接调用 API，无点击、导航或业务写入，不静默改换身份。详见 [统一搜索验证记录](docs/verification/2026-10-23-unified-search.md)。
