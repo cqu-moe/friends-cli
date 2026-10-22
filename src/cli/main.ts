@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 import {organizationActivitySchemas,registerOrganizationActivityCommands} from "./organization-activities.js";
+
+import {courseReviewSchemas, registerCourseReviewCommands} from "./course-reviews.js";
 import {volunteerActivityReviewSchemas,registerVolunteerActivityReviewCommands} from "./volunteer-activity-reviews.js";
 import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
+import { courseOfferingSchemas, registerCourseOfferingCommands } from "./course-offering.js";
 import { Command } from "commander";
+import { organizationActivityReviewSchemas, registerOrganizationActivityReviewCommands } from "./organization-activity-reviews.js";
 import {
   courseId,
   validateCourseListInput,
@@ -27,20 +31,33 @@ import {
 import { createCquAuthClient } from "../auth.js";
 import { resolveQuerySession } from "./session.js";
 import { draftSchemas, registerDraftCommands } from "./drafts.js";
+import {
+  courseParticipationSchemas,
+  registerCourseParticipationCommands,
+} from "./course-participation.js";
 import { organizationSchemas, registerOrganizationCommands } from "./organizations.js";
 import { registerVolunteerCommands, volunteerSchemas } from "./volunteer.js";
 import { registerVolunteerReviewCommands, volunteerReviewSchemas } from "./volunteer-reviews.js";
 import { offeringSchemas, registerOfferingCommands } from "./offerings.js";
 
+import {organizationParticipationSchemas,registerOrganizationParticipationCommands} from "./organization-participation.js";
+
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
   ...organizationActivitySchemas,
+
+  ...organizationParticipationSchemas,
+  ...courseReviewSchemas,
   ...offeringSchemas,
   ...volunteerActivityReviewSchemas,
   ...certificationApiSchemas,
+  ...courseOfferingSchemas,
   ...draftSchemas,
+  ...courseParticipationSchemas,
   ...organizationSchemas,
   ...volunteerSchemas,
+
+  ...organizationActivityReviewSchemas,
   ...volunteerReviewSchemas,
   errors: {
     operation: "errors", readonly:true, permission:"none", phases:["inspect"], supportedVia:["local"],
@@ -364,6 +381,10 @@ auth
 
 const courses = program.command("courses").description("Course queries");
 
+registerCourseParticipationCommands(courses, {
+  baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
+});
+
 courses
   .command("list")
   .description("List one page of courses")
@@ -407,6 +428,11 @@ courses
     });
   });
 
+registerOrganizationParticipationCommands(program,{baseUrl:process.env.FRIENDS_BASE_URL??productionBaseUrl});
+registerOrganizationActivityReviewCommands(program, { baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl });
+
+
+registerCourseReviewCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 registerVolunteerActivityReviewCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 registerCertificationApiCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 
@@ -425,6 +451,10 @@ registerVolunteerCommands(program, {
   output,
   selectedSession: (options) =>
     resolveQuerySession(options, process.env.FRIENDS_BASE_URL ?? productionBaseUrl),
+});
+
+registerCourseOfferingCommands(program, {
+  baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,
 });
 
 registerVolunteerReviewCommands(program, {
@@ -452,7 +482,9 @@ program.parseAsync(process.argv).catch(async (error: unknown) => {
   const nextAction =
     friendsError.code === FriendsErrorCode.AuthRequired
       ? `friends auth login --method ${await loadSession().then(session => session.loginMethod).catch(() => "local")}`
-      : undefined;
+      : friendsError.code === FriendsErrorCode.UnknownOutcome
+        ? "Inspect read-only output before any human retry; for course registrations use friends courses registrations list --json"
+        : undefined;
   process.stdout.write(
     `${JSON.stringify(
       {

@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';import {test} from 'node:test';import {spawn} from 'node:child_process';import {mkdtemp,writeFile,rm} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';import {participationScenario,participationSession} from './fixtures/organization-participation.mjs';
+export async function run(args,env,input){return new Promise((resolve,reject)=>{const p=spawn(process.execPath,['dist/cli/main.js',...args],{env});let stdout='',stderr='';p.stdout.on('data',d=>stdout+=d);p.stderr.on('data',d=>stderr+=d);p.on('error',reject);p.on('close',code=>resolve({code,stdout,stderr}));p.stdin.end(input);});}
+async function environment(t,api){const home=await mkdtemp(join(tmpdir(),'friends-organization-cli-'));t.after(()=>rm(home,{recursive:true,force:true}));await writeFile(join(home,'session.json'),JSON.stringify({...participationSession,schemaVersion:1,storage:'file',loginMethod:'local',account:{userNo:'20210001',userName:'示例学生'},context:{levelNo:'XS',levelName:'学生',unit:{unitNo:'college-1',unitName:'示例学院',unitType:1}}}),{mode:0o600});return {...process.env,FRIENDS_HOME:home,FRIENDS_BASE_URL:api.baseUrl};}
+test('CLI organization participation reads, validates stdin/file and confirms SDK writes with versioned output',async t=>{
+ const api=await participationScenario();t.after(api.close);const env=await environment(t,api);const cli=['organization-participation'];
+ for(const args of [['list','--mine'],['show','org-activity-1']]){const r=await run([...cli,...args],env);assert.equal(r.code,0,r.stderr);assert.equal(JSON.parse(r.stdout).meta.requestMode,'direct-api');assert.equal(r.stderr,'');assert.equal(r.stdout.trim().split('\n').length,1);}
+ const cmd=[...cli,'register','org-activity-1','--via','api','--input','-'];
+ const dry=await run([...cmd,'--dry-run'],env,JSON.stringify({'q-1':'示例参与'}));assert.equal(dry.code,0,dry.stderr);assert.equal(JSON.parse(dry.stdout).data.submitted,false);
+ assert.equal((await run(cmd,env,'{}')).code,2);const result=await run([...cmd,'--yes'],env,JSON.stringify({'q-1':'示例参与'}));assert.equal(result.code,0,result.stderr);assert.equal(JSON.parse(result.stdout).data.registrationId,'org-registration-1');
+ api.row.applicationCode=7;assert.equal((await run([...cli,'exit','org-activity-1','--via','api','--yes'],env)).code,0);
+ assert.equal((await run([...cli,'--help'],env)).code,0);assert.equal(JSON.parse((await run(['schema','organization-participation.prepare'],env)).stdout).data.requestMode,'visible-ui');
+ assert.equal((await run([...cli,'register','org-activity-1','--via','ego','--yes'],env)).code,2);
+});
+test('CLI organization participation reports transport loss as exit 7 with one attempted business write',async t=>{
+ const api=await participationScenario();t.after(api.close);api.state.mode='lost';const env=await environment(t,api);const file=join(env.FRIENDS_HOME,'answers.json');await writeFile(file,JSON.stringify({'q-1':'参与'}));const r=await run(['organization-participation','register','org-activity-1','--via','api','--input',file,'--yes'],env);assert.equal(r.code,7,r.stderr);assert.equal(JSON.parse(r.stdout).error.recovery.readback,'matched');assert.equal(api.requests.filter(r=>r.path.endsWith('/enroll-info')).length,1);
+});

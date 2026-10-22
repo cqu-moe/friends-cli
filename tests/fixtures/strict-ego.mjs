@@ -8,11 +8,12 @@ if(!configuration.executeSession&&script.includes('FRIENDS_CLI_EGO_SESSION:')) {
   console.log('FRIENDS_CLI_EGO_SESSION:'+JSON.stringify({token:'ego-fixture-token',userLevel:'XS'}));
   process.exit(0);
 }
-const stats={clicks:[],fills:[],handoffs:0,newPages:0,navigations:0,loadStates:0,submits:0,finalRequests:0,snapshots:0};
+const stats={clicks:[],fills:[],handoffs:0,newPages:0,navigations:0,loadStates:0,submits:0,remoteWrites:0,finalRequests:0,snapshots:0};
 const html=await readFile(configuration.html,'utf8');
 function initialize(w){
   w.fetch=async(url,init)=>{
-    const method=init?.method??'GET';
+    const method=(init?.method??'GET').toUpperCase();
+    if(['POST','PUT','PATCH','DELETE'].includes(method))stats.remoteWrites++;
     if(method==='POST')stats.submits++;
     if(['/write','/quit'].includes(new URL(url,configuration.url).pathname)&&method!=='GET')stats.finalRequests++;
     return fetch(new URL(url,configuration.url),init);
@@ -23,7 +24,7 @@ function initialize(w){
   w.localStorage.setItem('loginModel_str','STUDENT');
   w.localStorage.setItem('userInfo_obj',JSON.stringify({userNo:configuration.accountUserNo??'20210001'}));
 }
-const dom=new JSDOM(configuration.iframe?`<iframe src="${configuration.url}"></iframe>`:html,{url:configuration.url,runScripts:'dangerously',beforeParse:initialize});
+const dom=new JSDOM(configuration.iframe?`<iframe src="${configuration.url}"></iframe>`:html,{url:configuration.outerUrl??configuration.url,runScripts:'dangerously',beforeParse:initialize});
 const w=dom.window;
 const d=configuration.iframe?w.document.querySelector('iframe').contentDocument:w.document;
 const content=d.defaultView;
@@ -66,8 +67,8 @@ function one(selector){
 function active(){if(saved.ownership==='user'||stats.handoffs)throw new Error('Browser operation after handOff');}
 const page={
   label:'p1',
-  async url(){active();return configuration.url;},
-  async goto(){active();stats.navigations++;},
+  async url(){active();return configuration.outerUrl??configuration.url;},
+  async goto(){active();stats.navigations++;if(stats.newPages===0)throw new Error('Unexpected navigation would discard fixture edits');},
   async waitForLoadState(){active();stats.loadStates++;},
   async snapshot(){
     active();
@@ -140,6 +141,7 @@ try {
   }
   await writeFile(configuration.result,JSON.stringify({
     ...stats,
+    model:content.__courseForm??null,
     html:d.body.innerHTML,
     fieldValues:[...d.querySelectorAll('input,textarea')].map(e=>({id:e.id||null,ariaLabel:e.getAttribute('aria-label'),value:e.value})),
   }));

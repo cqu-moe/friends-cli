@@ -41,7 +41,7 @@ function queryOptions(command: Command) {
   return command.option('--via <source>','api or existing Ego session','api').option('--ego-task-space <number>','existing Ego task space').option('--ego-page <label>','existing Ego page label').option('--level-no <value>','select Ego school identity').option('--unit-no <value>','select Ego school unit').option('--json','print versioned JSON',true);
 }
 export function registerOrganizationActivityCommands(program: Command,{baseUrl}: {baseUrl: string}) {
-  const root = program.command('organization-activities').description('Organization activity browsing and opening applications');
+  const root = (program.commands.find(command => command.name() === 'organization-activities') ?? program.command('organization-activities')).description('Organization activity browsing and opening applications');
   const output = (operation: string,data: unknown,entry: 'api'|'ego',requestMode: string) => process.stdout.write(`${JSON.stringify({schemaVersion:1,ok:true,data,meta:{operation,selectedEntry:entry,requestMode}})}\n`);
   async function source(options: Record<string,string>) {
     const selected = await resolveQuerySession(options,baseUrl);
