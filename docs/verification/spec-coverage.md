@@ -50,7 +50,7 @@ SDK 名称指 npm 根入口；页面/存储适配器从 `/node` 导入，原生�
 | #11 | [两类志愿审批](2026-10-22-volunteer-activity-reviews.md) | SDK/CLI 两领域、严格 URL/ID/权限、真实 DOM 决定准备 | 10-23 真实 CLI `volunteer activity-reviews list --type registration --via ego --page-size 1` 成功、0 项；此前记录 hasMore=false。无真实决定弹窗或写入 |
 | #12 | [个人时长与认证审批](2026-10-22-volunteer-reviews.md) | SDK/CLI 时长、审批与错误；实际 DOM radio/textarea | 真实 CLI Ego 时长空列表；审批因当前角色权限不足拒绝。无真实审批准备/保存/最终提交 |
 | #13 | [课程参与源码与测试](2026-10-22-course-participation.md) | SDK/CLI 参与写入、问卷/材料、状态；iframe 实际事件 | 10-23 真实 CLI `courses registrations list --via ego` 返回 1 项。无真实报名、撤销或退出；角色控件等需用户处理 |
-| #14 | [CourseInfo/ReportSet、材料边界](2026-10-23-course-offering.md) | SDK/CLI 六阶段、丢失响应、严格 iframe DOM | 10-23 实际 SDK prepare 组织/字典查询成功；最新可见文本、类型、级别已填，组织原值匹配并保留。**开始时间仍有差异，修复及最终复测待补**，不宣称完整准备通过；无上传/下一步/最终提交 |
+| #14 | [CourseInfo/ReportSet、材料边界](2026-10-23-course-offering.md) | SDK/CLI 六阶段、丢失响应、严格 iframe DOM | 10-23 实际 SDK prepare 组织/字典查询成功；`080d893` 真实 helper 恢复及空表单完整录入通过，组织原值匹配，`executionError:null`、`submitted:false`。主任务重载清理后非空可编辑项/上传均为 0；handoff 被抑制（`handoffExercised:false`），实际公开 SDK/CLI 整体入口及真实交接未单独验收，无上传/下一步/最终提交 |
 | #15 | [课程两类审批源码](2026-10-23-course-reviews.md)、[角色核验修复](2026-10-23-review-context-fix.md) | SDK/CLI、权限/节点/状态、真实 DOM 与零最终请求 | 10-23 主任务在功能提交 `dff1dd1` 的真实 CLI Ego 报名待办查询成功、0 项；此前 AUTH_REQUIRED 修复已进入 integration。无真实准备/决定；受控回查不证明整体获批 |
 | #18 | [组织活动查询、两步开办与材料](2026-10-23-organization-activities.md) | SDK/真实 CLI 全部命令、严格路径/材料、多步停止、iframe 实际文本与事件 | 10-23 主任务真实 CLI list/show/requirements 成功；错误历史端点修正后，`e53aea7` 公开 SDK status 成功，nodeList=3、evaluationRecords=2，已随 `42f7d28` 合入。无开办准备/上传/申请写入。材料资源回查只核对 ID/文件名，不证明字节哈希 |
 | #19 | [组织活动参与源码](2026-10-23-organization-participation.md) | SDK/CLI 参与、材料组、丢失响应；实际 DOM | 10-23 真实 CLI list/show 同一项成功，但报名窗口关闭。无实际报名/撤销/退出 |

@@ -162,9 +162,9 @@ API 写入要求 `--via api` 和字面确认：报名 `--confirm apply`、撤销
 
 上传、第一步保存或最终提交响应丢失时返回 `UNKNOWN_OUTCOME`（退出码 7）。`error.recovery` 保留可另存为申请 JSON 的 `input`、已确认上传项、待确认文件、材料组和已有课程 UUID；已知 UUID 或上传组只做只读回查。即使回查匹配仍保持未知，不重试、不继续下一写操作，也不跨 API/Ego 续交。首次创建丢失 UUID 时无法按 ID 回查，必须人工核实。确认提交后回查失败，也会保留 `serverAcknowledged:true` 并以未知结果停止。
 
-`prepare-ego` 核验既有 Ego 页面中的账号、角色、路由和课程标识，只通过同源 iframe 内的可见控件准备名称、地址、介绍、类型、级别、组织和日期。既支持直接具名控件，也支持公开源码中的 Vant 标签、slot 和分行文本域；picker 等待选项选中及动画结束后才确认。已有人工值会保留，积分、认证设置、材料和下一页报名设置交给用户审阅；缺项及中途失败记录在 `missing`、`executionError` 中，然后 `handOff()`。`submitted:false`，不点“下一步/提交”，`--yes`、`--confirm` 无法绕过。dry-run 不导航、不录入、不点击、不交接。
+`prepare-ego` 核验既有 Ego 页面中的账号、角色、路由和课程标识，只通过同源 iframe 内的可见控件准备名称、地址、介绍、类型、级别、组织和日期。既支持直接具名控件，也支持公开源码中的 Vant 标签、slot 和分行文本域；picker 等待选项选中及动画结束后才确认。已有人工值会保留，积分、认证设置、材料和下一页报名设置交给用户审阅；缺项记录在 `missing` 中；底层可见准备出现中途失败时先 `handOff()`，公共 SDK 随后抛出 `UNKNOWN_OUTCOME`，CLI 退出 7，`error.recovery` 保留已完成字段、已有课程 ID、页面值、缺项及交接状态。已打开的人工 picker 不会自动取消或续跑。`submitted:false`，不点“下一步/提交”，`--yes`、`--confirm` 无法绕过。dry-run 不导航、不录入、不点击、不交接。
 
-`status <courseUuid> --via api|ego` 直接查询 `GET apply/approve-detail/{uuid}`；Ego 来源先核验登录上下文。只投影必要课程、组织与流程状态，未知枚举不解释为获批。材料上传、第一步保存、提交确认和开办批准是不同结果。本任务仅完成源码核对与受控 SDK/CLI/iframe 验证，真实 Ego 和生产写入尚未验收。
+`status <courseUuid> --via api|ego` 直接查询 `GET apply/approve-detail/{uuid}`；Ego 来源先核验登录上下文。只投影必要课程、组织与流程状态，未知枚举不解释为获批。材料上传、第一步保存、提交确认和开办批准是不同结果。本任务完成源码核对与受控 SDK/CLI/iframe 验证；主任务另实测真实学校 Ego helper 的恢复和空表单可见录入并清理测试输入。该实测抑制 handoff，真实公开 SDK/CLI 整条生产链路及所有权交接仍未单独验收；没有上传、下一步或最终提交，见 [分层验收记录](docs/verification/2026-10-23-course-offering.md)。
 
 ## 志愿认证草稿
 
@@ -199,7 +199,7 @@ friends drafts capture <draftId> --via ego --ego-task-space 16 \
 - CQU Auth 生产 native/public client 尚未注册，线上真实 Auth 登录、同意、ST 核销和学校 API 验收由后续配置与主线程验收完成；仓库内受控 HTTP 服务通过不能替代这些生产验收。
 - 课程接口和身份形状已按 2026-10-22 只读实测固化；接口资料中的历史 `verified` 不被当作当前生产验收。
 - 本仓库测试使用虚构 HTTP/Ego 场景。学校登录与只读查询单独记录于 [验收记录](docs/verification/2026-10-22-local-courses.md)，CI 通过不代表生产写入能力。
-- 课程开办的 SDK、真实 CLI 子进程和 strict Ego 脚本已用受控 HTTP/jsdom 场景验证；真实 Ego 页面、材料上传和最终开办写入尚未执行，不能宣称生产验收。
+- 课程开办的 SDK、真实 CLI 子进程和 strict Ego 脚本已用受控 HTTP/jsdom 场景验证；主任务另实测学校真实 helper 的恢复、完整可见录入和清理。该实测未执行真实 handoff、上传、下一步或最终提交，不能扩大为生产 SDK/CLI 整条链路或开办获批验收。
 - 查询类操作可使用 API；后续 Ego 写操作按阶段执行，需要审阅的表单只录入并交接，由用户亲自最终提交。
 - Ego 查询的受控 SDK/CLI 验收见 [Ego 课程查询验收](docs/verification/2026-10-22-ego-course-query.md)；真实已安装 Ego 与学校登录态实测由集中操作另行记录，不能由本仓库受控测试替代。
 - 志愿身份/活动/个人报名的受控 SDK、CLI 与 strict-Ego DOM 验收见 [志愿操作验收](docs/verification/2026-10-22-volunteer-operations.md)；真实 Ego、生产只读和授权写入仍是独立验收层。

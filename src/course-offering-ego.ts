@@ -13,7 +13,6 @@ export interface CourseOfferingEgoResult {
   missing?: string[];
   executionError?: { code: string; message: string } | null;
   prepared?: PreparedCourseOfferingApplication;
-  finalSubmitActions: 0;
 }
 
 interface Options {
@@ -98,7 +97,7 @@ export async function prepareCourseOfferingInEgo(options: Options): Promise<Cour
   const client = await createFriendsSdk({ baseUrl }).createCourseOfferingClient(options.session);
   const prepared = await client.prepare(options.application);
   if (options.dryRun) {
-    return { status: "ready", submitted: false, dryRun: true, prepared, finalSubmitActions: 0 };
+    return { status: "ready", submitted: false, dryRun: true, prepared };
   }
   const runtime = new URL("./course-offering-page.js", import.meta.url).href;
   const input = {
@@ -133,12 +132,31 @@ try {
   if (
     raw.status !== "awaiting-user" ||
     raw.submitted !== false ||
-    raw.handoff !== "completed" ||
-    raw.finalSubmitActions !== 0
+    raw.handoff !== "completed"
   ) {
     throw error("The Ego course preparation did not preserve the required handoff boundary", FriendsErrorCode.UnknownOutcome);
   }
-  return { ...(raw as unknown as CourseOfferingEgoResult), prepared };
+  const result = raw as unknown as CourseOfferingEgoResult;
+  if (result.executionError != null) {
+    const { term, organization, typeName, levelName, materialGroups, ...input } = prepared;
+    throw new FriendsError({
+      code: FriendsErrorCode.UnknownOutcome,
+      message: "Visible course preparation stopped. Inspect the handed-off page before any new operation; no automatic retry was made.",
+      recovery: {
+        operation: "course-offering.prepare-ego",
+        courseId: prepared.uuid ?? undefined,
+        applicationId: prepared.uuid ?? undefined,
+        organizationId: prepared.organization.id,
+        input,
+        completed: result.actions?.filter(action => action.action === "filled" || action.action === "already-matching").map(action => action.field) ?? [],
+        handoff: result.handoff,
+        page: result.page,
+        missing: result.missing,
+        executionError: result.executionError,
+      },
+    });
+  }
+  return { ...result, prepared };
 }
 
 export type { CourseOfferingApplication };
