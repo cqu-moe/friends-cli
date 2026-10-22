@@ -18,6 +18,7 @@ if(saved.rows){w.__rows=saved.rows;w.eval('rows.splice(0,rows.length,...__rows);
 function visible(element){for(let current=element;current;current=current.parentElement)if(w.getComputedStyle(current).display==='none')return false;return true;}
 function matches(selector,includeHidden=false){
  if(selector.startsWith('text=')){const value=JSON.parse(selector.slice(5));return [...w.document.querySelectorAll('button,div,span')].filter(e=>visible(e)&&e.textContent.trim()===value&&![...e.children].some(child=>child.textContent.trim()===value));}
+ if(selector.startsWith('xpath=')){const result=w.document.evaluate(selector.slice(6),w.document,null,7,null);return Array.from({length:result.snapshotLength},(_,i)=>result.snapshotItem(i)).filter(visible);}
  const css=selector.replace(/^loc=css:/,'');
  const text=css.match(/:(?:text-is|has-text)\((".*")\)$/);const base=text?css.slice(0,text.index):css;
  return [...w.document.querySelectorAll(base)].filter(e=>(includeHidden||visible(e))&&(!text||(css.includes(':has-text(')?e.textContent.trim().includes(JSON.parse(text[1])):e.textContent.trim()===JSON.parse(text[1]))));
