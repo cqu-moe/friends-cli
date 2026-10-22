@@ -520,3 +520,43 @@ test("SDK rejects unknown login types and verifies the entered level and unit", 
   server.closeAllConnections();
   server.close();
 });
+
+
+test("SDK full query chain preserves unknown pagination and rejects expired, denied and conflicting contexts", async (t) => {
+  let mode = "normal";
+  let entered = 0;
+  const server = createServer((req,res) => {
+    let body="";req.on("data",chunk=>body+=chunk);
+    req.on("end",()=>{
+      if (mode==="expired" || mode==="denied") { json(res,mode==="expired"?401:403,{});return; }
+      if (req.url.endsWith("/checkUserAndGetUserLevel")) {
+        json(res,200,{code:"0",data:{userLoginType:"STUDENT",loginLevels:[{levelNo:"XS",levelName:"学生",units:[{unitNo:"unit-a",unitName:"A",unitType:2},{unitNo:"unit-b",unitName:"B",unitType:2}]}]}});return;
+      }
+      if (req.url.endsWith("/user/info")) {json(res,200,{code:"0",data:{userNo:"fixture-account",userName:"示例"}});return;}
+      if (req.url.endsWith("/enterHall")) {
+        entered++;const input=JSON.parse(body);json(res,200,{code:"0",data:{account:"fixture-account",name:"示例",userLoginStateLevel:input.userStateLevel,departmentNo:input.departNo}});return;
+      }
+      if (req.url.endsWith("student-apply-page-list")) {json(res,200,{code:"0",data:{data:[{uuid:"fixture-course",curriculumName:"示例课程"}]}});return;}
+      json(res,200,{code:"0",data:{uuid:"fixture-course",curriculumName:"示例课程",roles:[],questionnaires:[]}});
+    });
+  });
+  t.after(()=>{server.closeAllConnections();server.close();});
+  await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
+  const sdk=createFriendsSdk({baseUrl:`http://127.0.0.1:${server.address().port}/gateway`});
+  const browser={token:"fixture-token",userLevel:"XS"};
+  const identity=await sdk.inspectLocalSession(browser);
+  const activated=await sdk.activateLocalContext({...browser,selector:{unitNo:"unit-a"}});
+  const client=await sdk.createCourseClient({...browser,...activated});
+  const page=await client.list();
+  assert.equal(page.totalCount,null);assert.equal(page.hasMore,null);assert.equal(page.hasMoreSource,"unknown");
+  assert.equal((await client.get(courseId(page.items[0].id))).id,"fixture-course");
+  const before=entered;
+  await assert.rejects(()=>sdk.createCourseClient({...browser,account:identity.account,context:identity.contexts[1]}),e=>e.code===FriendsErrorCode.UpstreamBusiness);
+  assert.equal(entered,before);
+  for (const [scenario,code] of [["expired",FriendsErrorCode.AuthRequired],["denied",FriendsErrorCode.PermissionDenied]]) {
+    mode=scenario;await assert.rejects(()=>client.list(),e=>e.code===code);
+  }
+  mode="normal";
+  const restored=await sdk.createCourseClient({...browser,...activated});
+  assert.equal((await restored.list()).items.length,1);
+});

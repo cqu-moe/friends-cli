@@ -29,6 +29,12 @@ test("real CLI performs local login, fixed-context activation, storage, and cour
         reply(res, { code: "10030", message: "resource unavailable", requestId: "request-cli" });
         return;
       }
+      if (mode === "permission") {
+        res.writeHead(403); res.end("{}"); return;
+      }
+      if (mode === "protocol") {
+        res.writeHead(200); res.end("not-json"); return;
+      }
       if (mode === "expired") {
         res.writeHead(401, { "content-type": "application/json" });
         res.end("{}");
@@ -225,6 +231,13 @@ test("real CLI performs local login, fixed-context activation, storage, and cour
       return true;
     },
   );
+  for (const [scenario, exit, code] of [["permission",4,"PERMISSION_DENIED"],["protocol",6,"NETWORK_PROTOCOL_ERROR"]]) {
+    mode = scenario;
+    await assert.rejects(() => run(process.execPath,[cli,"courses","list","--json"],{env}), error => {
+      assert.equal(error.code,exit); assert.equal(JSON.parse(error.stdout).error.code,code);
+      assert.ok(error.stderr.trim()); return true;
+    });
+  }
   mode = "expired";
   await assert.rejects(
     () => run(process.execPath, [cli, "courses", "list", "--json"], { env }),

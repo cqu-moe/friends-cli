@@ -108,3 +108,43 @@ test("file storage uses a dedicated secure directory and rejects invalid session
     await rm(parent, { recursive: true, force: true });
   }
 });
+
+
+test("default keyring stores isolated secrets or fails without a file fallback", {timeout:15000}, async () => {
+  const {mkdtemp,realpath}=await import("node:fs/promises");
+  const {createHash}=await import("node:crypto");
+  const parent=await mkdtemp(join(tmpdir(),"friends-keyring-test-"));
+  const previousHome=process.env.FRIENDS_HOME;
+  const previousBus=process.env.DBUS_SESSION_BUS_ADDRESS;
+  const homes=[join(parent,"one"),join(parent,"two")];
+  const session={schemaVersion:1,loginMethod:"local",storage:"keyring",token:"synthetic-one",userLevel:"XS",account:{userNo:"fixture",userName:"示例"},context:{levelNo:"XS",levelName:"学生",unit:{unitNo:"unit",unitName:"院系",unitType:2}}};
+  const written=[];
+  try {
+    process.env.FRIENDS_HOME=homes[0];
+    if (process.platform==="linux") {
+      process.env.DBUS_SESSION_BUS_ADDRESS="unix:path=/nonexistent/friends-keyring-test";
+      await assert.rejects(()=>saveSession(session),e=>e.code==="AUTH_REQUIRED");
+      await assert.rejects(()=>readFile(join(homes[0],"session.json")),e=>e.code==="ENOENT");
+    } else if(process.platform==="darwin") {
+      for (let i=0;i<homes.length;i++) {
+        process.env.FRIENDS_HOME=homes[i];
+        await saveSession({...session,token:`synthetic-${i}`});written.push(homes[i]);
+        const metadata=JSON.parse(await readFile(join(homes[i],"session.json"),"utf8"));
+        assert.equal(metadata.storage,"keyring");assert.ok(!metadata.token);
+      }
+      for (let i=0;i<homes.length;i++) {
+        process.env.FRIENDS_HOME=homes[i];assert.equal((await loadSession()).token,`synthetic-${i}`);
+      }
+    } else {
+      await assert.rejects(()=>saveSession(session),e=>e.code==="INVALID_INPUT");
+    }
+  } finally {
+    if(written.length) {
+      const {Entry}=await import("@napi-rs/keyring");
+      for (const home of written) new Entry("friends-cli","local-session:"+createHash("sha256").update(await realpath(home)).digest("hex")).deletePassword();
+    }
+    if(previousHome===undefined) delete process.env.FRIENDS_HOME; else process.env.FRIENDS_HOME=previousHome;
+    if(previousBus===undefined) delete process.env.DBUS_SESSION_BUS_ADDRESS; else process.env.DBUS_SESSION_BUS_ADDRESS=previousBus;
+    await rm(parent,{recursive:true,force:true});
+  }
+});
