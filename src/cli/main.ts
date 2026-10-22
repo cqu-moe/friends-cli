@@ -28,9 +28,11 @@ import { resolveQuerySession } from "./session.js";
 import { draftSchemas, registerDraftCommands } from "./drafts.js";
 import { organizationSchemas, registerOrganizationCommands } from "./organizations.js";
 import { registerVolunteerReviewCommands, volunteerReviewSchemas } from "./volunteer-reviews.js";
+import { offeringSchemas, registerOfferingCommands } from "./offerings.js";
 
 const productionBaseUrl = "https://friends.cqu.edu.cn/gateway";
 const schemas = {
+  ...offeringSchemas,
   ...volunteerActivityReviewSchemas,
   ...certificationApiSchemas,
   ...draftSchemas,
@@ -403,6 +405,8 @@ courses
 
 registerVolunteerActivityReviewCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 registerCertificationApiCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
+
+registerOfferingCommands(program, { baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl });
 
 registerDraftCommands(program, {
   baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl,

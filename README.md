@@ -1,6 +1,6 @@
 # friends-cli
 
-重庆大学第二课堂平台的本地 CLI 与可复用 SDK。当前交付 Issue #2–#3 的最小只读课程链、Issue #4 的 CQU Auth OAuth/DPoP 登录与恢复、Issue #5 的志愿认证本地草稿、Issue #12 的个人志愿时长与认证审批查询/受控决定，以及 Issue #21 的学生组织查询、成员查询与组织资料受控维护：Ego 浏览器本地登录、学校 API 身份/上下文核验、课程查询、可管理志愿活动/报名名单只读查询、草稿编辑与恢复、志愿时长/认证审批查询、组织/资料/成员查询。不包含组织活动报名、审批、成员写入或部门维护。
+重庆大学第二课堂平台的本地 CLI 与可复用 SDK。SDK 提供共享业务契约；CLI 支持本地 API 与 Ego 会话查询、活动与认证准备、明确确认的 API 写入。Ego 写操作保留给用户审核并亲自最终提交。完整范围和验证层次见下文与 docs/verification。
 
 ## 安装与命令
 
@@ -45,6 +45,11 @@ friends volunteer-certification-reviews prepare <reviewUuid> \
 friends drafts activities --via ego --ego-task-space 16 --ego-page p1 --json
 friends drafts create --activity-id <activityUuid> --json
 friends drafts edit <draftId> --expected-revision 0 --input patch.json --json
+friends offerings prepare --input offering.json --via api --json
+friends offerings materials --input offering.json --via api --dry-run --json
+friends offerings materials --input offering.json --via api --confirm --json
+friends offerings submit --input offering.json --via api --publicity-group-uuid <32-hex> --confirm --json
+friends offerings status <offeringApplicationUuid> --via ego --ego-task-space 16 --json
 ```
 
 多身份/多单位时，命令要求同时提供 `--level-no` 与 `--unit-no`，不会默认选择第一项。课程 UUID 只用于课程详情，不能替换报名记录、认证申请或其他领域 UUID。
@@ -144,6 +149,22 @@ friends certification status <activityId> --via ego --ego-task-space 16
 认证审批 API 决定只暴露生产页面可见的 `pass` 和 `back`。决定必须独立 `--via api`，并使用 `--confirm` 或 `--dry-run`；写入前会用当前学校会话重新核对账号、真实角色、待办列表、申请 UUID 和活动绑定，BACK 的回退节点只能来自学校 callback-list。请求确认和只读回查分开返回，写入响应丢失时即使回查匹配也保持 `UNKNOWN_OUTCOME`，不会重试。
 
 Ego prepare 同样用已核验会话新建 review SDK client 并重新读取学校返回的账号、角色、待办申请和活动绑定，不信任 CLI 传入的角色或绑定。它会复用已打开的目标审批页；其他页面直接拒绝，只有调用者显式给出 `--allow-blank-navigation` 且当前页是 `about:blank` 时才导航。命令先取得页面快照再点击通过/打回；若审批意见已有非空人工输入则保留该值，只在空字段填入请求意见，然后输出 `submitted:false` 并交接页面。它不点击最终确认、不触发保存 PUT、不调用写入 API；BACK 的回退节点和最终提交由用户人工确认。
+
+## 校内志愿活动开办申请
+
+`offerings prepare` 会重新核验学校身份、志愿组织、活动类型/等级和当前学年学期，只构造公开源码核实过的第一页与报名字段。`SCHOOL_ACTIVITY` 先创建中间 UUID 再最终提交；`TEMP_ACTIVITY` 的 `next-step` 本身就是最终写入，并额外携带 `posts: []` 与 `nameList`。两类标识和输入不同，不能互换。
+
+材料 JSON 引用本地文件，路径按输入文件目录解析（stdin 按 CLI 当前目录解析），也可以用 `name` 覆盖上传文件名：
+
+```json
+{"materials":{"publicityPictures":[{"path":"banner.png"}],"attachments":[{"path":"details.pdf","name":"虚构明细.pdf"}]}}
+```
+
+公开图片最多 5 张、每张 20 MiB，仅接受图片；附件最多 10 个，普通附件 20 MiB、视频 200 MiB。`offerings materials` 使用标准 `FormData` 上传到 protected upload 接口并逐组只读回查；部分失败时保留已完成资源和组 UUID，不重试、不清理。上传响应丢失时即使回查发现文件，也报告不确定，不宣称服务器已确认。
+
+正式 API 提交必须独立 `--via api --confirm`，并传入材料阶段返回的 publicity/attachment 组 UUID；`--dry-run` 只重新校验与只读回查，不需要组 UUID。Ego 只支持可见 prepare：打开或复用对应开办页，可见填写文本、数字、日期和包装层选择器，保留人工已有值，不上传材料、不点击“下一步”或“提交申请”，交接后返回 `submitted:false`。`offerings submit --via ego` 在副作用前拒绝。进度查询可从 API 或 Ego 会话直接调用同一个只读详情接口，未知学校流程字段原样保留。
+
+`UNKNOWN_OUTCOME`（退出码 7）表示学校可能已接受请求；结果中会保留已发生的组 UUID、中间申请 UUID（若已取得）和只读回查状态，调用者必须先查 manager/status，不得自动重试或跨 API/Ego 续交。
 
 ## 学生组织
 
