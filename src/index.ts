@@ -622,3 +622,6 @@ export function createFriendsSdk(options: {
 }
 export {createVolunteerActivityReviewClient} from './volunteer-activity-reviews.js';
 export type {VolunteerActivityReviewType, VolunteerActivityReviewInput, PreparedVolunteerActivityReview, VolunteerActivityReviewClientOptions} from './volunteer-activity-reviews.js';
+
+export { createOrganizationActivityReviewClient, validateOrganizationActivityReviewInput } from "./organization-activity-reviews.js";
+export type { OrganizationActivityReviewKind, OrganizationOfferingReviewQuery, OrganizationRegistrationReviewQuery, OrganizationOfferingReviewInput, OrganizationRegistrationReviewInput, PreparedOrganizationActivityReview, OrganizationActivityReviewClientOptions } from "./organization-activity-reviews.js";

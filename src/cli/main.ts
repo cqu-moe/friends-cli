@@ -2,6 +2,7 @@
 import {volunteerActivityReviewSchemas,registerVolunteerActivityReviewCommands} from "./volunteer-activity-reviews.js";
 import { certificationApiSchemas, registerCertificationApiCommands } from "./certification-api.js";
 import { Command } from "commander";
+import { organizationActivityReviewSchemas, registerOrganizationActivityReviewCommands } from "./organization-activity-reviews.js";
 import {
   courseId,
   validateCourseListInput,
@@ -36,6 +37,7 @@ const schemas = {
   ...certificationApiSchemas,
   ...draftSchemas,
   ...organizationSchemas,
+  ...organizationActivityReviewSchemas,
   errors: {
     operation: "errors", readonly:true, permission:"none", phases:["inspect"], supportedVia:["local"],
     exitCodes: {0:"success", 2:"INVALID_INPUT", 3:"AUTH_REQUIRED", 4:"PERMISSION_DENIED", 5:"BUSINESS_REJECTED", 6:"NETWORK_PROTOCOL_ERROR", 7:"UNKNOWN_OUTCOME"},
@@ -400,6 +402,8 @@ courses
       ...queryMeta(source),
     });
   });
+
+registerOrganizationActivityReviewCommands(program, { baseUrl: process.env.FRIENDS_BASE_URL ?? productionBaseUrl });
 
 registerVolunteerActivityReviewCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
 registerCertificationApiCommands(program, {baseUrl:process.env.FRIENDS_BASE_URL ?? productionBaseUrl});
