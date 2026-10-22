@@ -9,7 +9,7 @@ interface Page {
  url():Promise<string>;
  goto(url:string):Promise<unknown>;
  snapshot():Promise<unknown>;
- click(selector:string):Promise<unknown>;
+ click(selector:string,options?:{position:{x:number;y:number};force?:boolean}):Promise<unknown>;
  fill(selector:string,value:string):Promise<unknown>;
  waitForSelector(selector:string,options?:{state?:string;timeout?:number}):Promise<unknown>;
  waitForFunction<A>(fn:(arg:A)=>unknown,arg:A,options?:{timeout:number}):Promise<unknown>;
@@ -18,8 +18,7 @@ interface Page {
 interface Task {page(label:string):Page;handOff():Promise<unknown>}
 interface Input {draft:VolunteerCertificationDraft;source:VolunteerCertificationSource;session:{token:string;userLevel:string;account:{userNo:string};context:{levelNo:string;unit:{unitNo:string}}};page:string;url:string;dryRun?:boolean}
 
-/** Runs in Ego's Node process. Every write below is a visible, local form action. */
-export async function prepareCertificationPage(task:Task,input:Input){
+async function inspectCertificationPage(task:Task,input:Input){
  const page=task.page(input.page);
  const target=new URL(input.url);
  const before=await page.url();
@@ -62,6 +61,12 @@ export async function prepareCertificationPage(task:Task,input:Input){
   const method=text(cell('认证方式'));
   return {activity:{id:new URL(d.defaultView!.location.href).searchParams.get('uuid')!,name:text(cell('活动名称')),organizationName:text(cell('组织单位')),positionSetMethod:method==='岗位时长'?'TIME':method==='签到+签退'?'SIGN':null},rows,selectedStudentNos:rows.filter(row=>row.selected).map(row=>row.studentNo).filter((id):id is string=>id!==null)};
  },{candidates});
+ return {page,capture};
+}
+
+/** Every write here is a source-verified local form action. */
+export async function prepareCertificationPage(task:Task,input:Input){
+ const {page,capture}=await inspectCertificationPage(task,input);
  const initial=await capture();
  const preparation=buildVolunteerCertificationPreparation(input.draft,input.source,initial as CertificationPageSnapshot,input.session);
  if(input.dryRun) return {...preparation,status:'ready',dryRun:true,submitted:false,page:initial,completedActions:[]};
@@ -87,7 +92,7 @@ export async function prepareCertificationPage(task:Task,input:Input){
     await page.waitForSelector('loc=css:.van-popup--right .stu-info',{state:'visible',timeout:15000});
     const found=await page.evaluate((name)=>{const d=document.querySelector('iframe')?.contentDocument??document;const rows=[...d.querySelectorAll('.van-popup--right .stu-info')];return rows.length===1&&rows[0].querySelector('.stu-name')?.textContent?.trim().startsWith(name+' / ');},action.studentName);
     if(!found) throw new Error('The exact student search is ambiguous; review it manually');
-    await page.click('loc=css:.van-popup--right .stu-info [role="checkbox"]');
+    await page.click('loc=css:.van-popup--right .stu-info [role="radio"]');
     await page.click('loc=css:.search-footer .confirm');
     await page.waitForSelector('loc=css:.van-popup--right',{state:'hidden'});
     panel='.set-form';
@@ -95,7 +100,7 @@ export async function prepareCertificationPage(task:Task,input:Input){
     if(!identity) throw new Error('The selected visible student number differs from the draft');
    } else {
     if(index<0) throw new Error('The student is no longer visible');
-    await page.click(`loc=css:.name-list .list-group:nth-child(${index+1}) button`);
+    await page.click(`loc=css:.name-list .list-group:nth-child(${index+1}) button:has-text("设置时长")`);
     panel='.van-popup--center';
    }
    await page.waitForSelector(`loc=css:${panel} input[name="requiredCourseCount"]`,{state:'visible'});
@@ -106,10 +111,10 @@ export async function prepareCertificationPage(task:Task,input:Input){
    if(action.kind==='set-person' && fields.hours!=='' && Number(fields.hours)!==action.durationHours && Number(fields.hours)!==baselineHours) throw new Error('A human changed the duration after inspection; preserve it for review');
    if(action.kind==='set-person' && fields.post!==action.postName && fields.post && fields.post!==baseline?.postName) throw new Error('A human changed the post; preserve it for review');
    if(fields.post!==action.postName){
-    await page.click(`loc=css:${panel} .field-select input`);
+    await page.click(`loc=css:${panel} .field-select`);
     await page.waitForSelector('loc=css:.van-picker',{state:'visible'});
     await page.snapshot();
-    await page.click(`loc=css:.van-picker-column__item:text-is(${JSON.stringify(action.postName)})`);
+    await page.click(`loc=css:.van-picker-column__item .van-ellipsis:text-is(${JSON.stringify(action.postName)})`);
     await page.click('loc=css:.van-picker__confirm');
     await page.waitForSelector('loc=css:.van-picker',{state:'hidden'});
    }
@@ -127,4 +132,38 @@ export async function prepareCertificationPage(task:Task,input:Input){
  const result={...preparation,status:'awaiting-user' as const,submitted:false as const,handoff:'completed' as const,completedActions,page:finalPage,executionError};
  await task.handOff();
  return result;
+}
+
+/** Opens each local editor for its visible identity and post, then closes without saving. */
+export async function captureCertificationPage(task:Task,input:Input){
+ const {page,capture}=await inspectCertificationPage(task,{...input,dryRun:true});
+ const initial=await capture() as CertificationPageSnapshot;
+ const pending:string[]=[];
+ const unfinished=await page.evaluate(()=>{
+  const d=document.querySelector('iframe')?.contentDocument??document;
+  return [...d.querySelectorAll('.van-popup--center,.set-form')].some(e=>{for(let node:Element|null=e;node;node=node.parentElement)if(d.defaultView!.getComputedStyle(node).display==='none')return false;return true;});
+ },null);
+ if(unfinished) return {page:initial,pending:['unfinished-editor: close or locally save the open editor before capture'],completeRoster:false};
+ for(let index=0;index<initial.rows.length;index++){
+  await page.click(`loc=css:.name-list .list-group:nth-child(${index+1}) button:has-text("设置时长")`);
+  await page.waitForSelector('loc=css:.van-popup--center input[name="requiredCourseCount"]',{state:'visible'});
+  await page.snapshot();
+  const fields=await page.evaluate(()=>{
+   const d=document.querySelector('iframe')?.contentDocument??document;
+   const panel=d.querySelector('.van-popup--center')!;
+   const cell=(label:string)=>[...panel.querySelectorAll('.van-cell')].find(e=>e.querySelector('.van-cell__title')?.textContent===label)?.querySelector('.van-cell__value')?.textContent?.trim()??null;
+   const hours=panel.querySelector<HTMLInputElement>('input[name="requiredCourseCount"]')?.value??'';
+   return {studentNo:cell('学号'),studentName:cell('姓名'),postName:panel.querySelector<HTMLInputElement>('.field-select input')?.value??null,durationHours:hours===''?null:Number(hours)};
+  },null);
+  if(!fields.studentNo || fields.studentName!==initial.rows[index].studentName) throw new FriendsError({code:FriendsErrorCode.UpstreamBusiness,message:'The visible roster changed during capture; nothing was saved'});
+  const posts=input.source.activity.posts.filter(post=>post.name===fields.postName);
+  initial.rows[index]={...initial.rows[index],...fields,postId:posts.length===1?posts[0].id:null};
+  if(posts.length!==1)pending.push(`unknown-post:${fields.studentNo}`);
+  await page.click('loc=css:.van-overlay',{position:{x:8,y:8},force:true});
+  await page.waitForSelector('loc=css:.van-popup--center input[name="requiredCourseCount"]',{state:'hidden'});
+ }
+ const final=await capture();
+ if(final.rows.length!==initial.rows.length || final.rows.some((row,index)=>row.studentName!==initial.rows[index].studentName || row.selected!==initial.rows[index].selected || row.durationHours!==initial.rows[index].durationHours))throw new FriendsError({code:FriendsErrorCode.UpstreamBusiness,message:'The visible roster changed during capture; nothing was saved'});
+ initial.selectedStudentNos=initial.rows.filter(row=>row.selected).flatMap(row=>row.studentNo?[row.studentNo]:[]);
+ return {page:initial,pending,completeRoster:true};
 }
