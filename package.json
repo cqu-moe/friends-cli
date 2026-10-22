@@ -23,6 +23,10 @@
     "./auth": {
       "types": "./dist/auth.d.ts",
       "default": "./dist/auth.js"
+    },
+    "./auth-node": {
+      "types": "./dist/auth-node.d.ts",
+      "default": "./dist/auth-node.js"
     }
   },
   "scripts": {

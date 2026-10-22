@@ -1,6 +1,6 @@
 # friends-cli 初步设计
 
-日期：2026-10-22。状态：整体设计草案；技术栈、双登录、API/Ego 双操作方式、Ego 录入后人工审核及提交、Better Auth 选型与团组织首版范围已确认，详细接口契约仍待验证。命令、类型与目录均为提案，不代表已有实现。
+日期：2026-10-22。状态：整体设计记录；技术栈、双登录、API/Ego 双操作方式、Ego 录入后人工审核及提交、认证库后续决定与团组织首版范围已确认。早期“详细接口契约待验证”的段落保留为历史；当前实现以源码、测试与验收记录为准。
 
 本文保留设计与调查过程；正式规格以 [Issue #1](https://github.com/cqu-moe/friends-cli/issues/1) 为准。规格要求 SDK 与 CLI 两层公开接口测试，Ego 录入流程由用户亲自最终提交。
 
@@ -18,7 +18,7 @@
 - 技术栈采用 TypeScript + Node.js；首版单包分别提供 SDK 导出与 friends 命令（Q4 已确认）。
 - 首版同时支持独立本地学校登录和 CQU Auth 登录（Q5 已确认）。
 - 所有范围内业务均以 API 直接调用和 Ego 有头浏览器显式操作为目标，共享业务数据与本地草稿；两条路径的自动化终点按操作明确声明。志愿者录入等需人工审阅的 Ego 流程止于填表与交接，由用户审核并亲自最终提交。
-- 认证统一采用 Better Auth 的客户端及官方 OAuth 工具；优先使用现成库，不另起 OAuth 实现。DPoP 客户端能力缺口单独验证，不因选型而降低安全要求。
+- Better Auth 作为 CQU Auth 授权服务器；native 客户端按已批准决定使用 `oauth4webapi@3.8.8` 承担 public client、S256 PKCE 与 DPoP 协议。回环回调、安全存储和 CLI 编排是本仓库薄集成；不手写密码学，不静默降级。
 - 团组织首版覆盖组织资料、成员查询、加入/退出审批、负责人变更申请；下设部门编辑与团员入团/注册/评议留待后续（Q6 已确认）。
 - 本轮先完成勘测和整体设计，不执行真实报名、审批、认证或组织成员变更。
 
@@ -103,7 +103,7 @@ src/
     api.ts                    # 学校网关、Header、业务错误与分页
     ego.ts                    # 调用已安装 ego-browser，按可见页面执行
   local/
-    auth.ts                   # Better Auth 接入、本地学校登录、凭据存储
+    auth.ts                   # oauth4webapi CQU Auth 客户端、DPoP 与学校会话 SDK
     drafts.ts                 # 本地草稿读取、校验与原子保存
   cli/
     main.ts                   # 命令注册、参数解析与输出
@@ -175,7 +175,7 @@ docs/
 
 ## CLI 提案
 
-以下命令表达目标形态，尚未实现。ID 示例均为虚构值。
+以下命令表达当时的整体目标形态；ID 示例均为虚构值。实际命令、参数与验收以当前 README、schema 和源码为准。
 
 ```sh
 friends auth login --method local
@@ -254,7 +254,7 @@ Agent-First 输出与调用约定：
 1. 本地学校登录：浏览器完成 CQU 登录，再建立二课会话。目标是单机独立使用；首次会话交接方式、可用浏览器与过期恢复仍需验证。
 2. CQU Auth 登录：以 native public client 通过授权码 + S256 PKCE 登录，再申请 `cqu:ticket:friends` 对应 ST，换取二课会话。新增固定服务与权限已由 [Auth #94](https://github.com/cqu-moe/auth/issues/94) 跟踪，当前尚不可当作已部署能力。详细流程、凭据区分与恢复策略见 [CQU Auth 登录设计](2026-10-22-cqu-auth-login.md)。
 
-认证选型已确定为 Better Auth：使用 `better-auth/client` 中适用的客户端接口与 `better-auth/oauth2` 官方工具，不因服务端已有 Better Auth 就假定 `createAuthClient` 自动完成原生 CLI 的整条 OAuth 链。当前官方源码提供 PKCE、授权码换票与刷新工具；DPoP 已查到服务端校验，客户端 proof 签名、nonce 处理及持久化须按正式发布版本验证。没有经验证的客户端支持时保持缺口状态，不手写密码学或静默降级。
+认证选型按 2026-10-22 后续决定更新：Better Auth 保持服务端/授权服务器角色；客户端使用 `oauth4webapi@3.8.8` 的正式 API 完成原生 OAuth/DPoP 链。不能声称 Better Auth 客户端自动提供 DPoP proof 签名；也不能因服务端使用 Better Auth 而拒绝已批准、可审计的标准 OAuth 客户端库。
 
 实现上仅需两个登录入口和共用的二课会话初始化，不提前建设认证插件框架。本地方式不依赖 CQU Auth 可用性；CQU Auth 方式不向 CLI 分发共享 client secret 或学校 TGT。
 
@@ -269,7 +269,7 @@ Agent-First 输出与调用约定：
 
 每一步都交付一条可用业务链，全部阶段完成才覆盖用户提出的范围。
 
-1. 登录与查询：本地与 CQU Auth 两条路径分别建立会话 → 共用能力/上下文确认 → 课程搜索 → 详情；固定 JSON、错误和分页契约，并分别验证 API 和 Ego。补齐 Better Auth CLI 互操作与 DPoP 客户端缺口，才算完成相应登录能力。
+1. 登录与查询：本地与 CQU Auth 两条路径分别建立会话 → 共用能力/上下文确认 → 课程搜索 → 详情；固定 JSON、错误和分页契约，并分别验证 API 和 Ego。受控 CQU Auth 互操作完成后，仍需生产注册与真实链路验收才算生产可用。
 2. 志愿管理优先交付认证草稿：活动查询 → 添加人员/时长 → 本地保存 → 关闭恢复 → API 独立提交，或 Ego 录入后交接人工审核及亲自提交 → 状态回查；并覆盖开办申请/审批、报名审批、学生报名、退出、时长查询。
 3. 课程与组织活动：开办申请、报名与审批、课程认证，分别核实各自流程；未确认入口先列为缺口。
 4. 组织管理：组织资料维护、成员查询、加入/退出审批、负责人变更申请。首版不包含下设部门编辑、任意权限调整，以及另一模块的团员入团/注册/评议。
@@ -283,7 +283,7 @@ Agent-First 输出与调用约定：
 ## 待技术验证的事实
 
 - 本地浏览器登录完成后，如何可靠地交接二课会话，以及过期后的恢复方式。
-- Better Auth 正式发布版本的原生 public client / PKCE / DPoP 端到端互操作；线上 discovery 未列出 token auth method `none` 与源码支持 public client 的差异。
+- CQU Auth 生产 native/public client 注册、线上 discovery/token endpoint 与受控实现的差异，以及真实同意、ST 核销和学校 API 身份一致性。
 - Auth #94 部署后，生产 CLI 客户端注册、精确回调与 friends 取票核销链路。
 - Ego 页面捕获/回填完整性，以及各表单是否存在自动保存副作用。
 - CLI 直接请求学校 API 的网络行为，以及两个登录来源下的身份和权限一致性。

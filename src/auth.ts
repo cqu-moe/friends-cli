@@ -75,6 +75,18 @@ export interface CreateCquGrantManagerOptions {
   persist?: PersistCquOAuthCredentials;
 }
 
+export interface CquAuthClient {
+  beginAuthorization(input: BeginCquAuthorizationOptions): Promise<CquPendingAuthorization>;
+  completeAuthorization(pending: CquPendingAuthorization, callback: string | URL): Promise<CquAuthGrant>;
+  createGrantManager(input: CreateCquGrantManagerOptions): CquGrantManager;
+  requestFriendsServiceTicket(credentials: CquOAuthCredentials, keyPair: CquDpopKeyPair): Promise<string>;
+  exchangeFriendsSession(
+    ticket: string,
+    selector?: { levelNo: string; unitNo: string },
+  ): Promise<CquFriendsSession>;
+  createCourseClient(session: CquFriendsSession): Promise<CourseClient>;
+}
+
 const friendsScope = "cqu:ticket:friends";
 const offlineScope = "offline_access";
 
@@ -239,7 +251,7 @@ export function createCquAuthClient(options: CreateCquAuthClientOptions) {
     }
   }
 
-  const auth = {
+  const auth: CquAuthClient = {
     async beginAuthorization(input: BeginCquAuthorizationOptions): Promise<CquPendingAuthorization> {
       if (!input?.keyPair?.privateKey || !input?.keyPair?.publicKey) {
         throw error("A CQU Auth DPoP key pair is required", FriendsErrorCode.InvalidInput);
@@ -314,7 +326,7 @@ export function createCquAuthClient(options: CreateCquAuthClientOptions) {
         throw error("The DPoP key bound to the CQU Auth grant is missing; log in again", FriendsErrorCode.AuthRequired);
       }
       let credentials = { ...input.credentials };
-      let queue: Promise<unknown> = Promise.resolve();
+      let refreshInFlight: Promise<CquOAuthCredentials> | undefined;
 
       async function tokenRequest(): Promise<oauth.AuthorizationServer> {
         return discover();
@@ -345,22 +357,23 @@ export function createCquAuthClient(options: CreateCquAuthClientOptions) {
         return { ...credentials };
       }
 
-      function serialize<T>(operation: () => Promise<T>): Promise<T> {
-        const result = queue.then(operation, operation);
-        queue = result.catch(() => undefined);
-        return result;
-      }
-
       async function ensureFreshAccessToken(): Promise<CquOAuthCredentials> {
         if (credentials.expiresAt !== null && credentials.expiresAt <= Math.floor(Date.now() / 1000) + 5) {
-          await serialize(refreshLocked);
+          await refresh();
         }
         return credentials;
       }
 
+      function refresh(): Promise<CquOAuthCredentials> {
+        refreshInFlight ??= refreshLocked().finally(() => {
+          refreshInFlight = undefined;
+        });
+        return refreshInFlight;
+      }
+
       return {
         getCredentials: () => ({ ...credentials }),
-        refresh: () => serialize(refreshLocked),
+        refresh,
         async requestFriendsServiceTicket(): Promise<string> {
           const token = await ensureFreshAccessToken();
           const as = await tokenRequest();
@@ -433,7 +446,10 @@ export function createCquAuthClient(options: CreateCquAuthClientOptions) {
       const envelope = object(payload);
       const data = object(envelope?.data);
       const token = string(data?.token);
-      if (envelope?.code !== "0" || !token || typeof data?.manyAccount !== "boolean") {
+      if (envelope?.code !== "0") {
+        throw error("Friends rejected the service-ticket exchange", FriendsErrorCode.AuthRequired);
+      }
+      if (!token || typeof data?.manyAccount !== "boolean") {
         throw error("Friends returned an invalid current CAS login response", FriendsErrorCode.NetworkProtocol);
       }
       if (data.manyAccount && (!selector || selector.levelNo === "" || selector.unitNo === "")) {

@@ -57,17 +57,26 @@ function jkt(jwk) {
   return sha256(JSON.stringify(canonical));
 }
 
-function identityEnvelope() {
+function identity(mode) {
+  if (mode === "changed") {
+    return {
+      userNo: "20219999",
+      userName: "另一示例",
+      levelNo: "JS",
+      levelName: "教师",
+      unitType: 1,
+      unitNo: "unit-b",
+      unitName: "另一示例单位",
+    };
+  }
   return {
-    code: "0",
-    data: {
-      loginLevels: [{
-        levelNo: "XS",
-        levelName: "学生",
-        units: [{ unitType: 2, unitNo: "unit-a", unitName: "示例学院" }],
-      }],
-      userLoginType: "STUDENT",
-    },
+    userNo: "20210001",
+    userName: "示例",
+    levelNo: "XS",
+    levelName: "学生",
+    unitType: 2,
+    unitNo: "unit-a",
+    unitName: "示例学院",
   };
 }
 
@@ -80,15 +89,20 @@ export async function controlledCquAuthScenario(options = {}) {
   const proofIdentifiers = new Set();
   const nonces = new Map();
   const accessTokens = new Map();
+  const activeFriendsTokens = new Set();
   const state = {
     discoveryIssuer: null,
     authorizationError: null,
     tokenNonceRequired: true,
+    tokenNonceChallenge: false,
     serviceNonceRequired: false,
+    rejectDpopProof: false,
     refreshDelayMs: 0,
+    identityMode: "primary",
     accessSerial: 1,
     refreshSerial: 1,
     codeSerial: 1,
+    friendsTokenSerial: 1,
   };
   const server = createServer(async (req, res) => {
     let body = "";
@@ -105,8 +119,12 @@ export async function controlledCquAuthScenario(options = {}) {
       url: req.url,
       headers: { ...req.headers },
       body: parsedBody,
+      startedAt: Date.now(),
     };
-    res.on("finish", () => { record.status = res.statusCode; });
+    res.on("finish", () => {
+      record.status = res.statusCode;
+      record.finishedAt = Date.now();
+    });
     requests.push(record);
     try {
       if (url.pathname === "/api/auth/.well-known/openid-configuration") {
@@ -170,26 +188,31 @@ export async function controlledCquAuthScenario(options = {}) {
           }
           const verifier = record.body.code_verifier ?? "";
           if (sha256(verifier) !== codeRecord.challenge) return json(res, 400, { error: "invalid_grant" });
-          const accessToken = `access-${state.accessSerial++}`;
-          const refreshToken = `refresh-${state.refreshSerial++}`;
-          grants.set(refreshToken, { jkt: codeRecord.dpopJkt, current: true, scopes: new Set(["cqu:ticket:friends", "offline_access"]) });
-          accessTokens.set(accessToken, { jkt: codeRecord.dpopJkt, scopes: new Set(["cqu:ticket:friends", "offline_access"]) });
           return await finishToken(res, url, record, proof => {
             const authorizationJkt = jkt(proof.header.jwk);
             return authorizationJkt === codeRecord.dpopJkt;
-          }, accessToken, refreshToken, "authorization_code");
+          }, () => {
+            const accessToken = `access-${state.accessSerial++}`;
+            const refreshToken = `refresh-${state.refreshSerial++}`;
+            const scopes = new Set(["cqu:ticket:friends", "offline_access"]);
+            grants.set(refreshToken, { jkt: codeRecord.dpopJkt, current: true, scopes });
+            accessTokens.set(accessToken, { jkt: codeRecord.dpopJkt, scopes });
+            return { accessToken, refreshToken };
+          }, "authorization_code");
         }
 
         if (record.body.grant_type === "refresh_token") {
           const old = grants.get(record.body.refresh_token);
           if (!old?.current || record.body.client_id !== clientId) return json(res, 400, { error: "invalid_grant" });
           if (state.refreshDelayMs) await new Promise(resolve => setTimeout(resolve, state.refreshDelayMs));
-          old.current = false;
-          const accessToken = `access-${state.accessSerial++}`;
-          const refreshToken = `refresh-${state.refreshSerial++}`;
-          grants.set(refreshToken, { jkt: old.jkt, current: true, scopes: old.scopes });
-          accessTokens.set(accessToken, { jkt: old.jkt, scopes: old.scopes });
-          return await finishToken(res, url, record, proof => jkt(proof.header.jwk) === old.jkt, accessToken, refreshToken, "refresh_token");
+          return await finishToken(res, url, record, proof => jkt(proof.header.jwk) === old.jkt, () => {
+            old.current = false;
+            const accessToken = `access-${state.accessSerial++}`;
+            const refreshToken = `refresh-${state.refreshSerial++}`;
+            grants.set(refreshToken, { jkt: old.jkt, current: true, scopes: old.scopes });
+            accessTokens.set(accessToken, { jkt: old.jkt, scopes: old.scopes });
+            return { accessToken, refreshToken };
+          }, "refresh_token");
         }
         return json(res, 400, { error: "unsupported_grant_type" });
       }
@@ -202,6 +225,17 @@ export async function controlledCquAuthScenario(options = {}) {
           return json(res, 403, { error: "forbidden" });
         }
         const proof = decodeProof(record);
+        if (state.serviceNonceRequired) {
+          const existingNonce = nonces.get(url.origin) ?? randomUUID();
+          nonces.set(url.origin, existingNonce);
+          if (proof?.payload.nonce !== existingNonce) {
+            state.tokenNonceChallenge = true;
+            return json(res, 401, { error: "use_dpop_nonce" }, {
+              "www-authenticate": `DPoP error="use_dpop_nonce"`,
+              "dpop-nonce": existingNonce,
+            });
+          }
+        }
         const nonce = state.serviceNonceRequired ? nonces.get(url.origin) : undefined;
         const proofValid = await verifyProof(proof, {
           method: "POST",
@@ -209,14 +243,9 @@ export async function controlledCquAuthScenario(options = {}) {
           nonce,
           accessToken,
         });
-        if (!proofValid || proofIdentifiers.has(proof.payload.jti)) {
+        if (!proofValid || jkt(proof.header.jwk) !== token.jkt || proofIdentifiers.has(proof.payload.jti)) {
           res.setHeader("www-authenticate", 'DPoP error="invalid_dpop_proof"');
           return json(res, 401, { error: "invalid_dpop_proof" });
-        }
-        if (state.serviceNonceRequired && !nonces.has(url.origin)) {
-          const nonceValue = randomUUID();
-          nonces.set(url.origin, nonceValue);
-          return json(res, 400, { error: "use_dpop_nonce" }, { "dpop-nonce": nonceValue });
         }
         proofIdentifiers.add(proof.payload.jti);
         const ticket = `ST-${randomUUID()}`;
@@ -229,24 +258,72 @@ export async function controlledCquAuthScenario(options = {}) {
         const recordTicket = issuedTickets.get(ticket);
         if (!recordTicket || recordTicket.used) return json(res, 200, { code: "1001", message: "ticket invalid" });
         recordTicket.used = true;
-        return json(res, 200, { code: "0", data: { token: "friends-token", manyAccount } });
+        const token = `friends-token-${state.friendsTokenSerial++}`;
+        activeFriendsTokens.add(token);
+        return json(res, 200, { code: "0", data: { token, manyAccount } });
       }
 
-      if (url.pathname.endsWith("/checkUserAndGetUserLevel")) return json(res, 200, identityEnvelope());
-      if (url.pathname.endsWith("/user/info")) return json(res, 200, { code: "0", data: { userNo: "20210001", userName: "示例" } });
+      const friendsToken = req.headers["h-zove-token"];
+      if (typeof friendsToken === "string" && !activeFriendsTokens.has(friendsToken)) {
+        return json(res, 401, { code: "401", message: "session expired" });
+      }
+      const current = identity(state.identityMode);
+      if (url.pathname.endsWith("/checkUserAndGetUserLevel")) {
+        return json(res, 200, {
+          code: "0",
+          data: {
+            loginLevels: [{
+              levelNo: current.levelNo,
+              levelName: current.levelName,
+              units: [{ unitType: current.unitType, unitNo: current.unitNo, unitName: current.unitName }],
+            }],
+            userLoginType: "STUDENT",
+          },
+        });
+      }
+      if (url.pathname.endsWith("/user/info")) {
+        return json(res, 200, { code: "0", data: { userNo: current.userNo, userName: current.userName } });
+      }
       if (url.pathname.endsWith("/enterHall")) {
-        return json(res, 200, { code: "0", data: { account: "20210001", name: "示例", userLoginStateLevel: "XS", departmentNo: "unit-a" } });
+        return json(res, 200, { code: "0", data: {
+          account: current.userNo,
+          name: current.userName,
+          userLoginStateLevel: current.levelNo,
+          departmentNo: current.unitNo,
+        } });
       }
       if (url.pathname.endsWith("/student-apply-page-list")) {
         return json(res, 200, { code: "0", data: { currentPage: 1, pageSize: 10, totalCount: 1, pages: 1, data: [{ uuid: "course-1", curriculumName: "示例课程" }] } });
+      }
+      if (url.pathname.endsWith("/mob/apply/course-1")) {
+        return json(res, 200, { code: "0", data: {
+          uuid: "course-1",
+          curriculumName: "示例课程",
+          organizationName: "示例学院",
+          curriculumState: "NEW_LIVE_STATE",
+          roles: [{ uuid: "role-1", roleName: "讲师", integral: 0.5, classHour: 2 }],
+          questionnaires: [{ reviewerName: "示例审核人" }],
+        } });
       }
       return json(res, 404, { error: "not_found" });
     } catch (error) {
       json(res, 500, { error: "scenario_failure", message: error.message });
     }
 
-    async function finishToken(res, url, record, keyMatches, accessToken, refreshToken, grantType) {
+    async function finishToken(res, url, record, keyMatches, issueTokens, grantType) {
       const proof = decodeProof(record);
+      if (state.tokenNonceRequired) {
+        const existingNonce = nonces.get(url.origin) ?? randomUUID();
+        nonces.set(url.origin, existingNonce);
+        if (proof?.payload.nonce !== existingNonce) {
+          state.tokenNonceChallenge = true;
+          return json(res, 400, { error: "use_dpop_nonce" }, { "dpop-nonce": existingNonce });
+        }
+      }
+      if (state.rejectDpopProof) {
+        res.setHeader("www-authenticate", 'DPoP error="invalid_dpop_proof"');
+        return json(res, 401, { error: "invalid_dpop_proof" });
+      }
       const nonce = state.tokenNonceRequired ? nonces.get(url.origin) : undefined;
       const proofValid = await verifyProof(proof, {
         method: "POST",
@@ -257,12 +334,8 @@ export async function controlledCquAuthScenario(options = {}) {
         res.setHeader("www-authenticate", 'DPoP error="invalid_dpop_proof"');
         return json(res, 401, { error: "invalid_dpop_proof" });
       }
-      if (state.tokenNonceRequired && !nonces.has(url.origin)) {
-        const nonceValue = randomUUID();
-        nonces.set(url.origin, nonceValue);
-        return json(res, 400, { error: "use_dpop_nonce" }, { "dpop-nonce": nonceValue });
-      }
       proofIdentifiers.add(proof.payload.jti);
+      const { accessToken, refreshToken } = issueTokens();
       if (record.body.grant_type === "authorization_code") authorizationCodes.get(record.body.code).used = true;
       return json(res, 200, {
         access_token: accessToken,
@@ -292,5 +365,8 @@ export async function controlledCquAuthScenario(options = {}) {
     set discoveryIssuer(value) { state.discoveryIssuer = value; },
     set serviceNonceRequired(value) { state.serviceNonceRequired = value; },
     set refreshDelayMs(value) { state.refreshDelayMs = value; },
+    set rejectDpopProof(value) { state.rejectDpopProof = value; },
+    set identityMode(value) { state.identityMode = value; },
+    invalidateFriendsToken(token) { activeFriendsTokens.delete(token); },
   };
 }

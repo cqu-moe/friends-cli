@@ -1,6 +1,6 @@
 # friends-cli
 
-重庆大学第二课堂平台的本地 CLI 与可复用 SDK。当前交付 Issue #2–#3 的最小只读课程链，以及 Issue #5 的志愿认证本地草稿：Ego 浏览器本地登录、学校 API 身份/上下文核验、课程查询、可管理志愿活动/报名名单只读查询、草稿编辑与恢复。不包含 OAuth、报名、审批或学校认证提交。
+重庆大学第二课堂平台的本地 CLI 与可复用 SDK。当前交付 Issue #2–#3 的最小只读课程链、Issue #4 的 CQU Auth OAuth/DPoP 登录与恢复，以及 Issue #5 的志愿认证本地草稿：Ego 浏览器本地登录、学校 API 身份/上下文核验、课程查询、可管理志愿活动/报名名单只读查询、草稿编辑与恢复。不包含报名、审批或学校认证提交。
 
 ## 安装与命令
 
@@ -21,6 +21,10 @@ friends auth login --method local \
   --ego-task-space 12 --ego-page p1 \
   --storage file --json
 friends auth status --json
+friends auth login --method cqu-auth \
+  --issuer https://auth.cqu.moe/api/auth \
+  --client-id <public-client-id> --json
+friends auth login --method cqu-auth --no-open --storage file --json
 friends courses list --page 1 --page-size 10 --keyword 周周艺 --json
 friends courses show <courseUuid> --json
 friends courses list --via ego --ego-task-space 12 --ego-page p1 --json
@@ -29,7 +33,7 @@ friends drafts create --activity-id <activityUuid> --json
 friends drafts edit <draftId> --expected-revision 0 --input patch.json --json
 ```
 
-多身份/多单位时，命令会列出学校返回的 `levelNo/unitNo`，用 `--level-no` 与 `--unit-no` 显式选择。课程 UUID 只用于课程详情，不能替换报名记录、认证申请或其他领域 UUID。
+多身份/多单位时，命令要求同时提供 `--level-no` 与 `--unit-no`，不会默认选择第一项。课程 UUID 只用于课程详情，不能替换报名记录、认证申请或其他领域 UUID。
 
 查询默认 `--via api`，只读取已保存的本地会话并直接调用学校 API；不传 `--via` 的旧调用保持原行为。`--via ego` 必须显式给出已有数字 task space，页标签默认 `p1`；它会复用当前 Ego 页面读取会话，先通过学校 API 独立核对账号和身份单位，再用同一 SDK client 直接调用课程 API。该路径不读取或改写本地保存的 token，也不为只读查询导航、点击或模拟人工浏览。输出中的 `meta.selectedEntry`、`meta.requestMode` 和 `meta.verification` 分别记录用户选择执行方式、实际请求方式与已核对上下文。登录来源仍由 `auth login --method local|cqu-auth` 表达，不与执行方式混用。
 
@@ -37,19 +41,27 @@ friends drafts edit <draftId> --expected-revision 0 --input patch.json --json
 
 默认使用系统凭据库：macOS Keychain；Linux 固定要求 Secret Service，不在失败时静默退到重启即丢失的 keyutils。会话元数据保存在仓库外 `~/.local/state/friends-cli/session.json`，目录 `0700`、文件 `0600`；Keychain 模式的元数据不含 token。
 
-`--storage file` 是显式后备，仅支持可执行 POSIX 目录/文件权限检查的平台（macOS/Linux）；Windows 文件后备不受支持。它同样要求仓库外专用目录和权限，可配合 `FRIENDS_HOME` 指定独立目录。token 不进入 argv、日志、schema、`auth status` 或命令结果 JSON。
+CQU Auth 登录使用 native public client（`token_endpoint_auth_method: none`）、授权码 + S256 PKCE、固定回环 `http://127.0.0.1:<port>/callback`、`state` 关联和 DPoP。最小 scope 是 `cqu:ticket:friends offline_access`；`offline_access` 用于刷新，不申请其他取票权限。授权码、state、verifier、DPoP key、Auth access/refresh token、一次性 CAS ST 和二课 token 都不进入 argv、日志、schema、`auth status` 或命令结果 JSON。`--no-open` 输出的唯一授权 URL 是例外，它不包含 code/state/verifier/key/token。
+
+Auth OAuth 凭据与 DPoP key 保存在 `cqu-auth-state.json` 对应的安全边界中；文件模式同样是目录 `0700`、文件 `0600`，Keyring 模式元数据只保存 issuer/client/JKT 标识。二课 token 仍独立保存在 `session.json`/会话凭据库。刷新轮换使用同一 DPoP key、跨进程文件锁串行保存；旧 refresh 重放、错误 DPoP key、密钥缺失和非 DPoP token 都失败关闭，要求重新授权，不生成替代 key，也不回退 Bearer 或本地登录。
+
+`--storage file` 是显式后备，仅支持可执行 POSIX 目录/文件权限检查的平台（macOS/Linux）；Windows 文件后备不受支持。它同样要求仓库外专用目录和权限，可配合 `FRIENDS_HOME` 指定独立目录。
 
 ## SDK
 
 ```ts
 import { createFriendsSdk } from "@cqu-moe/friends-cli";
 import { readVerifiedEgoSession } from "@cqu-moe/friends-cli/node";
+import { createCquAuthClient, generateCquDpopKeyPair } from "@cqu-moe/friends-cli/auth";
+import { startCquAuthLoopback, loadCquAuthManager } from "@cqu-moe/friends-cli/auth-node";
 
 const sdk = createFriendsSdk();
 const session = await readVerifiedEgoSession({ taskSpaceId: 12, page: "p1" });
 const courses = await sdk.createCourseClient(session);
 await courses.list({ keyword: "周周艺" });
 ```
+
+`@cqu-moe/friends-cli/auth` 是纯 SDK OAuth/DPoP 客户端，正式依赖 `oauth4webapi@3.8.8`：`None()` public client、S256 PKCE、`DPoP` proof/nonce 管理、同 key refresh 与 protected resource 请求均由该库实现；本仓库不手写密码学或协议签名。`@cqu-moe/friends-cli/auth-node` 只增加本机回调监听、浏览器打开和凭据存储。Better Auth 仍是 CQU Auth 授权服务器；不能声称 Better Auth 客户端自带这些 DPoP proof 能力。
 
 `readVerifiedEgoSession` 复用既有 Ego bridge，并返回 `{ token, userLevel, account, context }`；其中 `context` 是学校 API 返回并经 `enterHall` 核对的完整 `levelNo/levelName/unit`。调用者可传 `baseUrl`、`selector`、`timeoutMs` 或受控 `command`，但该函数不包含任何课程业务。
 
@@ -65,11 +77,12 @@ await courses.list({ keyword: "周周艺" });
 
 ## 输出与错误
 
-业务命令与 schema 输出为一个版本化 JSON 文档；`--help`/`--version` 使用普通文本，错误诊断写 stderr。退出码：0 成功，2 输入错误，3 认证失效，4 权限不足，5 业务拒绝/状态冲突，6 网络或协议错误。HTTP 200 但 `code !== "0"` 不是成功；HTTP 非 2xx 即使业务码为 0 也不是成功。
+业务命令与 schema 输出为版本化 JSON；`auth login --method cqu-auth --no-open` 会先输出一行只含授权 URL 的 JSON 事件，完成后输出最终 JSON。`--help`/`--version` 使用普通文本，错误诊断写 stderr。退出码：0 成功，2 输入错误，3 认证失效，4 权限不足，5 业务拒绝/状态冲突，6 网络或协议错误。HTTP 200 但 `code !== "0"` 不是成功；HTTP 非 2xx 即使业务码为 0 也不是成功。
 
 ## 验证边界
 
-- `npm test`：TypeScript 构建、SDK 公开方法测试、真实 CLI 子进程测试、Node/Ego 桥安全测试。
+- `npm test`：TypeScript 构建、SDK 公开方法测试、真实 CLI 子进程测试、Node/Ego 桥安全测试、受控 OAuth/DPoP/学校 API 场景、macOS Keyring 与跨进程刷新锁测试。
+- CQU Auth 生产 native/public client 尚未注册，线上真实 Auth 登录、同意、ST 核销和学校 API 验收由后续配置与主线程验收完成；仓库内受控 HTTP 服务通过不能替代这些生产验收。
 - 课程接口和身份形状已按 2026-10-22 只读实测固化；接口资料中的历史 `verified` 不被当作当前生产验收。
 - 本仓库测试使用虚构 HTTP/Ego 场景。学校登录与只读查询单独记录于 [验收记录](docs/verification/2026-10-22-local-courses.md)，CI 通过不代表生产写入能力。
 - 查询类操作可使用 API；后续 Ego 写操作按阶段执行，需要审阅的表单只录入并交接，由用户亲自最终提交。
